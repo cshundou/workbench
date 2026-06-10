@@ -13,6 +13,7 @@ from app.core.deps import (
     get_db_session,
     require_permission,
 )
+from app.core.exceptions import NotFoundError
 from app.core.permissions import USER_DELETE, USER_READ, USER_WRITE
 from app.core.response import success_response
 from app.schemas.user import UserCreate, UserUpdate
@@ -56,8 +57,6 @@ async def get_user(
     """获取指定用户的详细信息。"""
     user = await user_service.get_user_by_id(db, user_id, tenant_id)
     if user is None:
-        from app.core.exceptions import NotFoundError
-
         raise NotFoundError(message="用户不存在")
     return success_response(data=user_service._to_response(user).model_dump())
 
