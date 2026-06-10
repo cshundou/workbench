@@ -9,8 +9,10 @@ export const PERMISSION_OPTIONS = [
   { label: '知识库管理', value: 'knowledge:write' },
   { label: '智能体查看', value: 'agent:read' },
   { label: '智能体管理', value: 'agent:write' },
+  { label: '智能体删除', value: 'agent:delete' },
   { label: '工作流查看', value: 'workflow:read' },
   { label: '工作流管理', value: 'workflow:write' },
+  { label: '监控查看', value: 'monitor:read' },
 ] as const;
 
 /** 路由权限映射 */
@@ -20,4 +22,5 @@ export const ROUTE_PERMISSIONS = {
   workflows: 'workflow:read',
   userManagement: 'user:read',
   roleManagement: 'role:read',
+  monitor: 'monitor:read',
 } as const;

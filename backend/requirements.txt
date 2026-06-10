@@ -25,6 +25,7 @@ langchain==0.1.20
 langchain-community==0.0.38
 langchain-openai==0.1.7
 langgraph==0.0.26
+langchain-experimental==0.0.58
 
 # Vector store & document processing
 chromadb==0.4.24
