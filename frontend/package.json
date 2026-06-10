@@ -12,9 +12,11 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "axios": "^1.7.7",
-    "element-plus": "^2.8.4",
     "@element-plus/icons-vue": "^2.3.1",
+    "@vue-flow/core": "^1.48.2",
+    "axios": "^1.7.7",
+    "echarts": "^5.6.0",
+    "element-plus": "^2.8.4",
     "pinia": "^2.2.4",
     "vue": "^3.5.12",
     "vue-router": "^4.4.5"

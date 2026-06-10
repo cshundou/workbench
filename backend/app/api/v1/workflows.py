@@ -1,0 +1,161 @@
+"""
+工作流管理 API 路由。
+"""
+
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.deps import (
+    CurrentUser,
+    get_current_tenant_id,
+    get_db_session,
+    require_permission,
+)
+from app.core.permissions import WF_DELETE, WF_READ, WF_WRITE
+from app.core.response import success_response
+from app.schemas.workflow import (
+    HumanInterventionRequest,
+    WorkflowCreate,
+    WorkflowExecuteRequest,
+    WorkflowUpdate,
+)
+from app.services.workflow.workflow_service import workflow_service
+
+router = APIRouter(prefix="/workflows", tags=["工作流管理"])
+
+
+@router.get("", summary="获取工作流列表")
+async def list_workflows(
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    page: int = Query(default=1, ge=1, description="页码"),
+    page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
+) -> dict[str, Any]:
+    """分页查询工作流模板列表。"""
+    result = await workflow_service.list_workflows(
+        db, tenant_id, current_user, page, page_size
+    )
+    return success_response(data=result.model_dump())
+
+
+@router.post("", summary="创建工作流")
+async def create_workflow(
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    data: WorkflowCreate,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """创建新的工作流模板。"""
+    result = await workflow_service.create_workflow(
+        db, tenant_id, current_user, data
+    )
+    return success_response(data=result.model_dump(), message="创建成功")
+
+
+@router.get("/executions/{execution_id}", summary="获取执行状态")
+async def get_execution_status(
+    execution_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """获取工作流执行状态、节点状态与执行日志。"""
+    result = await workflow_service.get_execution_status(
+        db, execution_id, tenant_id
+    )
+    return success_response(data=result.model_dump())
+
+
+@router.post(
+    "/executions/{execution_id}/intervene",
+    summary="人工介入确认",
+)
+async def human_intervention(
+    execution_id: int,
+    data: HumanInterventionRequest,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """人工介入：批准或拒绝继续执行工作流。"""
+    result = await workflow_service.handle_human_intervention(
+        db, execution_id, tenant_id, data
+    )
+    return success_response(data=result.model_dump(), message="操作成功")
+
+
+@router.get("/{workflow_id}", summary="获取工作流详情")
+async def get_workflow(
+    workflow_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """获取指定工作流详情。"""
+    result = await workflow_service.get_workflow(
+        db, workflow_id, tenant_id, current_user
+    )
+    return success_response(data=result.model_dump())
+
+
+@router.put("/{workflow_id}", summary="更新工作流")
+async def update_workflow(
+    workflow_id: int,
+    data: WorkflowUpdate,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """更新工作流模板。"""
+    result = await workflow_service.update_workflow(
+        db, workflow_id, tenant_id, current_user, data
+    )
+    return success_response(data=result.model_dump(), message="更新成功")
+
+
+@router.delete("/{workflow_id}", summary="删除工作流")
+async def delete_workflow(
+    workflow_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_DELETE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """删除工作流模板。"""
+    await workflow_service.delete_workflow(
+        db, workflow_id, tenant_id, current_user
+    )
+    return success_response(message="删除成功")
+
+
+@router.post("/{workflow_id}/execute", summary="执行工作流")
+async def execute_workflow(
+    workflow_id: int,
+    data: WorkflowExecuteRequest,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """手动执行工作流并传入任务参数。"""
+    result = await workflow_service.execute_workflow(
+        db, workflow_id, tenant_id, current_user, data
+    )
+    return success_response(data=result.model_dump(), message="工作流已启动")
+
+
+@router.get("/{workflow_id}/executions", summary="获取执行历史")
+async def list_executions(
+    workflow_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> dict[str, Any]:
+    """查询工作流执行历史记录。"""
+    result = await workflow_service.list_executions(
+        db, workflow_id, tenant_id, current_user, page, page_size
+    )
+    return success_response(data=result.model_dump())

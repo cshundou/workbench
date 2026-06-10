@@ -16,6 +16,7 @@ from app.core.exceptions import AppException
 from app.core.logging import get_logger
 from app.core.response import error_response
 from app.core.security import decode_access_token
+from app.services.monitor_service import monitor_service
 
 logger = get_logger(__name__)
 
@@ -69,6 +70,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if not path.startswith(settings.api_v1_prefix):
             return await call_next(request)
 
+        # WebSocket 连接在端点内通过 query token 认证
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+
         token = _extract_bearer_token(request.headers.get("Authorization"))
         if not token:
             return JSONResponse(
@@ -101,6 +106,34 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
 class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
     """全局异常处理中间件，捕获未处理异常并返回统一错误格式。"""
 
+    async def _record_metrics(
+        self,
+        request: Request,
+        status_code: int,
+        elapsed_ms: float,
+        message: str = "",
+        error_detail: Optional[str] = None,
+    ) -> None:
+        """记录 API 调用指标与错误日志。"""
+        path = request.url.path
+        if not path.startswith(settings.api_v1_prefix):
+            return
+
+        await monitor_service.record_api_call(
+            method=request.method,
+            path=path,
+            status_code=status_code,
+            elapsed_ms=elapsed_ms,
+        )
+        if status_code >= 400:
+            await monitor_service.record_error_log(
+                method=request.method,
+                path=path,
+                status_code=status_code,
+                message=message or f"HTTP {status_code}",
+                error_detail=error_detail,
+            )
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """处理请求并捕获异常。"""
         start_time = time.perf_counter()
@@ -114,13 +147,26 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
                 response.status_code,
                 elapsed_ms,
             )
+            await self._record_metrics(
+                request,
+                response.status_code,
+                elapsed_ms,
+            )
             return response
         except AppException as exc:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
             logger.warning(
                 "业务异常 [%s] %s: %s",
                 exc.code,
                 request.url.path,
                 exc.message,
+            )
+            await self._record_metrics(
+                request,
+                exc.code,
+                elapsed_ms,
+                message=exc.message,
+                error_detail=exc.error,
             )
             return JSONResponse(
                 status_code=exc.code,
@@ -132,6 +178,7 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
                 ),
             )
         except Exception as exc:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
             logger.error(
                 "未处理异常 %s %s: %s\n%s",
                 request.method,
@@ -140,6 +187,13 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
                 traceback.format_exc(),
             )
             error_detail = str(exc) if settings.debug else "服务器内部错误"
+            await self._record_metrics(
+                request,
+                500,
+                elapsed_ms,
+                message="服务器内部错误",
+                error_detail=error_detail,
+            )
             return JSONResponse(
                 status_code=500,
                 content=error_response(
