@@ -3,7 +3,7 @@ fastapi==0.110.0
 uvicorn[standard]==0.27.1
 
 # Database（asyncpg>=0.30 提供 Python 3.13+ 预编译 wheel；Docker 内 Python 3.11 同样兼容）
-sqlalchemy==2.0.29
+sqlalchemy>=2.0.36  # 2.0.29 在 Python 3.13 下不兼容，Docker Python 3.11 同样可用
 asyncpg>=0.30.0
 alembic==1.13.1
 
