@@ -19,6 +19,24 @@ ROLE_READ = "role:read"
 ROLE_WRITE = "role:write"
 ROLE_DELETE = "role:delete"
 
+# 知识库管理权限
+KB_READ = "kb:read"
+KB_WRITE = "kb:write"
+KB_DELETE = "kb:delete"
+
+# 系统监控权限
+MONITOR_READ = "monitor:read"
+
+# 智能体管理权限
+AGENT_READ = "agent:read"
+AGENT_WRITE = "agent:write"
+AGENT_DELETE = "agent:delete"
+
+# 工作流管理权限
+WF_READ = "workflow:read"
+WF_WRITE = "workflow:write"
+WF_DELETE = "workflow:delete"
+
 # 默认管理员拥有的全部权限标识
 DEFAULT_ADMIN_PERMISSIONS: list[str] = [PERMISSION_ALL]
 
@@ -30,6 +48,16 @@ ALL_PERMISSION_CODES: list[str] = [
     ROLE_READ,
     ROLE_WRITE,
     ROLE_DELETE,
+    KB_READ,
+    KB_WRITE,
+    KB_DELETE,
+    AGENT_READ,
+    AGENT_WRITE,
+    AGENT_DELETE,
+    WF_READ,
+    WF_WRITE,
+    WF_DELETE,
+    MONITOR_READ,
 ]
 
 

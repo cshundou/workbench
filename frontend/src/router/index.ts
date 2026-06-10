@@ -32,6 +32,26 @@ const routes: RouteRecordRaw[] = [
           icon: 'Collection',
           permission: ROUTE_PERMISSIONS.knowledge,
         },
+        children: [
+          {
+            path: '',
+            name: 'KnowledgeList',
+            component: () => import('@/views/knowledge/List.vue'),
+            meta: { title: '知识库' },
+          },
+          {
+            path: ':id/chat',
+            name: 'KnowledgeChat',
+            component: () => import('@/views/knowledge/Chat.vue'),
+            meta: { title: '知识库问答' },
+          },
+          {
+            path: ':id',
+            name: 'KnowledgeDetail',
+            component: () => import('@/views/knowledge/Detail.vue'),
+            meta: { title: '知识库详情' },
+          },
+        ],
       },
       {
         path: 'agents',
@@ -42,6 +62,26 @@ const routes: RouteRecordRaw[] = [
           icon: 'Cpu',
           permission: ROUTE_PERMISSIONS.agents,
         },
+        children: [
+          {
+            path: '',
+            name: 'AgentList',
+            component: () => import('@/views/agents/List.vue'),
+            meta: { title: '智能体' },
+          },
+          {
+            path: ':id/config',
+            name: 'AgentConfig',
+            component: () => import('@/views/agents/Config.vue'),
+            meta: { title: '智能体配置' },
+          },
+          {
+            path: ':id/chat',
+            name: 'AgentChat',
+            component: () => import('@/views/agents/Chat.vue'),
+            meta: { title: '智能体对话' },
+          },
+        ],
       },
       {
         path: 'workflows',
@@ -51,6 +91,30 @@ const routes: RouteRecordRaw[] = [
           title: '工作流',
           icon: 'Share',
           permission: ROUTE_PERMISSIONS.workflows,
+        },
+        children: [
+          {
+            path: '',
+            name: 'WorkflowList',
+            component: () => import('@/views/workflows/List.vue'),
+            meta: { title: '工作流' },
+          },
+          {
+            path: ':id/execute',
+            name: 'WorkflowExecute',
+            component: () => import('@/views/workflows/Execute.vue'),
+            meta: { title: '执行工作流' },
+          },
+        ],
+      },
+      {
+        path: 'monitor',
+        name: 'Monitor',
+        component: () => import('@/views/monitor/Dashboard.vue'),
+        meta: {
+          title: '监控面板',
+          icon: 'DataAnalysis',
+          permission: ROUTE_PERMISSIONS.monitor,
         },
       },
       {

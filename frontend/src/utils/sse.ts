@@ -14,6 +14,10 @@ export class SSEClient {
   private eventSource: EventSource | null = null;
   private url: string;
   private headers: Record<string, string>;
+  private onMessage?: (data: unknown) => void;
+  private onError?: (error: Event) => void;
+  private onOpen?: () => void;
+  private onClose?: () => void;
   private isConnected: Ref<boolean> = ref(false);
   private data: Ref<string> = ref('');
   private error: Ref<Event | null> = ref(null);
@@ -21,6 +25,10 @@ export class SSEClient {
   constructor(options: SSEOptions) {
     this.url = options.url;
     this.headers = options.headers || {};
+    this.onMessage = options.onMessage;
+    this.onError = options.onError;
+    this.onOpen = options.onOpen;
+    this.onClose = options.onClose;
   }
 
   connect(): void {
@@ -46,27 +54,26 @@ export class SSEClient {
     this.eventSource.onopen = () => {
       this.isConnected.value = true;
       this.error.value = null;
+      this.onOpen?.();
     };
 
     this.eventSource.onmessage = (event) => {
       try {
-        const parsedData = JSON.parse(event.data);
-        this.data.value += parsedData.content || '';
+        const parsedData = JSON.parse(event.data) as { content?: string };
+        if (parsedData.content) {
+          this.data.value += parsedData.content;
+        }
+        this.onMessage?.(parsedData);
       } catch {
-        // 处理纯文本数据
         this.data.value += event.data;
+        this.onMessage?.(event.data);
       }
     };
 
     this.eventSource.onerror = (error) => {
       this.isConnected.value = false;
       this.error.value = error;
-      // 自动重连（最多3次）
-      setTimeout(() => {
-        if (!this.isConnected.value) {
-          this.connect();
-        }
-      }, 3000);
+      this.onError?.(error);
     };
   }
 
@@ -75,7 +82,13 @@ export class SSEClient {
       this.eventSource.close();
       this.eventSource = null;
       this.isConnected.value = false;
+      this.onClose?.();
     }
+  }
+
+  /** 重置已累积的流式文本 */
+  resetData(): void {
+    this.data.value = '';
   }
 
   getData(): Ref<string> {
@@ -92,8 +105,8 @@ export class SSEClient {
 }
 
 // 组合式API封装
-export function useSSE(url: string, headers?: Record<string, string>) {
-  const client = new SSEClient({ url, headers });
+export function useSSE(url: string, options?: Omit<SSEOptions, 'url'>) {
+  const client = new SSEClient({ url, ...options });
 
   onUnmounted(() => {
     client.disconnect();
@@ -102,6 +115,7 @@ export function useSSE(url: string, headers?: Record<string, string>) {
   return {
     connect: client.connect.bind(client),
     disconnect: client.disconnect.bind(client),
+    resetData: client.resetData.bind(client),
     data: client.getData(),
     error: client.getError(),
     isConnected: client.getConnectionStatus(),
