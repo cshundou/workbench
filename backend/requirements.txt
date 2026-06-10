@@ -2,9 +2,9 @@
 fastapi==0.110.0
 uvicorn[standard]==0.27.1
 
-# Database
+# Database（asyncpg>=0.30 提供 Python 3.13+ 预编译 wheel；Docker 内 Python 3.11 同样兼容）
 sqlalchemy==2.0.29
-asyncpg==0.29.0
+asyncpg>=0.30.0
 alembic==1.13.1
 
 # Configuration & validation
@@ -28,8 +28,10 @@ langgraph==0.0.26
 langchain-experimental==0.0.58
 
 # Vector store & document processing
+numpy<2  # langchain 0.1.x 要求 numpy 1.x
 chromadb==0.4.24
 unstructured==0.11.8
+networkx>=3.0  # unstructured 传递依赖
 pypdf2==3.0.1
 python-docx==1.1.0
 pandas==2.2.1
@@ -37,5 +39,6 @@ openpyxl==3.1.2
 beautifulsoup4==4.12.3
 
 # External tools
-cohere==5.3.3
+cohere>=5.11.0  # >=5.11 兼容 tokenizers 0.20+（Python 3.13 wheel）
+tokenizers>=0.20.0
 tavily-python==0.3.3
