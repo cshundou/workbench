@@ -7,6 +7,7 @@ import {
   Collection,
   Cpu,
   Share,
+  DataAnalysis,
   Setting,
   Fold,
   Expand,
@@ -43,6 +44,12 @@ const topMenuItems = computed(() => {
       title: '工作流',
       icon: Share,
       permission: ROUTE_PERMISSIONS.workflows,
+    },
+    {
+      path: '/monitor',
+      title: '监控面板',
+      icon: DataAnalysis,
+      permission: ROUTE_PERMISSIONS.monitor,
     },
   ];
 

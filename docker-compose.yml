@@ -1,6 +1,5 @@
 # AI Workbench - Docker Compose
-# PostgreSQL 16 + Redis 7 + FastAPI backend + Vue frontend
-# Stage 6: add nginx service using nginx/nginx.conf as reverse proxy
+# PostgreSQL 16 + Redis 7 + FastAPI backend + Vue frontend + Nginx
 
 services:
   postgres:
@@ -55,7 +54,6 @@ services:
     env_file:
       - .env
     environment:
-      # Docker 网络内使用服务名作为主机名
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ai_workbench}:${POSTGRES_PASSWORD:-ai_workbench_secret}@postgres:5432/${POSTGRES_DB:-ai_workbench}
       REDIS_URL: redis://redis:6379/${REDIS_DB:-0}
       POSTGRES_HOST: postgres
@@ -78,14 +76,15 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: builder
     container_name: ai-workbench-frontend
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      # 容器内通过 Vite 代理转发到 backend 服务
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
       VITE_API_PROXY_TARGET: ${VITE_API_PROXY_TARGET:-http://backend:8000}
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
     depends_on:
@@ -97,20 +96,19 @@ services:
     networks:
       - ai-workbench-network
 
-  # Stage 6: 取消注释以启用 Nginx 反向代理
-  # nginx:
-  #   image: nginx:1.25-alpine
-  #   container_name: ai-workbench-nginx
-  #   restart: unless-stopped
-  #   ports:
-  #     - "${NGINX_HTTP_PORT:-80}:80"
-  #   volumes:
-  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-  #   depends_on:
-  #     - backend
-  #     - frontend
-  #   networks:
-  #     - ai-workbench-network
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: ai-workbench-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - ai-workbench-network
 
 volumes:
   postgres_data:

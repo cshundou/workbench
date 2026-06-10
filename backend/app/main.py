@@ -23,6 +23,8 @@ from app.core.middleware import (
     JWTAuthMiddleware,
     RequestLoggingMiddleware,
 )
+from app.core.rate_limit import RateLimitMiddleware
+from app.core.redis import close_redis
 from app.core.response import error_response
 
 # 初始化日志
@@ -51,6 +53,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     logger.info("应用关闭")
+    try:
+        await close_redis()
+    except Exception as exc:
+        logger.error("关闭 Redis 连接失败: %s", exc)
     try:
         await close_db()
     except Exception as exc:
@@ -85,6 +91,7 @@ def create_app() -> FastAPI:
 
     # 自定义中间件（后添加的先执行）
     app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(RateLimitMiddleware)
     app.add_middleware(JWTAuthMiddleware)
     app.add_middleware(ExceptionHandlerMiddleware)
 
