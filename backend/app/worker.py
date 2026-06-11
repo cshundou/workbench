@@ -5,6 +5,7 @@ ARQ Worker 配置入口。
 from arq.connections import RedisSettings
 
 from app.core.config import settings
+from app.services.audit_retention_service import purge_audit_logs_task
 from app.services.task_worker import (
     execute_workflow_task,
     parse_document_task,
@@ -20,6 +21,10 @@ class WorkerSettings:
         parse_document_task,
         execute_workflow_task,
         resume_workflow_task,
+        purge_audit_logs_task,
+    ]
+    cron_jobs = [
+        ("0 3 * * *", purge_audit_logs_task),
     ]
     job_timeout = 1800  # 30 分钟
     keep_result = 3600  # 结果保留 1 小时

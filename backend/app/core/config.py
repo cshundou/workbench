@@ -84,6 +84,7 @@ class Settings(BaseSettings):
         description="Pinecone 索引名称（VECTOR_STORE=pinecone 时必填）",
     )
     upload_dir: str = Field(default="data/uploads", description="文档上传存储目录")
+    max_upload_size_mb: int = Field(default=100, description="单文件最大上传大小（MB）")
 
     # LangSmith 追踪（可选）
     langchain_tracing_v2: bool = Field(
@@ -134,6 +135,22 @@ class Settings(BaseSettings):
         description="账号锁定时长（分钟）",
     )
 
+    # 密码重置
+    password_reset_token_expire_minutes: int = Field(
+        default=30,
+        description="密码重置令牌有效期（分钟）",
+    )
+    password_reset_base_url: str = Field(
+        default="http://localhost/reset-password",
+        description="密码重置页面基础 URL",
+    )
+
+    # 审计日志保留
+    audit_log_retention_days: int = Field(
+        default=90,
+        description="审计日志保留天数",
+    )
+
     # 认证模式：required=全局强制登录；optional=按需登录
     auth_mode: Literal["required", "optional"] = Field(
         default="required",
@@ -152,6 +169,8 @@ class Settings(BaseSettings):
             "/api/v1/monitor/health",
             "/api/v1/auth/login",
             "/api/v1/auth/refresh",
+            "/api/v1/auth/forgot-password",
+            "/api/v1/auth/reset-password",
             "/api/v1/config/auth",
             "/metrics",
             "/docs",
