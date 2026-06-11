@@ -52,7 +52,9 @@ export async function getUserInfo(): Promise<UserInfoResult> {
 }
 
 /** 刷新访问令牌 */
-export function refreshAccessToken(refreshToken: string): Promise<{ token: string; expires_in: number }> {
+export function refreshAccessToken(
+  refreshToken: string,
+): Promise<{ token: string; expires_in: number }> {
   return request.post('/auth/refresh', { refresh_token: refreshToken }) as Promise<{
     token: string;
     expires_in: number;
@@ -98,6 +100,12 @@ export interface UserImportResult {
   errors: string[];
 }
 
+export interface BatchUserStatusResult {
+  updated_count: number;
+  skipped_count: number;
+  status: number;
+}
+
 const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 /** 导出用户 CSV */
@@ -125,4 +133,12 @@ export function importUsersCsv(file: File): Promise<UserImportResult> {
   return request.post('/users/import', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }) as Promise<UserImportResult>;
+}
+
+/** 批量启用/禁用用户 */
+export function batchUpdateUserStatus(data: {
+  user_ids: number[];
+  status: number;
+}): Promise<BatchUserStatusResult> {
+  return request.post('/users/batch-status', data) as Promise<BatchUserStatusResult>;
 }

@@ -78,3 +78,18 @@ class UserImportResult(BaseModel):
     success_count: int
     failed_count: int
     errors: List[str] = Field(default_factory=list)
+
+
+class UserBatchStatusRequest(BaseModel):
+    """批量启用/禁用用户请求。"""
+
+    user_ids: List[int] = Field(default_factory=list, min_length=1)
+    status: int = Field(..., ge=0, le=1, description="0:禁用, 1:启用")
+
+
+class UserBatchStatusResult(BaseModel):
+    """批量状态更新结果。"""
+
+    updated_count: int
+    skipped_count: int
+    status: int

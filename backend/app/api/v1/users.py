@@ -17,7 +17,7 @@ from app.core.deps import (
 from app.core.exceptions import NotFoundError
 from app.core.permissions import USER_DELETE, USER_READ, USER_WRITE
 from app.core.response import success_response
-from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.user import UserBatchStatusRequest, UserCreate, UserUpdate
 from app.services.user_service import user_service
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
@@ -82,6 +82,24 @@ async def import_users(
         db, tenant_id, csv_content, current_user.id
     )
     return success_response(data=result.model_dump(), message="导入完成")
+
+
+@router.post("/batch-status", summary="批量更新用户状态")
+async def batch_update_user_status(
+    data: UserBatchStatusRequest,
+    current_user: Annotated[CurrentUser, Depends(require_permission(USER_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """批量启用或禁用用户。"""
+    result = await user_service.batch_update_status(
+        db=db,
+        tenant_id=tenant_id,
+        user_ids=data.user_ids,
+        status=data.status,
+        actor_user_id=current_user.id,
+    )
+    return success_response(data=result.model_dump(), message="批量更新成功")
 
 
 @router.get("/{user_id}", summary="获取用户详情")

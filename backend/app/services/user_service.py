@@ -17,7 +17,14 @@ from app.core.security import get_password_hash
 from app.models.role import Role
 from app.models.user import User
 from app.schemas.auth import RoleBrief
-from app.schemas.user import UserCreate, UserImportResult, UserListResponse, UserResponse, UserUpdate
+from app.schemas.user import (
+    UserBatchStatusResult,
+    UserCreate,
+    UserImportResult,
+    UserListResponse,
+    UserResponse,
+    UserUpdate,
+)
 from app.services.audit_service import audit_service
 
 logger = get_logger(__name__)
@@ -291,6 +298,68 @@ class UserService:
             detail=detail,
         )
         logger.info("删除用户成功 user_id=%s tenant_id=%s", user_id, tenant_id)
+
+    async def batch_update_status(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        user_ids: list[int],
+        status: int,
+        actor_user_id: int,
+    ) -> UserBatchStatusResult:
+        """批量更新用户状态（启用/禁用）。"""
+        normalized_ids = sorted({int(user_id) for user_id in user_ids if int(user_id) > 0})
+        if not normalized_ids:
+            raise ValidationError(message="请选择有效的用户")
+
+        stmt = select(User).where(
+            User.tenant_id == tenant_id,
+            User.id.in_(normalized_ids),
+        )
+        result = await db.execute(stmt)
+        users = result.scalars().all()
+        if not users:
+            raise NotFoundError(message="未找到可更新的用户")
+
+        updated_count = 0
+        skipped_count = 0
+        for user in users:
+            if user.id == actor_user_id:
+                skipped_count += 1
+                continue
+            if user.status == status:
+                skipped_count += 1
+                continue
+            user.status = status
+            updated_count += 1
+
+        await db.flush()
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=actor_user_id,
+            action="user.batch_status",
+            resource_type="user",
+            resource_id=actor_user_id,
+            detail={
+                "target_user_ids": normalized_ids,
+                "status": status,
+                "updated_count": updated_count,
+                "skipped_count": skipped_count,
+            },
+        )
+        logger.info(
+            "批量更新用户状态 tenant_id=%s status=%s updated=%s skipped=%s",
+            tenant_id,
+            status,
+            updated_count,
+            skipped_count,
+        )
+        return UserBatchStatusResult(
+            updated_count=updated_count,
+            skipped_count=skipped_count,
+            status=status,
+        )
 
     async def export_users_csv(self, db: AsyncSession, tenant_id: int) -> str:
         """

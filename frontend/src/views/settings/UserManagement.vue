@@ -3,7 +3,15 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import { Download, Plus, Search, Upload } from '@element-plus/icons-vue';
-import { createUser, deleteUser, exportUsersCsv, getUsers, importUsersCsv, updateUser } from '@/api/user';
+import {
+  batchUpdateUserStatus,
+  createUser,
+  deleteUser,
+  exportUsersCsv,
+  getUsers,
+  importUsersCsv,
+  updateUser,
+} from '@/api/user';
 import { getRoles } from '@/api/role';
 import { useUserStore } from '@/stores/user';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
@@ -15,6 +23,7 @@ const loading = ref(false);
 const tableData = ref<UserListItem[]>([]);
 const total = ref(0);
 const roleOptions = ref<RoleInfo[]>([]);
+const selectedUserIds = ref<number[]>([]);
 
 const queryParams = reactive({
   page: 1,
@@ -137,6 +146,10 @@ function handlePageChange(page: number): void {
   fetchUsers();
 }
 
+function handleSelectionChange(rows: UserListItem[]): void {
+  selectedUserIds.value = rows.map((row) => row.id);
+}
+
 function resetForm(): void {
   userForm.username = '';
   userForm.email = '';
@@ -220,6 +233,38 @@ async function handleDelete(row: UserListItem): Promise<void> {
   }
 }
 
+async function handleBatchStatus(status: number): Promise<void> {
+  if (selectedUserIds.value.length === 0) {
+    ElMessage.warning('请先选择用户');
+    return;
+  }
+  const actionText = status === 1 ? '启用' : '禁用';
+  try {
+    await ElMessageBox.confirm(
+      `确定批量${actionText}已选中的 ${selectedUserIds.value.length} 个用户吗？`,
+      '提示',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    );
+    const result = await batchUpdateUserStatus({
+      user_ids: selectedUserIds.value,
+      status,
+    });
+    ElMessage.success(
+      `批量${actionText}完成：更新 ${result.updated_count} 个，跳过 ${result.skipped_count} 个`,
+    );
+    selectedUserIds.value = [];
+    await fetchUsers();
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('[Batch Update User Status Error]', error);
+    }
+  }
+}
+
 function formatStatus(status: number): string {
   return status === 1 ? '启用' : '禁用';
 }
@@ -273,13 +318,32 @@ onMounted(() => {
 
 <template>
   <div class="user-management">
-    <SectionHeader
-      title="用户管理"
-      description="管理系统用户账号、角色分配与状态"
-    >
+    <SectionHeader title="用户管理" description="管理系统用户账号、角色分配与状态">
       <template #actions>
-        <el-button v-if="canWrite" :icon="Upload" :loading="importLoading" round @click="triggerImport">
+        <el-button
+          v-if="canWrite"
+          :icon="Upload"
+          :loading="importLoading"
+          round
+          @click="triggerImport"
+        >
           导入 CSV
+        </el-button>
+        <el-button
+          v-if="canWrite"
+          :disabled="selectedUserIds.length === 0"
+          round
+          @click="handleBatchStatus(1)"
+        >
+          批量启用
+        </el-button>
+        <el-button
+          v-if="canWrite"
+          :disabled="selectedUserIds.length === 0"
+          round
+          @click="handleBatchStatus(0)"
+        >
+          批量禁用
         </el-button>
         <el-button :icon="Download" round @click="handleExport">导出 CSV</el-button>
         <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
@@ -296,7 +360,6 @@ onMounted(() => {
     </SectionHeader>
 
     <el-card shadow="never">
-
       <div class="search-bar">
         <el-input
           v-model="queryParams.keyword"
@@ -311,7 +374,14 @@ onMounted(() => {
         </el-input>
       </div>
 
-      <el-table v-loading="loading" :data="tableData" stripe>
+      <el-table
+        v-loading="loading"
+        :data="tableData"
+        stripe
+        row-key="id"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column v-if="canWrite" type="selection" width="50" />
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="username" label="用户名" min-width="120" />
         <el-table-column prop="email" label="邮箱" min-width="180" />
@@ -366,22 +436,24 @@ onMounted(() => {
           prop="password"
           :rules="
             isEdit
-              ? [{
-                  validator: (_rule, value: string, callback) => {
-                    if (!value) {
+              ? [
+                  {
+                    validator: (_rule, value: string, callback) => {
+                      if (!value) {
+                        callback();
+                        return;
+                      }
+                      const { checks } = checkPasswordStrength(value);
+                      const failed = checks.find((item) => !item.passed);
+                      if (failed) {
+                        callback(new Error(`密码需满足：${failed.label}`));
+                        return;
+                      }
                       callback();
-                      return;
-                    }
-                    const { checks } = checkPasswordStrength(value);
-                    const failed = checks.find((item) => !item.passed);
-                    if (failed) {
-                      callback(new Error(`密码需满足：${failed.label}`));
-                      return;
-                    }
-                    callback();
+                    },
+                    trigger: 'blur',
                   },
-                  trigger: 'blur',
-                }]
+                ]
               : formRules.password
           "
         >
