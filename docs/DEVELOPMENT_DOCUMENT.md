@@ -2308,45 +2308,100 @@ json
 
 ### 8.4 智能体管理接口
 
-#### 创建智能体
-
-- **请求路径**：`/agents`
-- **请求方法**：POST
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/agents` | 智能体列表 |
+| POST | `/agents` | 创建智能体 |
+| GET | `/agents/{id}` | 智能体详情 |
+| PUT | `/agents/{id}` | 更新智能体 |
+| DELETE | `/agents/{id}` | 删除智能体 |
+| POST | `/agents/{id}/copy` | 复制智能体 |
+| GET | `/agents/tools` | 可用工具列表 |
+| POST | `/agents/{id}/chat` | Agent 流式对话 |
+| GET | `/agents/{id}/history` | 对话历史（支持 session_id） |
+| DELETE | `/agents/{id}/history/{session_id}` | 删除会话 |
 
 ### 8.5 工作流管理接口
 
-- `GET /workflows`：工作流列表
-- `POST /workflows/{id}/execute`：执行工作流
-- `GET /workflows/{id}/executions`：执行历史
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/workflows` | 工作流列表 |
+| POST | `/workflows` | 创建工作流 |
+| PUT | `/workflows/{id}` | 更新工作流（含 graph_definition） |
+| POST | `/workflows/{id}/validate-graph` | 校验图定义 |
+| POST | `/workflows/{id}/execute` | 执行工作流 |
+| GET | `/workflows/{id}/executions` | 执行历史 |
+| GET | `/workflows/{id}/executions/{eid}/replay` | 获取重跑参数 |
+| GET | `/workflows/executions/{eid}` | 执行状态 |
+| POST | `/workflows/executions/{eid}/intervene` | 人工介入 |
+| WS | `/workflows/ws/{execution_id}` | 节点状态推送 |
 
 ### 8.6 流式交互接口
 
-- `POST /knowledge-bases/{kb_id}/chat`：SSE 流式问答（use_rag 切换）
-- `POST /agents/{id}/chat`：Agent 流式对话
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| POST | `/knowledge-bases/{kb_id}/chat` | SSE 流式问答（`use_rag` 切换） |
+| POST | `/agents/{id}/chat` | Agent 流式对话（Fetch Stream） |
+| POST | `/auth/refresh` | 刷新 Access Token |
+
+**SSE 事件类型**：`token`、`sources`、`done`、`error`
 
 ### 8.7 系统监控接口
 
-- `GET /monitor/user-activity`：DAU/WAU/MAU
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/monitor/health` | 系统健康检查 |
+| GET | `/monitor/token-usage` | Token 消耗统计 |
+| GET | `/monitor/api-stats` | API 调用量 / 响应时间 |
+| GET | `/monitor/error-logs` | 错误日志 |
+| GET | `/monitor/user-activity` | DAU/WAU/MAU |
+| GET | `/metrics` | Prometheus 指标（需 PROMETHEUS_ENABLED=true） |
 
 ### 8.8 租户与审计接口
 
-- `CRUD /tenants`：租户管理
-- `GET /audit-logs`：审计日志
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| CRUD | `/tenants` | 租户管理 |
+| GET | `/audit-logs` | 审计日志 |
+| GET | `/tasks/{task_id}` | 异步任务状态 |
+| POST | `/knowledge-bases/{kb_id}/import-url` | URL 导入文档 |
 
 ## 九、分阶段开发计划
 
-一期 MVP 已完成；二期 P0/P1/P2 已全部落地（测试、Monaco、预览、工作流编辑、租户、审计、CI）。
+| 阶段 | 状态 | 主要交付 |
+| ---- | ---- | -------- |
+| 一期 MVP | ✅ 完成 | RAG / Agent / Workflow 核心链路 |
+| 二期 | ✅ 完成 | Monaco、预览、工作流编辑、租户、审计、arq |
+| 三期 | ✅ 完成 | 测试门禁、E2E、validate-graph、URL 导入、Refresh Token |
 
 ## 十、测试指南
 
 ```bash
-cd backend && pytest tests/ -q
-cd frontend && npm run lint && npm run build
+# 后端（覆盖率门禁 ≥70%）
+cd backend
+pytest tests/ -q --cov=app --cov-config=.coveragerc --cov-fail-under=70
+
+# 前端单元测试
+cd frontend
+npm run test:unit
+
+# E2E（需本地 dev server 或 CI）
+npm run test:e2e
+
+# 全量 CI 等价
+npm run lint && npm run build
 ```
+
+详见 `docs/PHASE3_DEVELOPMENT_DOCUMENT.md` 验收检查表。
 
 ## 十一、部署指南
 
+完整 Runbook 见 **`docs/DEPLOYMENT_RUNBOOK.md`**。
+
 ```bash
 docker compose up -d
-cd backend && alembic upgrade head && arq app.worker.WorkerSettings
+docker compose exec backend alembic upgrade head
+curl http://localhost/api/v1/monitor/health
 ```
+
+**生产检查清单**：更换 JWT/加密密钥、启用 arq-worker、配置备份、可选 Prometheus + LangSmith。
