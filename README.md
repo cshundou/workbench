@@ -179,4 +179,4 @@ ai-workbench/
 | GET | `/api/v1/monitor/error-logs` | 错误日志分页查询 |
 | GET | `/api/v1/monitor/health` | 系统健康检查（免认证） |
 
-详细开发规范见 [docs/DEVELOPMENT_DOCUMENT.md](docs/DEVELOPMENT_DOCUMENT.md)。
+开发文档为本地维护，不包含在公开仓库中。

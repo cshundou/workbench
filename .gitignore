@@ -117,3 +117,8 @@ junit.xml
 .LSOverride
 Icon?
 ._*
+
+# --- Development documentation (local only, not pushed) ---
+docs/
+plan/
+ACCEPTANCE_REPORT.md
