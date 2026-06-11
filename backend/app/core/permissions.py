@@ -51,6 +51,55 @@ TASK_READ = "task:read"
 # 默认管理员拥有的全部权限标识
 DEFAULT_ADMIN_PERMISSIONS: list[str] = [PERMISSION_ALL]
 
+# 租户管理员权限（管理本租户用户、角色、知识库、智能体、工作流）
+DEFAULT_TENANT_ADMIN_PERMISSIONS: list[str] = [
+    USER_READ,
+    USER_WRITE,
+    USER_DELETE,
+    ROLE_READ,
+    ROLE_WRITE,
+    ROLE_DELETE,
+    KB_READ,
+    KB_WRITE,
+    KB_DELETE,
+    AGENT_READ,
+    AGENT_WRITE,
+    AGENT_DELETE,
+    WF_READ,
+    WF_WRITE,
+    WF_DELETE,
+    MONITOR_READ,
+    AUDIT_READ,
+    TASK_READ,
+]
+
+# 普通用户权限（可使用知识库、智能体、工作流，无管理权限）
+DEFAULT_USER_PERMISSIONS: list[str] = [
+    KB_READ,
+    KB_WRITE,
+    AGENT_READ,
+    AGENT_WRITE,
+    WF_READ,
+    WF_WRITE,
+    TASK_READ,
+]
+
+# 只读用户权限
+DEFAULT_READONLY_PERMISSIONS: list[str] = [
+    KB_READ,
+    AGENT_READ,
+    WF_READ,
+    TASK_READ,
+]
+
+# 内置默认角色定义（名称 -> 权限列表）
+DEFAULT_ROLE_DEFINITIONS: dict[str, list[str]] = {
+    "超级管理员": DEFAULT_ADMIN_PERMISSIONS,
+    "租户管理员": DEFAULT_TENANT_ADMIN_PERMISSIONS,
+    "普通用户": DEFAULT_USER_PERMISSIONS,
+    "只读用户": DEFAULT_READONLY_PERMISSIONS,
+}
+
 # 非管理员角色的完整权限列表（供角色配置参考）
 ALL_PERMISSION_CODES: list[str] = [
     USER_READ,

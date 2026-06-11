@@ -1,7 +1,7 @@
 """
 数据库初始化脚本。
 
-创建默认租户、超级管理员角色（拥有全部权限）及 admin 用户。
+创建默认租户、四种内置角色及 admin 用户。
 
 用法（在 backend 目录下执行）:
     python -m scripts.init_data
@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app.core.database import async_session_factory, close_db, init_db
 from app.core.logging import get_logger, setup_logging
-from app.core.permissions import DEFAULT_ADMIN_PERMISSIONS
+from app.core.permissions import DEFAULT_ROLE_DEFINITIONS
 from app.core.security import get_password_hash
 from app.models.role import Role
 from app.models.tenant import Tenant
@@ -29,15 +29,39 @@ logger = get_logger(__name__)
 
 DEFAULT_TENANT_NAME = "默认租户"
 DEFAULT_TENANT_DOMAIN = "default"
-ADMIN_ROLE_NAME = "超级管理员"
 ADMIN_USERNAME = "admin"
 ADMIN_EMAIL = "admin@example.com"
-ADMIN_PASSWORD = "admin123"
+ADMIN_PASSWORD = "Admin@123456"
+
+
+async def _ensure_roles(session, tenant_id: int) -> dict[str, Role]:
+    """创建或获取四种内置默认角色。"""
+    roles: dict[str, Role] = {}
+    for role_name, permissions in DEFAULT_ROLE_DEFINITIONS.items():
+        role_stmt = select(Role).where(
+            Role.tenant_id == tenant_id,
+            Role.name == role_name,
+        )
+        role = (await session.execute(role_stmt)).scalar_one_or_none()
+        if role is None:
+            role = Role(
+                tenant_id=tenant_id,
+                name=role_name,
+                description=f"内置角色：{role_name}",
+                permissions={"permissions": permissions},
+            )
+            session.add(role)
+            await session.flush()
+            logger.info("创建内置角色 name=%s id=%s", role_name, role.id)
+        else:
+            logger.info("内置角色已存在 name=%s id=%s", role_name, role.id)
+        roles[role_name] = role
+    return roles
 
 
 async def init_default_data() -> None:
     """
-    初始化默认租户、角色与用户。
+    初始化默认租户、四种内置角色与 admin 用户。
 
     若数据已存在则跳过，保证脚本可重复执行。
     """
@@ -62,26 +86,8 @@ async def init_default_data() -> None:
             else:
                 logger.info("默认租户已存在 id=%s", tenant.id)
 
-            # 创建或获取超级管理员角色
-            role_stmt = select(Role).where(
-                Role.tenant_id == tenant.id,
-                Role.name == ADMIN_ROLE_NAME,
-            )
-            role_result = await session.execute(role_stmt)
-            admin_role = role_result.scalar_one_or_none()
-
-            if admin_role is None:
-                admin_role = Role(
-                    tenant_id=tenant.id,
-                    name=ADMIN_ROLE_NAME,
-                    description="超级管理员，拥有所有权限",
-                    permissions={"permissions": DEFAULT_ADMIN_PERMISSIONS},
-                )
-                session.add(admin_role)
-                await session.flush()
-                logger.info("创建超级管理员角色 id=%s", admin_role.id)
-            else:
-                logger.info("超级管理员角色已存在 id=%s", admin_role.id)
+            roles = await _ensure_roles(session, tenant.id)
+            admin_role = roles["超级管理员"]
 
             # 创建或获取 admin 用户
             user_stmt = select(User).where(
@@ -108,14 +114,14 @@ async def init_default_data() -> None:
 
             await session.commit()
             logger.info(
-                "初始化完成: tenant_id=%s, role_id=%s, user_id=%s",
+                "初始化完成: tenant_id=%s, roles=%s, user_id=%s",
                 tenant.id,
-                admin_role.id,
+                list(roles.keys()),
                 admin_user.id,
             )
             print("数据库初始化成功")
             print(f"  租户: {tenant.name} ({tenant.domain})")
-            print(f"  角色: {admin_role.name}")
+            print(f"  内置角色: {', '.join(roles.keys())}")
             print(f"  用户: {ADMIN_USERNAME} / {ADMIN_PASSWORD}")
         except Exception as exc:
             await session.rollback()
