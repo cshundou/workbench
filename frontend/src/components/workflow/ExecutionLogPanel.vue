@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { NodeExecutionLog } from '@/api/workflow';
 import { NODE_STATUS_COLORS } from '@/stores/graph';
 
@@ -12,13 +12,48 @@ const emit = defineEmits<{
   select: [nodeId: string];
 }>();
 
-const sortedLogs = computed(() =>
-  [...props.logs].sort((a, b) => {
-    const ta = a.started_at || a.completed_at || '';
-    const tb = b.started_at || b.completed_at || '';
-    return ta.localeCompare(tb);
-  }),
-);
+const keyword = ref('');
+const expandedKeys = ref<Set<string>>(new Set());
+
+const sortedLogs = computed(() => {
+  const filtered = [...props.logs]
+    .filter((log) => {
+      if (!keyword.value.trim()) return true;
+      const text = JSON.stringify(log).toLowerCase();
+      return text.includes(keyword.value.trim().toLowerCase());
+    })
+    .sort((a, b) => {
+      const ta = a.started_at || a.completed_at || '';
+      const tb = b.started_at || b.completed_at || '';
+      return ta.localeCompare(tb);
+    });
+  return filtered;
+});
+
+const loopGroups = computed(() => {
+  const groups: Record<string, NodeExecutionLog[]> = {};
+  for (const log of sortedLogs.value) {
+    const iteration = (log as NodeExecutionLog & { loop_iteration?: number }).loop_iteration;
+    if (iteration != null) {
+      const key = `loop-${iteration}`;
+      groups[key] = groups[key] || [];
+      groups[key].push(log);
+    }
+  }
+  return groups;
+});
+
+function toggleExpand(key: string): void {
+  if (expandedKeys.value.has(key)) {
+    expandedKeys.value.delete(key);
+  } else {
+    expandedKeys.value.add(key);
+  }
+}
+
+function isExpanded(key: string): boolean {
+  return expandedKeys.value.has(key);
+}
 
 function statusColor(status: string): string {
   return NODE_STATUS_COLORS[status] || NODE_STATUS_COLORS.waiting;
@@ -36,6 +71,9 @@ function formatTime(iso?: string | null): string {
       <h4>执行日志</h4>
       <span class="log-count">{{ logs.length }} 条（含持久化记录）</span>
     </div>
+    <div class="panel-toolbar">
+      <el-input v-model="keyword" size="small" placeholder="搜索日志内容" clearable />
+    </div>
 
     <el-scrollbar v-if="sortedLogs.length" class="log-list">
       <div
@@ -52,10 +90,27 @@ function formatTime(iso?: string | null): string {
             {{ log.status }}
           </el-tag>
         </div>
-        <div class="log-time">{{ formatTime(log.started_at || log.completed_at) }}</div>
+        <div class="log-time">
+          {{ formatTime(log.started_at || log.completed_at) }}
+          <span v-if="(log as any).branch_duration_ms" class="branch-time">
+            分支耗时 {{ (log as any).branch_duration_ms }}ms
+          </span>
+          <span v-if="(log as any).loop_iteration != null" class="loop-badge">
+            循环 {{ (log as any).loop_iteration }}/{{ (log as any).max_iterations ?? '?' }}
+          </span>
+        </div>
         <div v-if="log.error" class="log-error">{{ log.error }}</div>
-        <div v-if="log.output_data" class="log-output">
-          <pre>{{ JSON.stringify(log.output_data, null, 2) }}</pre>
+        <div v-if="log.input_data" class="log-io">
+          <el-button link size="small" @click.stop="toggleExpand(`${log.node_id}-in`)">
+            {{ isExpanded(`${log.node_id}-in`) ? '收起输入' : '展开输入' }}
+          </el-button>
+          <pre v-if="isExpanded(`${log.node_id}-in`)">{{ JSON.stringify(log.input_data, null, 2) }}</pre>
+        </div>
+        <div v-if="log.output_data" class="log-io">
+          <el-button link size="small" @click.stop="toggleExpand(`${log.node_id}-out`)">
+            {{ isExpanded(`${log.node_id}-out`) ? '收起输出' : '展开输出' }}
+          </el-button>
+          <pre v-if="isExpanded(`${log.node_id}-out`)">{{ JSON.stringify(log.output_data, null, 2) }}</pre>
         </div>
       </div>
     </el-scrollbar>
