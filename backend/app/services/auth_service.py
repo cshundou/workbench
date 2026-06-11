@@ -2,7 +2,10 @@
 认证业务服务。
 """
 
+import secrets
+import smtplib
 from datetime import datetime, timezone
+from email.mime.text import MIMEText
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,15 +20,19 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_refresh_token,
+    get_password_hash,
     hash_token,
+    validate_password_complexity,
     verify_password,
 )
 from app.models.user import User
 from app.schemas.auth import (
+    ForgotPasswordRequest,
     LoginRequest,
     LoginResponse,
     RefreshTokenRequest,
     RefreshTokenResponse,
+    ResetPasswordRequest,
     RoleBrief,
     UserMeInfo,
     UserMeResponse,
@@ -79,6 +86,7 @@ class AuthService:
             raise AuthenticationError(message="用户已被禁用")
 
         user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_ip = ip_address
         await db.flush()
         await audit_service.record_login_action(
             db=db,
@@ -221,6 +229,81 @@ class AuthService:
         """登录成功后清除失败计数。"""
         redis = await get_redis()
         await redis.delete(f"login_fail:{username}")
+
+    async def request_password_reset(
+        self,
+        db: AsyncSession,
+        data: ForgotPasswordRequest,
+    ) -> None:
+        """
+        发起密码重置：生成令牌存入 Redis，并通过邮件发送重置链接。
+
+        无论邮箱是否存在均返回成功，避免用户枚举。
+        """
+        stmt = select(User).where(User.email == data.email, User.status == 1)
+        user = (await db.execute(stmt)).scalar_one_or_none()
+        if user is None:
+            logger.info("密码重置请求：邮箱不存在 email=%s", data.email)
+            return
+
+        token = secrets.token_urlsafe(32)
+        redis = await get_redis()
+        ttl = settings.password_reset_token_expire_minutes * 60
+        await redis.set(f"pwd_reset:{token}", str(user.id), ex=ttl)
+
+        reset_url = f"{settings.password_reset_base_url}?token={token}"
+        self._send_password_reset_email(user.email, reset_url)
+        logger.info("密码重置令牌已生成 user_id=%s", user.id)
+
+    async def reset_password(
+        self,
+        db: AsyncSession,
+        data: ResetPasswordRequest,
+    ) -> None:
+        """使用重置令牌设置新密码。"""
+        validate_password_complexity(data.new_password)
+
+        redis = await get_redis()
+        user_id_raw = await redis.get(f"pwd_reset:{data.token}")
+        if not user_id_raw:
+            raise AuthenticationError(message="重置链接无效或已过期")
+
+        user_id = int(user_id_raw)
+        stmt = select(User).where(User.id == user_id, User.status == 1)
+        user = (await db.execute(stmt)).scalar_one_or_none()
+        if user is None:
+            raise AuthenticationError(message="用户不存在或已被禁用")
+
+        user.password_hash = get_password_hash(data.new_password)
+        await db.flush()
+        await redis.delete(f"pwd_reset:{data.token}")
+        logger.info("密码重置成功 user_id=%s", user_id)
+
+    def _send_password_reset_email(self, to_email: str, reset_url: str) -> None:
+        """通过 SMTP 发送密码重置邮件；未配置 SMTP 时仅记录日志。"""
+        if not settings.alert_smtp_host:
+            logger.info("未配置 SMTP，密码重置链接（仅开发环境）: %s", reset_url)
+            return
+
+        try:
+            message = MIMEText(
+                f"您好，\n\n请点击以下链接重置密码（{settings.password_reset_token_expire_minutes} 分钟内有效）：\n"
+                f"{reset_url}\n\n如非本人操作请忽略此邮件。",
+                "plain",
+                "utf-8",
+            )
+            message["Subject"] = f"{settings.app_name} - 密码重置"
+            message["From"] = settings.alert_smtp_from or settings.alert_smtp_user
+            message["To"] = to_email
+
+            with smtplib.SMTP(settings.alert_smtp_host, settings.alert_smtp_port) as server:
+                server.starttls()
+                if settings.alert_smtp_user and settings.alert_smtp_password:
+                    server.login(settings.alert_smtp_user, settings.alert_smtp_password)
+                server.send_message(message)
+            logger.info("密码重置邮件已发送 to=%s", to_email)
+        except Exception as exc:
+            logger.error("发送密码重置邮件失败 to=%s: %s", to_email, exc)
 
 
 auth_service = AuthService()

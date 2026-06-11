@@ -52,6 +52,7 @@ class User(Base, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    last_login_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="users")
     role: Mapped[Optional["Role"]] = relationship(back_populates="users")

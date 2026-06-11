@@ -67,6 +67,7 @@ class UserService:
             role=role_brief,
             status=user.status,
             last_login_at=user.last_login_at,
+            last_login_ip=user.last_login_ip,
             created_at=user.created_at,
             updated_at=user.updated_at,
         )
