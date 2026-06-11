@@ -247,6 +247,10 @@ class Settings(BaseSettings):
         default="",
         description="钉钉机器人 Webhook URL",
     )
+    alert_wecom_webhook: str = Field(
+        default="",
+        description="企业微信机器人 Webhook URL",
+    )
 
 
 @lru_cache

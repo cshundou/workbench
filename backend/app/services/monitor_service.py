@@ -366,6 +366,7 @@ class MonitorService:
                 settings.alert_email_recipients and settings.alert_smtp_host
             ),
             "dingtalk_configured": bool(settings.alert_dingtalk_webhook),
+            "wecom_configured": bool(settings.alert_wecom_webhook),
         }
 
     async def get_alert_history(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -401,7 +402,7 @@ class MonitorService:
         await self._send_alert_notifications(alert_type, message)
 
     async def _send_alert_notifications(self, alert_type: str, message: str) -> None:
-        """通过邮件与钉钉发送告警。"""
+        """通过邮件、钉钉与企业微信发送告警。"""
         subject = f"[AI Workbench] 监控告警: {alert_type}"
         body = f"{message}\n时间: {datetime.now(timezone.utc).isoformat()}"
 
@@ -440,6 +441,31 @@ class MonitorService:
                     )
             except Exception as exc:
                 logger.error("发送钉钉告警失败: %s", exc)
+
+        if settings.alert_wecom_webhook:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(
+                        settings.alert_wecom_webhook,
+                        json={
+                            "msgtype": "text",
+                            "text": {"content": f"{subject}\n{body}"},
+                        },
+                    )
+            except Exception as exc:
+                logger.error("发送企业微信告警失败: %s", exc)
+
+    async def _check_chroma_health(self) -> tuple[str, str]:
+        """检测 Chroma 向量库可用性。"""
+        try:
+            import chromadb
+
+            client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
+            heartbeat = client.heartbeat()
+            return "healthy", f"heartbeat={heartbeat}"
+        except Exception as exc:
+            logger.error("Chroma 健康检查失败: %s", exc)
+            return "unhealthy", str(exc)
 
     async def _is_alert_in_cooldown(self, alert_key: str) -> bool:
         """检查告警是否处于冷却期。"""
@@ -569,10 +595,12 @@ class MonitorService:
 
         redis_ok = await ping_redis()
         redis_status = "healthy" if redis_ok else "unhealthy"
+        chroma_status, chroma_message = await self._check_chroma_health()
 
         components = {
             "database": {"status": db_status, "message": db_message},
             "redis": {"status": redis_status, "message": "ok" if redis_ok else "unavailable"},
+            "vector_db": {"status": chroma_status, "message": chroma_message},
         }
         overall = (
             "healthy"

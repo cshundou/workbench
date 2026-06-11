@@ -1,11 +1,11 @@
 """
 接口限流中间件。
 
-基于 Redis 固定窗口计数，按客户端 IP 限制请求频率。
+基于 Redis 固定窗口计数，按客户端 IP 和 JWT 用户双重限流。
 """
 
 import time
-from typing import Callable
+from typing import Callable, Optional
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.core.response import error_response
+from app.core.security import decode_access_token
 
 logger = get_logger(__name__)
 
@@ -37,6 +38,25 @@ def _get_client_ip(request: Request) -> str:
     if request.client:
         return request.client.host
     return "unknown"
+
+
+def _get_jwt_user_id(request: Request) -> Optional[str]:
+    """
+    从 Authorization: Bearer <token> 中提取用户 ID。
+
+    无 Token、Token 非法或无 sub 声明时返回 None。
+    """
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization[7:].strip()
+    if not token:
+        return None
+    payload = decode_access_token(token)
+    if not payload:
+        return None
+    subject = payload.get("sub")
+    return str(subject) if subject is not None else None
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -65,22 +85,37 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client_ip = _get_client_ip(request)
+        user_id = _get_jwt_user_id(request)
         window = settings.rate_limit_window_seconds
         window_id = int(time.time()) // window
-        redis_key = f"rate_limit:{client_ip}:{window_id}"
+        ip_key = f"rate_limit:ip:{client_ip}:{window_id}"
+        user_key = f"rate_limit:user:{user_id}:{window_id}" if user_id else None
 
         try:
             redis = await get_redis()
-            current_count = await redis.incr(redis_key)
-            if current_count == 1:
-                await redis.expire(redis_key, window + 1)
+            bucket_keys = [ip_key]
+            if user_key:
+                bucket_keys.append(user_key)
 
-            if current_count > settings.rate_limit_requests:
+            exceeded_bucket: Optional[str] = None
+            exceeded_count = 0
+            for bucket_key in bucket_keys:
+                current_count = await redis.incr(bucket_key)
+                if current_count == 1:
+                    await redis.expire(bucket_key, window + 1)
+                if current_count > settings.rate_limit_requests:
+                    exceeded_bucket = bucket_key
+                    exceeded_count = current_count
+                    break
+
+            if exceeded_bucket:
                 logger.warning(
-                    "触发限流 ip=%s path=%s count=%s",
+                    "触发限流 ip=%s user_id=%s path=%s bucket=%s count=%s",
                     client_ip,
+                    user_id or "-",
                     path,
-                    current_count,
+                    exceeded_bucket,
+                    exceeded_count,
                 )
                 return JSONResponse(
                     status_code=429,
