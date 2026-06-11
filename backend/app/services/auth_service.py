@@ -65,9 +65,14 @@ class AuthService:
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
 
+        await self._check_login_lock(login_data.username)
+
         if user is None or not verify_password(login_data.password, user.password_hash):
+            await self._record_login_failure(login_data.username)
             logger.warning("登录失败: 用户名或密码错误 username=%s", login_data.username)
             raise AuthenticationError(message="用户名或密码错误")
+
+        await self._clear_login_failures(login_data.username)
 
         if user.status != 1:
             logger.warning("登录失败: 用户已禁用 user_id=%s", user.id)
@@ -187,6 +192,35 @@ class AuthService:
         redis = await get_redis()
         value = await redis.get(f"refresh_blacklist:{token_hash}")
         return value is not None
+
+    async def _check_login_lock(self, username: str) -> None:
+        """检查账号是否因登录失败次数过多被锁定。"""
+        redis = await get_redis()
+        lock_key = f"login_lock:{username}"
+        if await redis.get(lock_key):
+            minutes = settings.login_lock_duration_minutes
+            raise AuthenticationError(
+                message=f"账号已锁定，请 {minutes} 分钟后再试或联系管理员"
+            )
+
+    async def _record_login_failure(self, username: str) -> None:
+        """记录登录失败次数，达到上限时锁定账号。"""
+        redis = await get_redis()
+        fail_key = f"login_fail:{username}"
+        count = await redis.incr(fail_key)
+        if count == 1:
+            ttl = settings.login_lock_duration_minutes * 60
+            await redis.expire(fail_key, ttl)
+        if count >= settings.login_max_attempts:
+            lock_ttl = settings.login_lock_duration_minutes * 60
+            await redis.set(f"login_lock:{username}", "1", ex=lock_ttl)
+            await redis.delete(fail_key)
+            logger.warning("账号已锁定 username=%s attempts=%s", username, count)
+
+    async def _clear_login_failures(self, username: str) -> None:
+        """登录成功后清除失败计数。"""
+        redis = await get_redis()
+        await redis.delete(f"login_fail:{username}")
 
 
 auth_service = AuthService()
