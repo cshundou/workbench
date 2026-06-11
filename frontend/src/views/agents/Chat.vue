@@ -80,6 +80,11 @@ async function handleDeleteSession(targetSessionId: string): Promise<void> {
 }
 
 function handleStreamMessage(msg: AgentChatStreamMessage): void {
+  if (msg.type === 'model_fallback') {
+    ElMessage.warning(msg.content || '已自动切换模型');
+    return;
+  }
+
   if (msg.type === 'thinking') {
     thinkingText.value = msg.content || '正在分析问题...';
     return;

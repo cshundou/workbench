@@ -66,7 +66,7 @@ export interface ToolCallStep {
 
 /** 流式对话 SSE 消息 */
 export interface AgentChatStreamMessage {
-  type?: 'thinking' | 'tool_start' | 'tool_end' | 'content' | 'done' | 'error';
+  type?: 'thinking' | 'tool_start' | 'tool_end' | 'content' | 'done' | 'error' | 'model_fallback';
   content?: string;
   tool_name?: string;
   tool_label?: string;

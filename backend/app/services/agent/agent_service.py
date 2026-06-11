@@ -40,7 +40,8 @@ from app.core.deps import get_user_permissions
 from app.core.guardrails import guardrails_service
 from app.services.token_quota_service import token_quota_service
 from app.services.token_usage_service import token_usage_service
-from app.services.user_key_context import UserKeyContext, create_chat_llm, format_llm_error_message
+from app.services.llm_fallback_service import llm_fallback_service
+from app.services.user_key_context import UserKeyContext, format_llm_error_message
 
 logger = get_logger(__name__)
 
@@ -181,6 +182,65 @@ class AgentService:
             )
         return lc_tools
 
+    async def _invoke_with_llm_fallback(
+        self,
+        executor: AgentExecutor,
+        user_ctx: UserKeyContext,
+        agent_config: Dict[str, Any],
+        lc_tools: list[StructuredTool],
+        payload: Dict[str, Any],
+        resolved_model: str,
+    ) -> Dict[str, Any]:
+        """执行 Agent，失败时按模型优先级自动降级。"""
+        primary_model = agent_config.get("model_name", resolved_model)
+        tried_models = [resolved_model]
+
+        while True:
+            try:
+                result = await executor.ainvoke(payload)
+                llm_fallback_service.record_success(user_ctx.user_id, resolved_model)
+                return result
+            except Exception as exc:
+                if not llm_fallback_service.is_fallback_error(exc):
+                    raise
+
+                llm_fallback_service.record_failure(user_ctx.user_id, resolved_model)
+                logger.warning(
+                    "模型%s不可用，错误原因：%s",
+                    resolved_model,
+                    exc,
+                )
+
+                priority = llm_fallback_service.build_model_priority(
+                    user_ctx,
+                    primary_model,
+                    agent_config.get("model_priorities"),
+                )
+                remaining = [
+                    model
+                    for model in priority
+                    if model not in tried_models
+                    and llm_fallback_service.is_model_available(user_ctx.user_id, model)
+                ]
+                if not remaining:
+                    raise RuntimeError("所有大模型服务都不可用，请稍后再试") from exc
+
+                next_model = remaining[0]
+                tried_models.append(next_model)
+                logger.info(
+                    "模型%s不可用，已自动降级到%s，错误原因：%s",
+                    resolved_model,
+                    next_model,
+                    exc,
+                )
+                resolved_model = next_model
+                fallback_config = {**agent_config, "model_name": next_model}
+                executor, resolved_model = self._build_agent_executor(
+                    fallback_config,
+                    lc_tools,
+                    user_ctx,
+                )
+
     @staticmethod
     def _estimate_tokens(text: str) -> int:
         """粗略估算 Token 数。"""
@@ -206,15 +266,16 @@ class AgentService:
         agent_config: Dict[str, Any],
         lc_tools: list[StructuredTool],
         user_ctx: UserKeyContext,
-    ) -> AgentExecutor:
-        """创建 LangChain OpenAI Tools Agent 执行器。"""
+    ) -> tuple[AgentExecutor, str]:
+        """创建 LangChain OpenAI Tools Agent 执行器，返回执行器与实际模型名。"""
         user_ctx.get_llm_provider()
-        llm = create_chat_llm(
+        llm, resolved_model, _ = llm_fallback_service.create_llm_with_fallback(
             user_ctx,
-            model_name=agent_config.get("model_name"),
+            model_name=agent_config.get("model_name", "gpt-3.5-turbo"),
             temperature=agent_config["temperature"],
             top_p=agent_config.get("top_p"),
             max_tokens=agent_config["max_tokens"],
+            model_priorities=agent_config.get("model_priorities"),
         )
 
         # 使用 SystemMessage 避免 system_prompt 中的 JSON/花括号被当作模板变量
@@ -228,7 +289,7 @@ class AgentService:
         )
 
         agent = create_openai_tools_agent(llm, lc_tools, prompt)
-        return AgentExecutor(
+        executor = AgentExecutor(
             agent=agent,
             tools=lc_tools,
             verbose=True,
@@ -236,6 +297,7 @@ class AgentService:
             max_iterations=5,
             handle_parsing_errors=True,
         )
+        return executor, resolved_model
 
     async def run_agent(
         self,
@@ -260,7 +322,9 @@ class AgentService:
             user_ctx,
         )
         lc_tools = self._to_langchain_tools(base_tools, user_permissions)
-        executor = self._build_agent_executor(agent_config, lc_tools, user_ctx)
+        executor, resolved_model = self._build_agent_executor(
+            agent_config, lc_tools, user_ctx
+        )
 
         history_messages: list[Any] = []
         for item in chat_history or []:
@@ -276,11 +340,13 @@ class AgentService:
             settings.agent_max_context_tokens,
         )
 
-        result = await executor.ainvoke(
-            {
-                "input": user_query,
-                "chat_history": history_messages,
-            }
+        result = await self._invoke_with_llm_fallback(
+            executor=executor,
+            user_ctx=user_ctx,
+            agent_config=agent_config,
+            lc_tools=lc_tools,
+            payload={"input": user_query, "chat_history": history_messages},
+            resolved_model=resolved_model,
         )
 
         prompt_tokens = self._estimate_tokens(
@@ -339,7 +405,9 @@ class AgentService:
             user_ctx,
         )
         lc_tools = self._to_langchain_tools(base_tools, user_permissions)
-        executor = self._build_agent_executor(agent_config, lc_tools, user_ctx)
+        executor, resolved_model = self._build_agent_executor(
+            agent_config, lc_tools, user_ctx
+        )
 
         history_messages: list[Any] = []
         for item in chat_history or []:
@@ -354,6 +422,13 @@ class AgentService:
             history_messages,
             settings.agent_max_context_tokens,
         )
+
+        if resolved_model != agent_config.get("model_name"):
+            yield {
+                "type": "model_fallback",
+                "content": f"当前模型服务暂时不可用，已自动切换到{resolved_model}模型",
+                "model_name": resolved_model,
+            }
 
         tool_label_map = {item["name"]: item["label"] for item in AVAILABLE_TOOL_DEFINITIONS}
         final_answer = ""
