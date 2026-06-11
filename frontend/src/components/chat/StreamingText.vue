@@ -47,10 +47,7 @@ function renderMarkdown(text: string): string {
     return '';
   }
 
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   // 代码块（含复制按钮容器）
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, lang, code) => {
@@ -85,7 +82,10 @@ function renderMarkdown(text: string): string {
 
   // 表格（简单管道表格）
   html = html.replace(/((?:\|.+\|\n)+)/g, (tableBlock) => {
-    const rows = tableBlock.trim().split('\n').filter((row) => !row.match(/^\|[\s-:|]+\|$/));
+    const rows = tableBlock
+      .trim()
+      .split('\n')
+      .filter((row) => !row.match(/^\|[\s-:|]+\|$/));
     if (rows.length === 0) {
       return tableBlock;
     }
@@ -94,7 +94,9 @@ function renderMarkdown(text: string): string {
         const cells = row
           .split('|')
           .filter((cell) => cell.trim() !== '')
-          .map((cell) => `<${index === 0 ? 'th' : 'td'}>${cell.trim()}</${index === 0 ? 'th' : 'td'}>`)
+          .map(
+            (cell) => `<${index === 0 ? 'th' : 'td'}>${cell.trim()}</${index === 0 ? 'th' : 'td'}>`,
+          )
           .join('');
         return `<tr>${cells}</tr>`;
       })
@@ -155,12 +157,7 @@ onMounted(async () => {
 
 <template>
   <div class="streaming-text">
-    <div
-      ref="markdownRef"
-      class="markdown-body"
-      v-html="renderedHtml"
-      @click="handleCopyClick"
-    />
+    <div ref="markdownRef" class="markdown-body" @click="handleCopyClick" v-html="renderedHtml" />
     <span v-if="streaming" class="cursor-blink">|</span>
   </div>
 </template>

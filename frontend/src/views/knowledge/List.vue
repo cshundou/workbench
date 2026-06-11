@@ -4,11 +4,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import { Plus, Search, Edit, Delete, ChatDotRound, FolderOpened } from '@element-plus/icons-vue';
-import {
-  createKnowledgeBase,
-  updateKnowledgeBase,
-  deleteKnowledgeBase,
-} from '@/api/rag';
+import { createKnowledgeBase, updateKnowledgeBase, deleteKnowledgeBase } from '@/api/rag';
 import type { KnowledgeBaseInfo } from '@/api/rag';
 import { useRagStore } from '@/stores/rag';
 import { useUserStore } from '@/stores/user';
@@ -162,10 +158,7 @@ onMounted(() => {
   <div class="knowledge-list">
     <ApiKeyHintBanner scene="rag" />
 
-    <SectionHeader
-      title="知识库"
-      description="企业私有知识沉淀，支持增强 RAG 检索与引用溯源"
-    >
+    <SectionHeader title="知识库" description="企业私有知识沉淀，支持增强 RAG 检索与引用溯源">
       <template #actions>
         <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
           新建知识库
@@ -189,14 +182,12 @@ onMounted(() => {
     </div>
 
     <div v-loading="ragStore.isLoading" class="kb-grid">
-      <el-empty v-if="!ragStore.isLoading && ragStore.knowledgeBases.length === 0" description="暂无知识库" />
+      <el-empty
+        v-if="!ragStore.isLoading && ragStore.knowledgeBases.length === 0"
+        description="暂无知识库"
+      />
 
-      <el-card
-        v-for="kb in ragStore.knowledgeBases"
-        :key="kb.id"
-        shadow="never"
-        class="kb-card"
-      >
+      <el-card v-for="kb in ragStore.knowledgeBases" :key="kb.id" shadow="never" class="kb-card">
         <div class="kb-card-header">
           <el-icon :size="24" class="kb-icon"><FolderOpened /></el-icon>
           <div class="kb-info">
@@ -215,9 +206,7 @@ onMounted(() => {
           <el-button text type="primary" :icon="FolderOpened" @click="goDetail(kb)">
             管理文档
           </el-button>
-          <el-button text type="primary" :icon="ChatDotRound" @click="goChat(kb)">
-            问答
-          </el-button>
+          <el-button text type="primary" :icon="ChatDotRound" @click="goChat(kb)"> 问答 </el-button>
           <template v-if="canWrite">
             <el-button text type="primary" :icon="Edit" @click="openEditDialog(kb)" />
             <el-button text type="danger" :icon="Delete" @click="handleDelete(kb)" />
@@ -292,7 +281,9 @@ onMounted(() => {
 
 .kb-card {
   border-radius: $border-radius-lg;
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 
   &:hover {
     box-shadow: $shadow-card-hover;

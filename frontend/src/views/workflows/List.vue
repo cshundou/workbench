@@ -140,14 +140,7 @@ onMounted(() => {
     </SectionHeader>
 
     <el-row v-loading="graphStore.isLoading" :gutter="16">
-      <el-col
-        v-for="wf in graphStore.workflows"
-        :key="wf.id"
-        :xs="24"
-        :sm="12"
-        :md="8"
-        :lg="6"
-      >
+      <el-col v-for="wf in graphStore.workflows" :key="wf.id" :xs="24" :sm="12" :md="8" :lg="6">
         <el-card shadow="never" class="wf-card">
           <div class="wf-card-header">
             <el-icon :size="28" class="wf-icon"><Share /></el-icon>
@@ -233,7 +226,9 @@ onMounted(() => {
 .wf-card {
   margin-bottom: 16px;
   border-radius: $border-radius-lg;
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 
   &:hover {
     box-shadow: $shadow-card-hover;

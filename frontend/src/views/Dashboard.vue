@@ -153,9 +153,7 @@ const statCards = [
     <!-- API Key 引导提示 -->
     <div v-if="needsApiKeySetup" class="api-key-tip">
       <el-icon class="tip-icon"><Key /></el-icon>
-      <span class="tip-text">
-        开始使用前，请先在「API 密钥管理」中配置您的大模型密钥
-      </span>
+      <span class="tip-text"> 开始使用前，请先在「API 密钥管理」中配置您的大模型密钥 </span>
       <el-button type="primary" size="small" round @click="goToApiKeys">前往配置</el-button>
     </div>
 
@@ -168,13 +166,7 @@ const statCards = [
         description="MiniMax 最新首推能力，覆盖知识库 / 智能体 / 工作流 / 监控"
       />
       <el-row :gutter="20">
-        <el-col
-          v-for="card in moduleCards"
-          :key="card.title"
-          :xs="24"
-          :sm="12"
-          :lg="6"
-        >
+        <el-col v-for="card in moduleCards" :key="card.title" :xs="24" :sm="12" :lg="6">
           <BentoCard
             :title="card.title"
             :description="card.description"

@@ -43,13 +43,7 @@ const emit = defineEmits<{
       <el-button v-if="canWrite" text :icon="CopyDocument" @click="emit('copy', agent)">
         复制
       </el-button>
-      <el-button
-        v-if="canDelete"
-        text
-        type="danger"
-        :icon="Delete"
-        @click="emit('delete', agent)"
-      >
+      <el-button v-if="canDelete" text type="danger" :icon="Delete" @click="emit('delete', agent)">
         删除
       </el-button>
     </div>
@@ -66,7 +60,9 @@ const emit = defineEmits<{
   border: none;
   border-radius: $border-radius-lg;
   box-shadow: $shadow-card;
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 
   &:hover {
     box-shadow: $shadow-card-hover;

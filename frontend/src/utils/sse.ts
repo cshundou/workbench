@@ -62,9 +62,7 @@ export interface FetchSSEStreamOptions<T> {
 /**
  * 统一 Fetch SSE 流式客户端，支持断线自动重连（默认最多 3 次）。
  */
-export async function fetchSSEStream<T>(
-  options: FetchSSEStreamOptions<T>,
-): Promise<void> {
+export async function fetchSSEStream<T>(options: FetchSSEStreamOptions<T>): Promise<void> {
   const {
     url,
     method = 'POST',
@@ -116,8 +114,7 @@ export async function fetchSSEStream<T>(
 
       attempt += 1;
       if (attempt > maxReconnectAttempts) {
-        const finalError =
-          error instanceof Error ? error : new Error('SSE 流式连接失败');
+        const finalError = error instanceof Error ? error : new Error('SSE 流式连接失败');
         onError?.(finalError);
         throw finalError;
       }

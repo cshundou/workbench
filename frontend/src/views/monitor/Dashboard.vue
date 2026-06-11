@@ -244,14 +244,14 @@ async function fetchDashboardData(): Promise<void> {
   try {
     const [tokenData, apiData, errorData, healthData, activityData, alertCfg, alerts] =
       await Promise.all([
-      getTokenUsage({ group_by: tokenGroupBy.value }),
-      getApiStats(statsDays.value),
-      getErrorLogs({ page: 1, page_size: 10 }),
-      getMonitorHealth(),
-      getUserActivity(),
-      getAlertConfig(),
-      getAlertHistory(10),
-    ]);
+        getTokenUsage({ group_by: tokenGroupBy.value }),
+        getApiStats(statsDays.value),
+        getErrorLogs({ page: 1, page_size: 10 }),
+        getMonitorHealth(),
+        getUserActivity(),
+        getAlertConfig(),
+        getAlertHistory(10),
+      ]);
     tokenStats.value = tokenData;
     apiStats.value = apiData;
     errorLogs.value = errorData.items;
@@ -320,10 +320,7 @@ onUnmounted(() => {
 
 <template>
   <div v-loading="loading" class="monitor-dashboard">
-    <SectionHeader
-      title="监控面板"
-      description="Token 消耗、API 调用量与系统健康状态实时监控"
-    />
+    <SectionHeader title="监控面板" description="Token 消耗、API 调用量与系统健康状态实时监控" />
 
     <el-row :gutter="20" class="summary-row">
       <el-col v-for="card in summaryCards" :key="card.title" :xs="24" :sm="12" :lg="6">
@@ -363,7 +360,11 @@ onUnmounted(() => {
                 <el-button size="small" :loading="exportLoading" @click="handleExportToken('csv')">
                   导出 CSV
                 </el-button>
-                <el-button size="small" :loading="exportLoading" @click="handleExportToken('excel')">
+                <el-button
+                  size="small"
+                  :loading="exportLoading"
+                  @click="handleExportToken('excel')"
+                >
                   导出 Excel
                 </el-button>
               </div>
@@ -412,7 +413,12 @@ onUnmounted(() => {
           <template #header>
             <div class="card-header flex-between">
               <span>API 调用统计</span>
-              <el-select v-model="statsDays" size="small" style="width: 120px" @change="fetchDashboardData">
+              <el-select
+                v-model="statsDays"
+                size="small"
+                style="width: 120px"
+                @change="fetchDashboardData"
+              >
                 <el-option :value="7" label="近 7 天" />
                 <el-option :value="14" label="近 14 天" />
                 <el-option :value="30" label="近 30 天" />
@@ -435,10 +441,10 @@ onUnmounted(() => {
             <p>
               通知渠道：
               <el-tag v-if="alertConfig.email_configured" size="small" type="success">邮件</el-tag>
-              <el-tag v-if="alertConfig.dingtalk_configured" size="small" type="success">钉钉</el-tag>
-              <span
-                v-if="!alertConfig.email_configured && !alertConfig.dingtalk_configured"
+              <el-tag v-if="alertConfig.dingtalk_configured" size="small" type="success"
+                >钉钉</el-tag
               >
+              <span v-if="!alertConfig.email_configured && !alertConfig.dingtalk_configured">
                 未配置
               </span>
             </p>

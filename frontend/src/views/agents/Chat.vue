@@ -2,11 +2,24 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { ArrowLeft, Delete, Loading, Plus, Position, Setting, VideoPause } from '@element-plus/icons-vue';
+import {
+  ArrowLeft,
+  Delete,
+  Loading,
+  Plus,
+  Position,
+  Setting,
+  VideoPause,
+} from '@element-plus/icons-vue';
 import StreamingText from '@/components/chat/StreamingText.vue';
 import ToolCallPanel from '@/components/agent/ToolCallPanel.vue';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
-import { chatAgentStream, deleteAgentSession, getAgentHistory, getAgentSessions } from '@/api/agent';
+import {
+  chatAgentStream,
+  deleteAgentSession,
+  getAgentHistory,
+  getAgentSessions,
+} from '@/api/agent';
 import type { AgentChatStreamMessage, ChatHistoryItem, ToolCallStep } from '@/api/agent';
 import { useAgentStore } from '@/stores/agent';
 
@@ -40,7 +53,10 @@ async function loadSessions(): Promise<void> {
 
 async function loadSessionHistory(targetSessionId: string): Promise<void> {
   sessionId.value = targetSessionId;
-  const { items } = await getAgentHistory(agentId.value, { session_id: targetSessionId, limit: 200 });
+  const { items } = await getAgentHistory(agentId.value, {
+    session_id: targetSessionId,
+    limit: 200,
+  });
   messages.value = items.map((item: ChatHistoryItem) => ({
     id: `history-${item.id}`,
     role: item.message_type === 'user' ? 'user' : 'assistant',
@@ -217,13 +233,7 @@ onUnmounted(() => {
       </div>
       <div class="header-actions">
         <el-button text :icon="Setting" @click="goConfig">配置</el-button>
-        <el-button
-          v-if="isStreaming"
-          type="danger"
-          plain
-          :icon="VideoPause"
-          @click="handleAbort"
-        >
+        <el-button v-if="isStreaming" type="danger" plain :icon="VideoPause" @click="handleAbort">
           停止生成
         </el-button>
       </div>
@@ -260,12 +270,7 @@ onUnmounted(() => {
         <div class="message-list">
           <el-empty v-if="messages.length === 0" description="输入问题开始与智能体对话" />
 
-          <div
-            v-for="msg in messages"
-            :key="msg.id"
-            class="message-item"
-            :class="msg.role"
-          >
+          <div v-for="msg in messages" :key="msg.id" class="message-item" :class="msg.role">
             <div class="message-bubble">
               <template v-if="msg.role === 'user'">
                 <p class="user-text">{{ msg.content }}</p>

@@ -30,7 +30,11 @@ function formatJson(value: unknown): string {
       <span>{{ thinkingText }}</span>
     </div>
 
-    <el-empty v-if="steps.length === 0 && !thinkingText" description="暂无工具调用" :image-size="60" />
+    <el-empty
+      v-if="steps.length === 0 && !thinkingText"
+      description="暂无工具调用"
+      :image-size="60"
+    />
 
     <el-collapse v-else accordion>
       <el-collapse-item

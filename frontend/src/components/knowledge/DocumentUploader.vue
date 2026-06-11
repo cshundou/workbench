@@ -79,22 +79,14 @@ function handleDrop(event: DragEvent): void {
       class="upload-area"
     >
       <el-icon class="upload-icon"><UploadFilled /></el-icon>
-      <div class="upload-text">
-        将文件拖到此处，或 <em>点击上传</em>
-      </div>
+      <div class="upload-text">将文件拖到此处，或 <em>点击上传</em></div>
       <template #tip>
-        <div class="upload-tip">
-          支持 PDF、Word、Excel、TXT、Markdown 等格式，可批量上传
-        </div>
+        <div class="upload-tip">支持 PDF、Word、Excel、TXT、Markdown 等格式，可批量上传</div>
       </template>
     </el-upload>
 
     <div v-if="Object.keys(uploadProgress).length > 0" class="upload-progress-list">
-      <div
-        v-for="(percent, fileKey) in uploadProgress"
-        :key="fileKey"
-        class="progress-item"
-      >
+      <div v-for="(percent, fileKey) in uploadProgress" :key="fileKey" class="progress-item">
         <span class="file-name">{{ fileKey.split('-')[0] }}</span>
         <el-progress :percentage="percent" :stroke-width="6" />
       </div>

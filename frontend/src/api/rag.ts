@@ -117,12 +117,8 @@ export interface RagChatHistoryItem {
 const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 /** 获取知识库列表 */
-export function getKnowledgeBases(
-  params?: PageParams,
-): Promise<PageResult<KnowledgeBaseInfo>> {
-  return request.get('/knowledge-bases', { params }) as Promise<
-    PageResult<KnowledgeBaseInfo>
-  >;
+export function getKnowledgeBases(params?: PageParams): Promise<PageResult<KnowledgeBaseInfo>> {
+  return request.get('/knowledge-bases', { params }) as Promise<PageResult<KnowledgeBaseInfo>>;
 }
 
 /** 获取知识库详情 */
@@ -131,9 +127,7 @@ export function getKnowledgeBaseById(id: number): Promise<KnowledgeBaseInfo> {
 }
 
 /** 创建知识库 */
-export function createKnowledgeBase(
-  data: CreateKnowledgeBaseParams,
-): Promise<KnowledgeBaseInfo> {
+export function createKnowledgeBase(data: CreateKnowledgeBaseParams): Promise<KnowledgeBaseInfo> {
   return request.post('/knowledge-bases', data) as Promise<KnowledgeBaseInfo>;
 }
 
@@ -184,21 +178,17 @@ export async function uploadDocument(
   const token = localStorage.getItem('token');
 
   try {
-    const response = await axios.post(
-      `${baseURL}/knowledge-bases/${kbId}/documents`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        onUploadProgress: (event) => {
-          if (event.total && onProgress) {
-            onProgress(Math.round((event.loaded / event.total) * 100));
-          }
-        },
+    const response = await axios.post(`${baseURL}/knowledge-bases/${kbId}/documents`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-    );
+      onUploadProgress: (event) => {
+        if (event.total && onProgress) {
+          onProgress(Math.round((event.loaded / event.total) * 100));
+        }
+      },
+    });
 
     const res = response.data;
     if (res.code === 200) {
@@ -220,17 +210,18 @@ export function deleteDocument(kbId: number, docId: number): Promise<void> {
 }
 
 /** 查询文档解析进度 */
-export function getDocumentProgress(
-  kbId: number,
-  docId: number,
-): Promise<DocumentProgress> {
+export function getDocumentProgress(kbId: number, docId: number): Promise<DocumentProgress> {
   return request.get(
     `/knowledge-bases/${kbId}/documents/${docId}/progress`,
   ) as Promise<DocumentProgress>;
 }
 
 /** 下载文档 */
-export async function downloadDocument(kbId: number, docId: number, filename: string): Promise<void> {
+export async function downloadDocument(
+  kbId: number,
+  docId: number,
+  filename: string,
+): Promise<void> {
   const token = localStorage.getItem('token');
 
   try {
@@ -261,9 +252,7 @@ export function searchKnowledgeBase(
   kbId: number,
   data: SearchKnowledgeParams,
 ): Promise<SearchResultItem[]> {
-  return request.post(`/knowledge-bases/${kbId}/search`, data) as Promise<
-    SearchResultItem[]
-  >;
+  return request.post(`/knowledge-bases/${kbId}/search`, data) as Promise<SearchResultItem[]>;
 }
 
 /** 构建流式问答 SSE URL（兼容旧 EventSource 调用，推荐使用 chatKnowledgeStream） */
@@ -307,7 +296,10 @@ export async function getRagChatSessions(
   kbId: number,
 ): Promise<{ session_id: string; last_message: string; updated_at?: string }[]> {
   const { items } = await getRagChatHistory(kbId, { limit: 200 });
-  const sessionMap = new Map<string, { session_id: string; last_message: string; updated_at?: string }>();
+  const sessionMap = new Map<
+    string,
+    { session_id: string; last_message: string; updated_at?: string }
+  >();
   for (const item of items) {
     const existing = sessionMap.get(item.session_id);
     if (!existing || (item.created_at && item.created_at > (existing.updated_at || ''))) {
@@ -318,8 +310,8 @@ export async function getRagChatSessions(
       });
     }
   }
-  return Array.from(sessionMap.values()).sort(
-    (a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''),
+  return Array.from(sessionMap.values()).sort((a, b) =>
+    (b.updated_at || '').localeCompare(a.updated_at || ''),
   );
 }
 

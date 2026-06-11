@@ -18,7 +18,10 @@ const emit = defineEmits<{
 }>();
 
 /** 文档状态映射 */
-const statusMap: Record<number, { label: string; type: 'info' | 'success' | 'danger' | 'warning' }> = {
+const statusMap: Record<
+  number,
+  { label: string; type: 'info' | 'success' | 'danger' | 'warning' }
+> = {
   0: { label: '解析中', type: 'warning' },
   1: { label: '已完成', type: 'success' },
   2: { label: '解析失败', type: 'danger' },
@@ -43,22 +46,14 @@ function getProgress(doc: DocumentInfo): number {
   return props.progressMap[doc.id] ?? 0;
 }
 
-const hasPendingDocs = computed(() =>
-  props.documents.some((doc) => doc.status === 0),
-);
+const hasPendingDocs = computed(() => props.documents.some((doc) => doc.status === 0));
 </script>
 
 <template>
   <div class="document-list">
     <div class="list-header flex-between">
       <span class="list-title">文档列表 ({{ documents.length }})</span>
-      <el-button
-        v-if="hasPendingDocs"
-        text
-        type="primary"
-        :icon="Refresh"
-        @click="emit('refresh')"
-      >
+      <el-button v-if="hasPendingDocs" text type="primary" :icon="Refresh" @click="emit('refresh')">
         刷新进度
       </el-button>
     </div>

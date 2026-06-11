@@ -135,7 +135,12 @@ onMounted(() => {
           <el-switch v-model="form.status" :active-value="1" :inactive-value="0" />
         </el-form-item>
         <el-form-item label="Token配额">
-          <el-input-number v-model="form.monthly_token_limit" :min="0" :step="100000" style="width: 100%" />
+          <el-input-number
+            v-model="form.monthly_token_limit"
+            :min="0"
+            :step="100000"
+            style="width: 100%"
+          />
           <div class="form-hint">0 表示不限制月度 Token 消耗</div>
         </el-form-item>
       </el-form>

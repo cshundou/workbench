@@ -6,12 +6,7 @@ import { Plus, Search } from '@element-plus/icons-vue';
 import AgentCard from '@/components/agent/AgentCard.vue';
 import AgentConfigForm from '@/components/agent/AgentConfigForm.vue';
 import type { AgentFormData } from '@/components/agent/AgentConfigForm.vue';
-import {
-  createAgent,
-  updateAgent,
-  deleteAgent,
-  copyAgent,
-} from '@/api/agent';
+import { createAgent, updateAgent, deleteAgent, copyAgent } from '@/api/agent';
 import type { AgentInfo } from '@/api/agent';
 import { useAgentStore } from '@/stores/agent';
 import { useUserStore } from '@/stores/user';
@@ -124,10 +119,7 @@ onMounted(() => {
   <div class="agent-list-page">
     <ApiKeyHintBanner scene="agent" />
 
-    <SectionHeader
-      title="智能体中心"
-      description="创建、配置和管理可调用工具的单 Agent 智能体"
-    >
+    <SectionHeader title="智能体中心" description="创建、配置和管理可调用工具的单 Agent 智能体">
       <template #actions>
         <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
           新建智能体
@@ -150,7 +142,10 @@ onMounted(() => {
     </div>
 
     <div v-loading="agentStore.isLoading" class="agent-grid">
-      <el-empty v-if="!agentStore.isLoading && agentStore.agents.length === 0" description="暂无智能体" />
+      <el-empty
+        v-if="!agentStore.isLoading && agentStore.agents.length === 0"
+        description="暂无智能体"
+      />
 
       <el-row v-else :gutter="16">
         <el-col

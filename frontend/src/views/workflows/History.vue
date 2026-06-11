@@ -46,7 +46,11 @@ async function handleReplay(row: WorkflowExecution): Promise<void> {
       extra_params: (input.extra_params as Record<string, unknown>) || {},
     });
     ElMessage.success('已重新启动执行');
-    router.push({ name: 'WorkflowExecute', params: { id: workflowId.value }, query: { executionId: execution.id } });
+    router.push({
+      name: 'WorkflowExecute',
+      params: { id: workflowId.value },
+      query: { executionId: execution.id },
+    });
   } catch {
     ElMessage.error('重跑失败');
   }
@@ -92,7 +96,9 @@ onMounted(() => {
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <el-button text type="primary" @click="goExecuteDetail(row)">详情</el-button>
-          <el-button text type="success" :icon="VideoPlay" @click="handleReplay(row)">重跑</el-button>
+          <el-button text type="success" :icon="VideoPlay" @click="handleReplay(row)"
+            >重跑</el-button
+          >
         </template>
       </el-table-column>
     </el-table>

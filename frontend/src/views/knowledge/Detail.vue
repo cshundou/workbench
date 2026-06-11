@@ -189,20 +189,17 @@ async function openCitationPreview(): Promise<void> {
     previewVisible.value = true;
     if (route.query.highlight === '1') {
       ElMessage.info(
-        route.query.chunkIndex
-          ? `已定位到片段 #${route.query.chunkIndex}`
-          : '已打开引用文档',
+        route.query.chunkIndex ? `已定位到片段 #${route.query.chunkIndex}` : '已打开引用文档',
       );
     }
   }
 }
 
 onMounted(() => {
-  loadData()
-    .then(() => {
-      startProgressPolling();
-      return openCitationPreview();
-    });
+  loadData().then(() => {
+    startProgressPolling();
+    return openCitationPreview();
+  });
   loadSearchAnalysis();
 });
 
@@ -219,11 +216,7 @@ onUnmounted(() => {
     >
       <template #actions>
         <el-button text :icon="ArrowLeft" @click="goBack">返回列表</el-button>
-        <el-button
-          v-if="canWrite"
-          :loading="rebuildLoading"
-          @click="handleRebuildVectors"
-        >
+        <el-button v-if="canWrite" :loading="rebuildLoading" @click="handleRebuildVectors">
           全量重建向量
         </el-button>
         <el-button type="primary" :icon="ChatDotRound" round @click="goChat">进入问答</el-button>
@@ -267,7 +260,11 @@ onUnmounted(() => {
             <el-statistic title="检索次数" :value="searchStats?.total_queries || 0" />
           </el-col>
           <el-col :span="8">
-            <el-statistic title="命中率" :value="((searchStats?.hit_rate || 0) * 100).toFixed(1)" suffix="%" />
+            <el-statistic
+              title="命中率"
+              :value="((searchStats?.hit_rate || 0) * 100).toFixed(1)"
+              suffix="%"
+            />
           </el-col>
           <el-col :span="8">
             <el-statistic title="平均延迟(ms)" :value="searchStats?.avg_latency_ms || 0" />

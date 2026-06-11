@@ -56,10 +56,7 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   /** 加载对话历史 */
-  async function fetchChatHistory(
-    agentId: number,
-    sessionId?: string,
-  ): Promise<void> {
+  async function fetchChatHistory(agentId: number, sessionId?: string): Promise<void> {
     isLoading.value = true;
     try {
       const res = await getAgentHistory(agentId, { session_id: sessionId });

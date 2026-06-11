@@ -26,7 +26,14 @@ const gradientId = useId();
       aria-hidden="true"
     >
       <defs>
-        <linearGradient :id="gradientId" x1="4" y1="28" x2="28" y2="4" gradientUnits="userSpaceOnUse">
+        <linearGradient
+          :id="gradientId"
+          x1="4"
+          y1="28"
+          x2="28"
+          y2="4"
+          gradientUnits="userSpaceOnUse"
+        >
           <stop stop-color="#FF5C4D" />
           <stop offset="1" stop-color="#FF8A65" />
         </linearGradient>
@@ -47,9 +54,7 @@ const gradientId = useId();
     </svg>
 
     <div v-if="showText !== false" class="logo-wordmark">
-      <span class="logo-brand">
-        <span class="logo-brand-accent">智</span>协
-      </span>
+      <span class="logo-brand"> <span class="logo-brand-accent">智</span>协 </span>
       <span v-if="!compact" class="logo-tagline">Workbench</span>
     </div>
   </div>

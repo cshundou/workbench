@@ -142,12 +142,8 @@ function initFormStates(): void {
 // 同步初始化，避免首屏渲染时 formStates[provider] 为 undefined
 initFormStates();
 
-const llmProviders = computed(() =>
-  PROVIDER_CONFIGS.filter((item) => item.category === 'llm'),
-);
-const toolProviders = computed(() =>
-  PROVIDER_CONFIGS.filter((item) => item.category === 'tool'),
-);
+const llmProviders = computed(() => PROVIDER_CONFIGS.filter((item) => item.category === 'llm'));
+const toolProviders = computed(() => PROVIDER_CONFIGS.filter((item) => item.category === 'tool'));
 
 /** 加载已保存的密钥 */
 async function fetchKeys(): Promise<void> {
@@ -208,10 +204,7 @@ async function handleValidate(config: ProviderConfig): Promise<void> {
   state.validateStatus = 'idle';
   state.validateMessage = '';
   try {
-    const result = await validateApiKey(
-      config.provider,
-      state.apiKey.trim() || undefined,
-    );
+    const result = await validateApiKey(config.provider, state.apiKey.trim() || undefined);
     state.validateStatus = result.is_valid ? 'success' : 'error';
     state.validateMessage = result.message;
     if (result.is_valid) {
@@ -302,12 +295,7 @@ onMounted(fetchKeys);
       <h3 class="section-title">大模型</h3>
       <p class="section-desc">支持 OpenAI、通义千问、豆包、MiniMax 等主流大模型</p>
       <el-row :gutter="20">
-        <el-col
-          v-for="config in llmProviders"
-          :key="config.provider"
-          :xs="24"
-          :lg="12"
-        >
+        <el-col v-for="config in llmProviders" :key="config.provider" :xs="24" :lg="12">
           <el-card shadow="never" class="provider-card">
             <div class="provider-header">
               <div>
@@ -331,7 +319,9 @@ onMounted(fetchKeys);
                   <el-button
                     text
                     :icon="formStates[config.provider].showKey ? Hide : View"
-                    @click="formStates[config.provider].showKey = !formStates[config.provider].showKey"
+                    @click="
+                      formStates[config.provider].showKey = !formStates[config.provider].showKey
+                    "
                   />
                 </div>
                 <p class="key-preview">当前：{{ keyPreview(config.provider) }}</p>
@@ -365,9 +355,16 @@ onMounted(fetchKeys);
                 </el-checkbox>
               </el-form-item>
 
-              <div v-if="formStates[config.provider].validateStatus !== 'idle'" class="validate-result">
+              <div
+                v-if="formStates[config.provider].validateStatus !== 'idle'"
+                class="validate-result"
+              >
                 <el-icon
-                  :class="formStates[config.provider].validateStatus === 'success' ? 'success-icon' : 'error-icon'"
+                  :class="
+                    formStates[config.provider].validateStatus === 'success'
+                      ? 'success-icon'
+                      : 'error-icon'
+                  "
                 >
                   <CircleCheck v-if="formStates[config.provider].validateStatus === 'success'" />
                   <CircleClose v-else />
@@ -408,12 +405,7 @@ onMounted(fetchKeys);
       <h3 class="section-title">工具</h3>
       <p class="section-desc">按需配置搜索、重排序与向量库相关密钥</p>
       <el-row :gutter="20">
-        <el-col
-          v-for="config in toolProviders"
-          :key="config.provider"
-          :xs="24"
-          :lg="12"
-        >
+        <el-col v-for="config in toolProviders" :key="config.provider" :xs="24" :lg="12">
           <el-card shadow="never" class="provider-card">
             <div class="provider-header">
               <div>
@@ -437,7 +429,9 @@ onMounted(fetchKeys);
                   <el-button
                     text
                     :icon="formStates[config.provider].showKey ? Hide : View"
-                    @click="formStates[config.provider].showKey = !formStates[config.provider].showKey"
+                    @click="
+                      formStates[config.provider].showKey = !formStates[config.provider].showKey
+                    "
                   />
                 </div>
                 <p class="key-preview">当前：{{ keyPreview(config.provider) }}</p>
@@ -458,9 +452,16 @@ onMounted(fetchKeys);
                 </el-select>
               </el-form-item>
 
-              <div v-if="formStates[config.provider].validateStatus !== 'idle'" class="validate-result">
+              <div
+                v-if="formStates[config.provider].validateStatus !== 'idle'"
+                class="validate-result"
+              >
                 <el-icon
-                  :class="formStates[config.provider].validateStatus === 'success' ? 'success-icon' : 'error-icon'"
+                  :class="
+                    formStates[config.provider].validateStatus === 'success'
+                      ? 'success-icon'
+                      : 'error-icon'
+                  "
                 >
                   <CircleCheck v-if="formStates[config.provider].validateStatus === 'success'" />
                   <CircleClose v-else />

@@ -68,7 +68,6 @@ const edges = computed(() =>
     };
   }),
 );
-
 </script>
 
 <template>

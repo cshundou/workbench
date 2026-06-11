@@ -21,10 +21,7 @@ const submitLoading = ref(false);
 const canWrite = computed(() => userStore.hasPermission('agent:write'));
 
 async function loadData(): Promise<void> {
-  await Promise.all([
-    agentStore.fetchAgent(agentId.value),
-    agentStore.fetchAvailableTools(),
-  ]);
+  await Promise.all([agentStore.fetchAgent(agentId.value), agentStore.fetchAvailableTools()]);
 }
 
 async function handleSubmit(form: AgentFormData): Promise<void> {
@@ -89,9 +86,15 @@ onMounted(() => {
         <el-descriptions-item label="描述">
           {{ agentStore.currentAgent.description || '—' }}
         </el-descriptions-item>
-        <el-descriptions-item label="模型">{{ agentStore.currentAgent.model_name }}</el-descriptions-item>
-        <el-descriptions-item label="温度">{{ agentStore.currentAgent.temperature }}</el-descriptions-item>
-        <el-descriptions-item label="最大 Token">{{ agentStore.currentAgent.max_tokens }}</el-descriptions-item>
+        <el-descriptions-item label="模型">{{
+          agentStore.currentAgent.model_name
+        }}</el-descriptions-item>
+        <el-descriptions-item label="温度">{{
+          agentStore.currentAgent.temperature
+        }}</el-descriptions-item>
+        <el-descriptions-item label="最大 Token">{{
+          agentStore.currentAgent.max_tokens
+        }}</el-descriptions-item>
         <el-descriptions-item label="工具">
           <el-tag
             v-for="tool in agentStore.currentAgent.tools"
@@ -107,7 +110,10 @@ onMounted(() => {
           <pre class="prompt-preview">{{ agentStore.currentAgent.system_prompt }}</pre>
         </el-descriptions-item>
       </el-descriptions>
-      <el-empty v-else-if="!agentStore.isLoading && !agentStore.currentAgent" description="智能体不存在" />
+      <el-empty
+        v-else-if="!agentStore.isLoading && !agentStore.currentAgent"
+        description="智能体不存在"
+      />
     </el-card>
   </div>
 </template>

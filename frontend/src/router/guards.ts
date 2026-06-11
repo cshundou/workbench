@@ -95,7 +95,5 @@ export async function authGuard(
 export function shouldRedirectOn401(route: RouteLocationNormalized): boolean {
   const appConfig = useAppConfigStore();
   const level = resolveAccessLevel(route);
-  return (
-    appConfig.authMode === 'required' || level === 'auth' || level === 'permission'
-  );
+  return appConfig.authMode === 'required' || level === 'auth' || level === 'permission';
 }

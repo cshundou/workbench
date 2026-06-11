@@ -52,7 +52,12 @@ onMounted(() => {
     <SectionHeader title="审计日志" description="记录登录、CRUD 与关键业务操作" />
 
     <div class="filters">
-      <el-input v-model="queryParams.action" placeholder="操作类型" clearable style="width: 180px" />
+      <el-input
+        v-model="queryParams.action"
+        placeholder="操作类型"
+        clearable
+        style="width: 180px"
+      />
       <el-input
         v-model="queryParams.resource_type"
         placeholder="资源类型"
@@ -74,18 +79,8 @@ onMounted(() => {
       <el-table-column prop="created_at" label="时间" width="180" />
       <el-table-column label="结果" width="100">
         <template #default="{ row }">
-          <el-tag
-            v-if="row.detail?.success === true"
-            size="small"
-            type="success"
-          >
-            成功
-          </el-tag>
-          <el-tag
-            v-else-if="row.detail?.success === false"
-            size="small"
-            type="danger"
-          >
+          <el-tag v-if="row.detail?.success === true" size="small" type="success"> 成功 </el-tag>
+          <el-tag v-else-if="row.detail?.success === false" size="small" type="danger">
             失败
           </el-tag>
           <span v-else>-</span>

@@ -34,7 +34,7 @@ export function acquireStream<T>(options: FetchSSEStreamOptions<T>): {
   }
 
   const abortController = new AbortController();
-  let mergedSignal: AbortSignal = abortController.signal;
+  const mergedSignal: AbortSignal = abortController.signal;
   if (options.signal) {
     if (options.signal.aborted) {
       abortController.abort();

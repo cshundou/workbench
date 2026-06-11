@@ -22,17 +22,14 @@ const selectedLog = ref<NodeExecutionLog | null>(null);
 const interventionComment = ref('');
 
 const graphDefinition = computed(
-  () =>
-    graphStore.currentWorkflow?.graph_definition || { nodes: [], edges: [] },
+  () => graphStore.currentWorkflow?.graph_definition || { nodes: [], edges: [] },
 );
 
 const executionStatus = computed(() => graphStore.currentExecution?.status || 'idle');
 
 const isWaitingHuman = computed(() => executionStatus.value === 'interrupted');
 
-const canTerminate = computed(() =>
-  ['pending', 'running'].includes(executionStatus.value),
-);
+const canTerminate = computed(() => ['pending', 'running'].includes(executionStatus.value));
 
 const isTerminating = ref(false);
 
@@ -300,10 +297,18 @@ onUnmounted(() => {
   height: 10px;
   border-radius: 50%;
 
-  &.waiting { background: #86909c; }
-  &.running { background: #ff5a1f; }
-  &.completed { background: #00b42a; }
-  &.failed { background: #f53f3f; }
+  &.waiting {
+    background: #86909c;
+  }
+  &.running {
+    background: #ff5a1f;
+  }
+  &.completed {
+    background: #00b42a;
+  }
+  &.failed {
+    background: #f53f3f;
+  }
 }
 
 .control-card,

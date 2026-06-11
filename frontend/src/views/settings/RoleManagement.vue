@@ -39,7 +39,9 @@ const formRules: FormRules = {
     { required: true, message: '请输入角色名称', trigger: 'blur' },
     { min: 2, max: 50, message: '角色名称长度为 2-50 个字符', trigger: 'blur' },
   ],
-  permissions: [{ required: true, message: '请至少选择一个权限', trigger: 'change', type: 'array' }],
+  permissions: [
+    { required: true, message: '请至少选择一个权限', trigger: 'change', type: 'array' },
+  ],
 };
 
 const canWrite = computed(() => userStore.hasPermission('role:write'));
@@ -163,10 +165,7 @@ onMounted(() => {
 
 <template>
   <div class="role-management">
-    <SectionHeader
-      title="角色管理"
-      description="配置角色权限，控制用户访问范围"
-    >
+    <SectionHeader title="角色管理" description="配置角色权限，控制用户访问范围">
       <template #actions>
         <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
           新建角色
@@ -175,7 +174,6 @@ onMounted(() => {
     </SectionHeader>
 
     <el-card shadow="never">
-
       <div class="search-bar">
         <el-input
           v-model="queryParams.keyword"

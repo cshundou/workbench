@@ -94,7 +94,9 @@ export interface AgentChatRequest {
 const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 /** 获取智能体列表 */
-export function getAgents(params?: PageParams & { keyword?: string }): Promise<PageResult<AgentInfo>> {
+export function getAgents(
+  params?: PageParams & { keyword?: string },
+): Promise<PageResult<AgentInfo>> {
   return request.get('/agents', { params }) as Promise<PageResult<AgentInfo>>;
 }
 
@@ -149,7 +151,10 @@ export async function getAgentSessions(
   agentId: number,
 ): Promise<{ session_id: string; last_message: string; updated_at?: string }[]> {
   const { items } = await getAgentHistory(agentId, { limit: 200 });
-  const sessionMap = new Map<string, { session_id: string; last_message: string; updated_at?: string }>();
+  const sessionMap = new Map<
+    string,
+    { session_id: string; last_message: string; updated_at?: string }
+  >();
   for (const item of items) {
     const existing = sessionMap.get(item.session_id);
     if (!existing || (item.created_at && item.created_at > (existing.updated_at || ''))) {
@@ -160,8 +165,8 @@ export async function getAgentSessions(
       });
     }
   }
-  return Array.from(sessionMap.values()).sort(
-    (a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''),
+  return Array.from(sessionMap.values()).sort((a, b) =>
+    (b.updated_at || '').localeCompare(a.updated_at || ''),
   );
 }
 

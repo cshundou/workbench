@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 # PostgreSQL 数据库全量备份脚本（交付标准 8.3，保留 30 天）
+# 增量备份支持说明：
+# 1) 本脚本负责全量逻辑备份（pg_dump）。
+# 2) 增量备份建议通过 PostgreSQL WAL 归档实现，单独维护 incremental 脚本：
+#    - 开启 postgresql.conf: archive_mode=on
+#    - 配置 archive_command 将 WAL 持续归档到外部存储
+# 3) 推荐策略：每日全量 + 每小时 WAL 增量归档。
+#
+# Cron 示例（请替换为真实绝对路径）：
+#   0 2 * * * /path/to/ai-workbench/scripts/backup_db.sh >> /var/log/ai-workbench/db_backup.log 2>&1
+#   5 * * * * /path/to/ai-workbench/scripts/backup_db_incremental.sh >> /var/log/ai-workbench/db_backup_incremental.log 2>&1
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
