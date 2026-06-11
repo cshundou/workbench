@@ -28,15 +28,21 @@ const nodeTypes = [
   { type: 'execution', label: '执行 Agent' },
   { type: 'human', label: '人工介入' },
   { type: 'reviewer', label: '审核 Agent' },
+  { type: 'loop', label: '循环节点' },
 ];
 
 function addNode(type: string, label: string): void {
   const id = `${type}_${Date.now()}`;
+  const config =
+    type === 'loop'
+      ? { loop_condition: '满足退出条件', max_iterations: 10 }
+      : {};
   nodes.value.push({
     id,
     type,
     label,
     position: { x: 120 + nodes.value.length * 40, y: 120 + nodes.value.length * 30 },
+    config,
   });
 }
 
