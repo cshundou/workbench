@@ -18,6 +18,7 @@ from app.schemas.user_api_key import (
     UserApiKeyUpsert,
     UserApiKeyValidateResult,
 )
+from app.services.audit_service import audit_service
 from app.services.user_key_context import (
     ALL_PROVIDERS,
     LLM_PROVIDERS,
@@ -143,6 +144,21 @@ class UserApiKeyService:
             await self._clear_default_flags(db, user_id, provider)
 
         await db.flush()
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            action="api_key.upsert",
+            resource_type="user_api_key",
+            resource_id=record.id,
+            detail={
+                "provider": provider,
+                "is_default": data.is_default,
+                "is_valid": is_valid,
+                "success": True,
+                "result": "saved" if is_valid else "saved_invalid",
+            },
+        )
         logger.info("用户 API 密钥已保存 user_id=%s provider=%s", user_id, provider)
         return self._to_response(record)
 
@@ -189,8 +205,18 @@ class UserApiKeyService:
         if record is None:
             raise NotFoundError(message=f"未找到 {provider} 的 API 密钥")
 
+        record_id = record.id
         await db.delete(record)
         await db.flush()
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            action="api_key.delete",
+            resource_type="user_api_key",
+            resource_id=record_id,
+            detail={"provider": provider, "success": True, "result": "deleted"},
+        )
         logger.info("用户 API 密钥已删除 user_id=%s provider=%s", user_id, provider)
 
     async def validate_key(
@@ -246,6 +272,22 @@ class UserApiKeyService:
                 record.is_valid = is_valid
                 record.last_validated_at = datetime.now(timezone.utc)
                 await db.flush()
+
+        await audit_service.record_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            action="api_key.validate",
+            resource_type="user_api_key",
+            resource_id=None,
+            detail={
+                "provider": provider,
+                "is_valid": is_valid,
+                "success": is_valid,
+                "result": "valid" if is_valid else "invalid",
+                "message": message,
+            },
+        )
 
         return UserApiKeyValidateResult(
             provider=provider,

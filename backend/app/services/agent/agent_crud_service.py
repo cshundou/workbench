@@ -18,6 +18,7 @@ from app.schemas.agent import (
     AgentResponse,
     AgentUpdate,
 )
+from app.services.audit_service import audit_service
 
 logger = get_logger(__name__)
 
@@ -154,9 +155,37 @@ class AgentCrudService:
             await db.refresh(agent)
         except IntegrityError as exc:
             await db.rollback()
+            await audit_service.record_crud_action(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user.id,
+                action="agent.create",
+                resource_type="agent",
+                resource_id=None,
+                detail={
+                    "name": data.name,
+                    "success": False,
+                    "result": "名称冲突",
+                },
+            )
+            await db.commit()
             logger.warning("创建智能体失败，名称冲突: %s", exc)
             raise ConflictError(message="智能体名称已存在") from exc
 
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="agent.create",
+            resource_type="agent",
+            resource_id=agent.id,
+            detail={
+                "name": agent.name,
+                "is_public": agent.is_public,
+                "success": True,
+                "result": "created",
+            },
+        )
         logger.info("创建智能体成功 agent_id=%s user_id=%s", agent.id, user.id)
         return self._to_response(agent)
 
@@ -181,8 +210,31 @@ class AgentCrudService:
             await db.refresh(agent)
         except IntegrityError as exc:
             await db.rollback()
+            await audit_service.record_crud_action(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user.id,
+                action="agent.update",
+                resource_type="agent",
+                resource_id=agent_id,
+                detail={"success": False, "result": "名称冲突"},
+            )
+            await db.commit()
             raise ConflictError(message="智能体名称已存在") from exc
 
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="agent.update",
+            resource_type="agent",
+            resource_id=agent.id,
+            detail={
+                **data.model_dump(exclude_unset=True),
+                "success": True,
+                "result": "updated",
+            },
+        )
         logger.info("更新智能体成功 agent_id=%s", agent_id)
         return self._to_response(agent)
 
@@ -196,7 +248,18 @@ class AgentCrudService:
         """删除智能体。"""
         agent = await self._get_agent_or_raise(db, agent_id, tenant_id)
         await self._check_agent_access(agent, user, require_owner=True)
+        agent_name = agent.name
         await db.delete(agent)
+        await db.commit()
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="agent.delete",
+            resource_type="agent",
+            resource_id=agent_id,
+            detail={"name": agent_name, "success": True, "result": "deleted"},
+        )
         await db.commit()
         logger.info("删除智能体成功 agent_id=%s", agent_id)
 
@@ -241,6 +304,21 @@ class AgentCrudService:
         await db.commit()
         await db.refresh(new_agent)
 
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="agent.copy",
+            resource_type="agent",
+            resource_id=new_agent.id,
+            detail={
+                "source_id": agent_id,
+                "name": new_agent.name,
+                "success": True,
+                "result": "copied",
+            },
+        )
+        await db.commit()
         logger.info("复制智能体成功 source_id=%s new_id=%s", agent_id, new_agent.id)
         return self._to_response(new_agent)
 
