@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import type { AgentInfo, ToolDefinition } from '@/api/agent';
+import PromptEditor from '@/components/agent/PromptEditor.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -130,12 +131,7 @@ async function handleSubmit(): Promise<void> {
       </el-form-item>
 
       <el-form-item label="系统提示词" prop="system_prompt">
-        <el-input
-          v-model="form.system_prompt"
-          type="textarea"
-          :rows="6"
-          placeholder="定义智能体角色与行为准则"
-        />
+        <PromptEditor v-model="form.system_prompt" height="220px" />
       </el-form-item>
 
       <el-form-item label="模型">
@@ -194,7 +190,7 @@ async function handleSubmit(): Promise<void> {
     </el-form-item>
 
     <el-form-item label="系统提示词" prop="system_prompt">
-      <el-input v-model="form.system_prompt" type="textarea" :rows="8" />
+      <PromptEditor v-model="form.system_prompt" height="280px" />
     </el-form-item>
 
     <el-form-item label="模型">

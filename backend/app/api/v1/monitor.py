@@ -104,3 +104,13 @@ async def get_monitor_health() -> dict[str, Any]:
     """
     result = await monitor_service.get_system_health()
     return success_response(data=result)
+
+
+@router.get("/user-activity", summary="用户活跃度统计")
+async def get_user_activity(
+    _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """查询 DAU/WAU/MAU、活跃用户 Top10 与模块访问占比。"""
+    result = await monitor_service.get_user_activity(db)
+    return success_response(data=result)

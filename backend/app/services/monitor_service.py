@@ -25,6 +25,10 @@ API_ENDPOINT_PREFIX = "monitor:api:endpoint:"
 API_DAILY_PREFIX = "monitor:api:daily:"
 ERROR_LOG_KEY = "monitor:error_logs"
 ERROR_LOG_MAX_SIZE = 1000
+USER_ACTIVITY_DAILY_PREFIX = "monitor:user:daily:"
+USER_ACTIVITY_TOP_USERS_KEY = "monitor:user:top_users"
+USER_ACTIVITY_MODULE_USAGE_KEY = "monitor:user:module_usage"
+USER_ACTIVITY_TTL_SECONDS = 60 * 60 * 24 * 35
 
 
 class MonitorService:
@@ -36,6 +40,7 @@ class MonitorService:
         path: str,
         status_code: int,
         elapsed_ms: float,
+        user_id: Optional[int] = None,
     ) -> None:
         """
         记录一次 API 调用指标到 Redis。
@@ -65,9 +70,27 @@ class MonitorService:
                 pipe.hincrby(day_key, "error_count", 1)
             pipe.expire(day_key, 60 * 60 * 24 * 30)
 
+            if user_id is not None:
+                user_day_key = f"{USER_ACTIVITY_DAILY_PREFIX}{date.today().isoformat()}"
+                module_name = self._resolve_module_name(path)
+                pipe.pfadd(user_day_key, str(user_id))
+                pipe.expire(user_day_key, USER_ACTIVITY_TTL_SECONDS)
+                pipe.zincrby(USER_ACTIVITY_TOP_USERS_KEY, 1, str(user_id))
+                pipe.expire(USER_ACTIVITY_TOP_USERS_KEY, USER_ACTIVITY_TTL_SECONDS)
+                pipe.hincrby(USER_ACTIVITY_MODULE_USAGE_KEY, module_name, 1)
+                pipe.expire(USER_ACTIVITY_MODULE_USAGE_KEY, USER_ACTIVITY_TTL_SECONDS)
+
             await pipe.execute()
         except Exception as exc:
             logger.error("记录 API 统计失败: %s", exc)
+
+    @staticmethod
+    def _resolve_module_name(path: str) -> str:
+        """从 API 路径推断模块名。"""
+        clean_path = path.replace("/api/v1/", "", 1).strip("/")
+        if not clean_path:
+            return "unknown"
+        return clean_path.split("/", maxsplit=1)[0] or "unknown"
 
     async def record_error_log(
         self,
@@ -394,6 +417,82 @@ class MonitorService:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "components": components,
         }
+
+    async def get_user_activity(self, db: AsyncSession) -> dict[str, Any]:
+        """查询 DAU/WAU/MAU、活跃用户 Top10 与模块访问占比。"""
+        try:
+            redis = await get_redis()
+            today = date.today()
+            dau_keys = [f"{USER_ACTIVITY_DAILY_PREFIX}{today.isoformat()}"]
+            wau_keys = [
+                f"{USER_ACTIVITY_DAILY_PREFIX}{(today - timedelta(days=offset)).isoformat()}"
+                for offset in range(7)
+            ]
+            mau_keys = [
+                f"{USER_ACTIVITY_DAILY_PREFIX}{(today - timedelta(days=offset)).isoformat()}"
+                for offset in range(30)
+            ]
+
+            dau = int(await redis.pfcount(*dau_keys))
+            wau = int(await redis.pfcount(*wau_keys))
+            mau = int(await redis.pfcount(*mau_keys))
+
+            top_user_rows = await redis.zrevrange(
+                USER_ACTIVITY_TOP_USERS_KEY,
+                0,
+                9,
+                withscores=True,
+            )
+            user_ids = [int(row[0]) for row in top_user_rows if str(row[0]).isdigit()]
+            users_map: dict[int, str] = {}
+            if user_ids:
+                stmt = select(User.id, User.username).where(User.id.in_(user_ids))
+                users = (await db.execute(stmt)).all()
+                users_map = {int(item.id): item.username for item in users}
+
+            top_users = [
+                {
+                    "user_id": int(item[0]),
+                    "username": users_map.get(int(item[0]), f"用户{item[0]}"),
+                    "count": int(item[1]),
+                }
+                for item in top_user_rows
+                if str(item[0]).isdigit()
+            ]
+
+            module_raw = await redis.hgetall(USER_ACTIVITY_MODULE_USAGE_KEY)
+            total_module_count = sum(int(value) for value in module_raw.values())
+            module_usage = [
+                {
+                    "module": module,
+                    "count": int(count),
+                    "ratio": round(int(count) / total_module_count, 4)
+                    if total_module_count
+                    else 0.0,
+                }
+                for module, count in sorted(
+                    module_raw.items(),
+                    key=lambda item: int(item[1]),
+                    reverse=True,
+                )
+            ]
+
+            return {
+                "dau": dau,
+                "wau": wau,
+                "mau": mau,
+                "top_users": top_users,
+                "module_usage": module_usage,
+            }
+        except Exception as exc:
+            logger.error("查询用户活跃度失败: %s", exc)
+            return {
+                "dau": 0,
+                "wau": 0,
+                "mau": 0,
+                "top_users": [],
+                "module_usage": [],
+            }
 
 
 monitor_service = MonitorService()

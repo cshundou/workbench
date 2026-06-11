@@ -135,6 +135,32 @@ export function getAgentHistory(
   }>;
 }
 
+/** 删除会话历史 */
+export function deleteAgentSession(agentId: number, sessionId: string): Promise<void> {
+  return request.delete(`/agents/${agentId}/history/${sessionId}`) as Promise<void>;
+}
+
+/** 获取会话列表（从 history 聚合） */
+export async function getAgentSessions(
+  agentId: number,
+): Promise<{ session_id: string; last_message: string; updated_at?: string }[]> {
+  const { items } = await getAgentHistory(agentId, { limit: 200 });
+  const sessionMap = new Map<string, { session_id: string; last_message: string; updated_at?: string }>();
+  for (const item of items) {
+    const existing = sessionMap.get(item.session_id);
+    if (!existing || (item.created_at && item.created_at > (existing.updated_at || ''))) {
+      sessionMap.set(item.session_id, {
+        session_id: item.session_id,
+        last_message: item.content.slice(0, 80),
+        updated_at: item.created_at,
+      });
+    }
+  }
+  return Array.from(sessionMap.values()).sort(
+    (a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''),
+  );
+}
+
 /** POST 流式对话（fetch + ReadableStream） */
 export async function chatAgentStream(
   agentId: number,

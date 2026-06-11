@@ -7,8 +7,6 @@ from typing import Any, Optional
 from langchain.retrievers import EnsembleRetriever
 from langchain.schema import Document
 from langchain_community.retrievers import BM25Retriever
-from langchain_community.vectorstores import Chroma
-
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -17,7 +15,7 @@ logger = get_logger(__name__)
 class HybridRetriever:
     """混合检索器，融合向量检索与 BM25 检索。"""
 
-    def __init__(self, vector_store: Chroma) -> None:
+    def __init__(self, vector_store: Any) -> None:
         self.vector_store = vector_store
         self.vector_retriever = vector_store.as_retriever(search_kwargs={"k": 10})
         self.bm25_retriever: Optional[BM25Retriever] = None

@@ -30,6 +30,7 @@ from app.schemas.knowledge_base import (
 )
 from app.services.rag.document_loader import DocumentLoader
 from app.services.rag.rag_service import rag_service
+from app.services.audit_service import audit_service
 
 logger = get_logger(__name__)
 
@@ -37,7 +38,7 @@ DOCUMENT_STATUS_PENDING = 0
 DOCUMENT_STATUS_DONE = 1
 DOCUMENT_STATUS_FAILED = 2
 
-ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".docx", ".xlsx", ".html"}
+ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".docx", ".xlsx", ".html", ".ppt", ".pptx"}
 
 
 class KnowledgeBaseService:
@@ -97,7 +98,11 @@ class KnowledgeBaseService:
             updated_at=kb.updated_at,
         )
 
-    def _to_document_response(self, document: Document) -> DocumentResponse:
+    def _to_document_response(
+        self,
+        document: Document,
+        parse_task_id: Optional[str] = None,
+    ) -> DocumentResponse:
         """文档 ORM 转响应模式。"""
         return DocumentResponse(
             id=document.id,
@@ -109,6 +114,7 @@ class KnowledgeBaseService:
             uploader_id=document.uploader_id,
             status=document.status,
             total_chunks=document.total_chunks,
+            parse_task_id=parse_task_id,
             created_at=document.created_at,
             updated_at=document.updated_at,
         )
@@ -182,6 +188,15 @@ class KnowledgeBaseService:
             logger.warning("知识库名称冲突 tenant_id=%s name=%s", tenant_id, data.name)
             raise ConflictError(message="知识库名称已存在") from exc
 
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="knowledge_base.create",
+            resource_type="knowledge_base",
+            resource_id=kb.id,
+            detail={"name": kb.name, "is_public": kb.is_public},
+        )
         logger.info("创建知识库 id=%s name=%s", kb.id, kb.name)
         return self._to_kb_response(kb, 0)
 
@@ -224,6 +239,15 @@ class KnowledgeBaseService:
         except IntegrityError as exc:
             raise ConflictError(message="知识库名称已存在") from exc
 
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="knowledge_base.update",
+            resource_type="knowledge_base",
+            resource_id=kb.id,
+            detail=update_data,
+        )
         doc_count = (
             await db.execute(
                 select(func.count()).select_from(Document).where(Document.kb_id == kb_id)
@@ -257,6 +281,15 @@ class KnowledgeBaseService:
             shutil.rmtree(upload_dir, ignore_errors=True)
 
         await db.delete(kb)
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="knowledge_base.delete",
+            resource_type="knowledge_base",
+            resource_id=kb_id,
+            detail={"name": kb.name},
+        )
         logger.info("删除知识库 id=%s", kb_id)
 
     async def list_documents(
@@ -361,11 +394,25 @@ class KnowledgeBaseService:
         await db.flush()
 
         await rag_service.set_parse_progress(document.id, 0, "等待解析", status="pending")
-        rag_service.schedule_parse_document(
+        parse_task_id = await rag_service.schedule_parse_document(
             document.id,
             user.id,
             tenant_id,
             tags=tag_list,
+        )
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="document.create",
+            resource_type="document",
+            resource_id=document.id,
+            detail={
+                "kb_id": kb_id,
+                "name": document.name,
+                "file_type": document.file_type,
+                "task_id": parse_task_id,
+            },
         )
 
         logger.info(
@@ -374,7 +421,7 @@ class KnowledgeBaseService:
             kb_id,
             file.filename,
         )
-        return self._to_document_response(document)
+        return self._to_document_response(document, parse_task_id=parse_task_id)
 
     async def get_document(
         self,
@@ -448,6 +495,15 @@ class KnowledgeBaseService:
 
         await rag_service.clear_parse_progress(doc_id)
         await db.delete(document)
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="document.delete",
+            resource_type="document",
+            resource_id=doc_id,
+            detail={"kb_id": kb_id, "name": document.name},
+        )
         logger.info("删除文档 document_id=%s kb_id=%s", doc_id, kb_id)
 
     async def get_parse_progress(

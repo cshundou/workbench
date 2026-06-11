@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from docx import Document as DocxDocument
 from unstructured.cleaners.core import clean_extra_whitespace
 from unstructured.partition.auto import partition
+from unstructured.partition.pptx import partition_pptx
 
 from app.core.logging import get_logger
 
@@ -26,6 +27,8 @@ class DocumentLoader:
             ".docx": self.load_docx,
             ".xlsx": self.load_excel,
             ".html": self.load_html,
+            ".ppt": self.load_pptx,
+            ".pptx": self.load_pptx,
         }
 
     def load_document(self, file_path: str, file_type: str) -> str:
@@ -88,6 +91,13 @@ class DocumentLoader:
         with open(file_path, "r", encoding="utf-8") as file:
             soup = BeautifulSoup(file.read(), "html.parser")
         return soup.get_text()
+
+    def load_pptx(self, file_path: str) -> str:
+        """加载 PPT/PPTX 文档。"""
+        elements = partition_pptx(filename=file_path)
+        return "\n\n".join(
+            [str(element) for element in elements if len(str(element).strip()) > 0]
+        )
 
     def get_supported_extensions(self) -> list[str]:
         """返回支持的文件扩展名列表。"""

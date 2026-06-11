@@ -74,6 +74,7 @@ class DocumentResponse(BaseModel):
     uploader_id: Optional[int] = None
     status: int
     total_chunks: int
+    parse_task_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -107,6 +108,7 @@ class SearchRequest(BaseModel):
 
     query: str = Field(..., min_length=1, description="检索问题")
     top_k: int = Field(default=5, ge=1, le=20, description="返回结果数量")
+    use_rag: bool = Field(default=True, description="是否启用知识库增强检索")
     filters: Optional[dict[str, Any]] = Field(
         default=None,
         description="过滤条件：department、file_type、document_id、tags",
@@ -134,6 +136,7 @@ class ChatRequest(BaseModel):
 
     query: str = Field(..., min_length=1, description="用户问题")
     top_k: int = Field(default=5, ge=1, le=20, description="检索数量")
+    use_rag: bool = Field(default=True, description="是否启用知识库增强检索")
     filters: Optional[dict[str, Any]] = Field(default=None, description="过滤条件")
 
 

@@ -37,13 +37,13 @@ async def list_users(
 
 @router.post("", summary="创建用户")
 async def create_user(
-    _: Annotated[CurrentUser, Depends(require_permission(USER_WRITE))],
+    current_user: Annotated[CurrentUser, Depends(require_permission(USER_WRITE))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     user_data: UserCreate,
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
     """在当前租户下创建新用户。"""
-    result = await user_service.create_user(db, tenant_id, user_data)
+    result = await user_service.create_user(db, tenant_id, user_data, current_user.id)
     return success_response(data=result.model_dump(), message="创建成功")
 
 
@@ -65,12 +65,14 @@ async def get_user(
 async def update_user(
     user_id: int,
     user_data: UserUpdate,
-    _: Annotated[CurrentUser, Depends(require_permission(USER_WRITE))],
+    current_user: Annotated[CurrentUser, Depends(require_permission(USER_WRITE))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
     """更新指定用户信息。"""
-    result = await user_service.update_user(db, user_id, tenant_id, user_data)
+    result = await user_service.update_user(
+        db, user_id, tenant_id, user_data, current_user.id
+    )
     return success_response(data=result.model_dump(), message="更新成功")
 
 

@@ -189,3 +189,23 @@ async def get_agent_history(
             "total": len(items),
         }
     )
+
+
+@router.delete("/{agent_id}/history/{session_id}", summary="删除对话会话")
+async def delete_agent_history_session(
+    agent_id: int,
+    session_id: str,
+    current_user: Annotated[CurrentUser, Depends(require_permission(AGENT_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """删除指定 Agent 会话的全部历史消息。"""
+    await agent_crud_service.get_agent(db, agent_id, tenant_id, current_user)
+    deleted_count = await agent_service.delete_chat_session(
+        db=db,
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        agent_id=agent_id,
+        session_id=session_id,
+    )
+    return success_response(data={"deleted": deleted_count}, message="删除成功")

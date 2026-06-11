@@ -15,6 +15,7 @@ from app.core.permissions import parse_permissions
 from app.core.security import create_access_token, verify_password
 from app.models.user import User
 from app.schemas.auth import LoginRequest, LoginResponse, RoleBrief, UserMeInfo, UserMeResponse
+from app.services.audit_service import audit_service
 
 logger = get_logger(__name__)
 
@@ -26,6 +27,7 @@ class AuthService:
         self,
         db: AsyncSession,
         login_data: LoginRequest,
+        ip_address: str | None = None,
     ) -> LoginResponse:
         """
         用户登录认证，校验用户名密码并签发 JWT。
@@ -58,6 +60,13 @@ class AuthService:
 
         user.last_login_at = datetime.now(timezone.utc)
         await db.flush()
+        await audit_service.record_login_action(
+            db=db,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            ip_address=ip_address,
+            detail={"username": user.username},
+        )
 
         expires_seconds = settings.jwt_access_token_expire_minutes * 60
         token = create_access_token(

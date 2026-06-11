@@ -5,6 +5,7 @@ FastAPI 应用入口。
 """
 
 from contextlib import asynccontextmanager
+import os
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
@@ -26,6 +27,7 @@ from app.core.middleware import (
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.redis import close_redis
 from app.core.response import error_response
+from app.core.task_queue import close_task_queue
 
 # 初始化日志
 setup_logging()
@@ -40,6 +42,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     启动时初始化数据库连接，关闭时释放资源。
     """
     logger.info("应用启动: %s [%s]", settings.app_name, settings.app_env)
+    if settings.langchain_tracing_v2:
+        if settings.langchain_api_key:
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGCHAIN_API_KEY"] = settings.langchain_api_key
+            logger.info("LangSmith 链路追踪已启用")
+        else:
+            logger.warning("LANGCHAIN_TRACING_V2=true 但未配置 LANGCHAIN_API_KEY，已跳过追踪")
     try:
         await init_db()
     except Exception as exc:
@@ -57,6 +66,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await close_redis()
     except Exception as exc:
         logger.error("关闭 Redis 连接失败: %s", exc)
+    try:
+        await close_task_queue()
+    except Exception as exc:
+        logger.error("关闭 ARQ 队列连接失败: %s", exc)
     try:
         await close_db()
     except Exception as exc:

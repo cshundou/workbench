@@ -1,9 +1,10 @@
 """
-RAG 编排服务：串联 7 层架构，管理 Chroma 向量库与增量更新。
+RAG 编排服务：串联 7 层架构，管理向量库与增量更新。
 """
 
 import asyncio
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +12,6 @@ from typing import Any, Optional
 
 from langchain.schema import Document
 from langchain_community.embeddings import OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.core.redis import get_redis
+from app.core.task_queue import enqueue_task
 from app.models.document import Document as DocumentModel
 from app.models.document_chunk import DocumentChunk
 from app.models.knowledge_base import KnowledgeBase
@@ -30,7 +31,13 @@ from app.services.rag.context_builder import ContextBuilder
 from app.services.rag.document_loader import DocumentLoader
 from app.services.rag.reranker import Reranker
 from app.services.rag.retriever import HybridRetriever
-from app.services.user_key_context import UserKeyContext, create_embeddings, user_key_resolver
+from app.services.rag.vector_store import VectorStoreBackend, create_vector_store_backend
+from app.services.user_key_context import (
+    UserKeyContext,
+    create_chat_llm,
+    create_embeddings,
+    user_key_resolver,
+)
 from app.services.token_usage_service import token_usage_service
 
 logger = get_logger(__name__)
@@ -38,6 +45,9 @@ logger = get_logger(__name__)
 # 文档解析进度 Redis 键前缀与 TTL（秒）
 PARSE_PROGRESS_KEY_PREFIX = "parse_progress:"
 PARSE_PROGRESS_TTL_SECONDS = 86400
+KB_SEARCH_STATS_KEY_PREFIX = "kb_search_stats:"
+KB_SEARCH_DOC_HITS_KEY_PREFIX = "kb_search_doc_hits:"
+KB_SEARCH_STATS_TTL_SECONDS = 60 * 60 * 24 * 30
 
 
 class RAGService:
@@ -45,7 +55,7 @@ class RAGService:
 
     def __init__(self) -> None:
         self.document_loader = DocumentLoader()
-        self._vector_stores: dict[int, Chroma] = {}
+        self._vector_stores: dict[int, VectorStoreBackend] = {}
         self._retrievers: dict[int, HybridRetriever] = {}
         self._embeddings_cache: dict[str, OpenAIEmbeddings] = {}
         Path(settings.chroma_persist_dir).mkdir(parents=True, exist_ok=True)
@@ -70,23 +80,23 @@ class RAGService:
         kb_id: int,
         embedding_model: str,
         user_ctx: UserKeyContext,
-    ) -> Chroma:
+    ) -> VectorStoreBackend:
         """
-        获取或创建知识库对应的 Chroma 向量存储。
+        获取或创建知识库对应的向量存储后端。
 
         Args:
             kb_id: 知识库 ID。
             embedding_model: 嵌入模型名称。
 
         Returns:
-            Chroma 向量存储实例。
+            向量存储后端实例。
         """
         if kb_id not in self._vector_stores:
             embeddings = self._get_embeddings(user_ctx, embedding_model)
-            self._vector_stores[kb_id] = Chroma(
-                collection_name=self._collection_name(kb_id),
-                embedding_function=embeddings,
-                persist_directory=settings.chroma_persist_dir,
+            self._vector_stores[kb_id] = create_vector_store_backend(
+                kb_id=kb_id,
+                embeddings=embeddings,
+                user_ctx=user_ctx,
             )
         return self._vector_stores[kb_id]
 
@@ -194,6 +204,172 @@ class RAGService:
                 document_id,
                 exc,
             )
+
+    @staticmethod
+    def _search_stats_key(kb_id: int) -> str:
+        """生成知识库检索统计 Redis 键。"""
+        return f"{KB_SEARCH_STATS_KEY_PREFIX}{kb_id}"
+
+    @staticmethod
+    def _search_doc_hits_key(kb_id: int) -> str:
+        """生成知识库文档命中统计 Redis 键。"""
+        return f"{KB_SEARCH_DOC_HITS_KEY_PREFIX}{kb_id}"
+
+    async def _record_search_metrics(
+        self,
+        kb_id: int,
+        latency_ms: float,
+        result_count: int,
+        document_ids: list[int],
+    ) -> None:
+        """记录检索调用次数、命中率与文档命中分布。"""
+        try:
+            redis = await get_redis()
+            stats_key = self._search_stats_key(kb_id)
+            doc_hits_key = self._search_doc_hits_key(kb_id)
+            pipe = redis.pipeline()
+            pipe.hincrby(stats_key, "total_queries", 1)
+            pipe.hincrbyfloat(stats_key, "total_latency_ms", latency_ms)
+            if result_count > 0:
+                pipe.hincrby(stats_key, "hit_queries", 1)
+            for document_id in document_ids:
+                pipe.hincrby(doc_hits_key, str(document_id), 1)
+            pipe.expire(stats_key, KB_SEARCH_STATS_TTL_SECONDS)
+            pipe.expire(doc_hits_key, KB_SEARCH_STATS_TTL_SECONDS)
+            await pipe.execute()
+        except Exception as exc:
+            logger.error("记录检索统计失败 kb_id=%s: %s", kb_id, exc)
+
+    async def get_search_stats(self, kb_id: int) -> dict[str, Any]:
+        """读取知识库检索统计数据。"""
+        try:
+            redis = await get_redis()
+            raw = await redis.hgetall(self._search_stats_key(kb_id))
+            doc_hits_raw = await redis.hgetall(self._search_doc_hits_key(kb_id))
+        except Exception as exc:
+            logger.error("读取检索统计失败 kb_id=%s: %s", kb_id, exc)
+            raw = {}
+            doc_hits_raw = {}
+
+        total_queries = int(raw.get("total_queries", 0) or 0)
+        hit_queries = int(raw.get("hit_queries", 0) or 0)
+        total_latency_ms = float(raw.get("total_latency_ms", 0.0) or 0.0)
+        avg_latency_ms = round(total_latency_ms / total_queries, 2) if total_queries else 0.0
+        hit_rate = round(hit_queries / total_queries, 4) if total_queries else 0.0
+
+        top_documents = sorted(
+            (
+                {"document_id": int(doc_id), "hit_count": int(hit_count)}
+                for doc_id, hit_count in doc_hits_raw.items()
+                if str(doc_id).isdigit()
+            ),
+            key=lambda item: item["hit_count"],
+            reverse=True,
+        )[:10]
+
+        return {
+            "kb_id": kb_id,
+            "total_queries": total_queries,
+            "hit_queries": hit_queries,
+            "hit_rate": hit_rate,
+            "avg_latency_ms": avg_latency_ms,
+            "top_documents": top_documents,
+        }
+
+    async def get_optimization_hints(
+        self,
+        db: AsyncSession,
+        kb_id: int,
+    ) -> dict[str, Any]:
+        """根据检索统计与分块参数输出优化建议。"""
+        kb = await self._get_knowledge_base(db, kb_id)
+        stats = await self.get_search_stats(kb_id)
+
+        doc_stmt = select(DocumentModel.id).where(
+            DocumentModel.kb_id == kb_id,
+            DocumentModel.status == 1,
+        )
+        doc_ids = [item[0] for item in (await db.execute(doc_stmt)).all()]
+        hit_docs: set[int] = set()
+        try:
+            redis = await get_redis()
+            hit_docs = {
+                int(doc_id)
+                for doc_id in (await redis.hkeys(self._search_doc_hits_key(kb_id)))
+                if str(doc_id).isdigit()
+            }
+        except Exception as exc:
+            logger.error("读取文档命中分布失败 kb_id=%s: %s", kb_id, exc)
+        never_hit_count = len([doc_id for doc_id in doc_ids if doc_id not in hit_docs])
+
+        hints: list[dict[str, str]] = []
+        if kb.chunk_size > 2000:
+            hints.append(
+                {
+                    "level": "warning",
+                    "type": "chunk_size",
+                    "message": "当前 chunk_size 偏大，建议下调到 600~1500 以提升召回精度。",
+                }
+            )
+        elif kb.chunk_size < 300:
+            hints.append(
+                {
+                    "level": "warning",
+                    "type": "chunk_size",
+                    "message": "当前 chunk_size 偏小，建议提高到 500+ 以减少语义割裂。",
+                }
+            )
+
+        if kb.chunk_overlap < 50:
+            hints.append(
+                {
+                    "level": "info",
+                    "type": "chunk_overlap",
+                    "message": "chunk_overlap 偏低，建议设置为 80~200 以增强上下文连续性。",
+                }
+            )
+
+        if stats["total_queries"] >= 10 and stats["hit_rate"] < 0.3:
+            hints.append(
+                {
+                    "level": "warning",
+                    "type": "hit_rate",
+                    "message": "检索命中率偏低，建议检查文档质量、标签与过滤条件设置。",
+                }
+            )
+
+        if doc_ids and never_hit_count > max(3, len(doc_ids) // 2):
+            hints.append(
+                {
+                    "level": "info",
+                    "type": "low_hit_documents",
+                    "message": "较多文档长期未命中，建议重建分块或清理低价值文档。",
+                }
+            )
+
+        if not hints:
+            hints.append(
+                {
+                    "level": "success",
+                    "type": "healthy",
+                    "message": "当前检索配置较为稳定，暂无明显优化项。",
+                }
+            )
+
+        return {
+            "kb_id": kb_id,
+            "stats": stats,
+            "hints": hints,
+            "config": {
+                "chunk_size": kb.chunk_size,
+                "chunk_overlap": kb.chunk_overlap,
+                "embedding_model": kb.embedding_model,
+            },
+            "document_summary": {
+                "total_documents": len(doc_ids),
+                "never_hit_documents": never_hit_count,
+            },
+        }
 
     def _build_chunk_metadata(
         self,
@@ -413,6 +589,97 @@ class RAGService:
 
         return chroma_filter or None
 
+    async def _retrieve_reranked_docs(
+        self,
+        db: AsyncSession,
+        kb_id: int,
+        query: str,
+        user_ctx: UserKeyContext,
+        top_k: int,
+        filters: Optional[dict[str, Any]],
+    ) -> list[Document]:
+        """执行检索、重排并记录检索统计。"""
+        user_ctx.get_embedding_provider()
+        kb = await self._get_knowledge_base(db, kb_id)
+        hybrid_retriever = await self._get_hybrid_retriever(db, kb, user_ctx)
+        chroma_filters = self._build_chroma_filters(filters)
+
+        started = time.perf_counter()
+        retrieved = hybrid_retriever.retrieve(query, filters=chroma_filters, top_k=top_k * 2)
+        doc_dicts = [
+            {"page_content": doc.page_content, "metadata": doc.metadata}
+            for doc in retrieved
+        ]
+
+        cohere_key = user_ctx.get_provider("cohere")
+        reranker = Reranker(
+            hybrid_retriever.vector_retriever,
+            cohere_api_key=cohere_key.api_key if cohere_key else None,
+        )
+        final_docs = reranker.rerank(query, doc_dicts)[:top_k]
+        latency_ms = (time.perf_counter() - started) * 1000
+
+        doc_ids: list[int] = []
+        for doc in final_docs:
+            document_id = doc.metadata.get("document_id")
+            if isinstance(document_id, int):
+                doc_ids.append(document_id)
+            elif isinstance(document_id, str) and document_id.isdigit():
+                doc_ids.append(int(document_id))
+
+        await self._record_search_metrics(
+            kb_id=kb_id,
+            latency_ms=latency_ms,
+            result_count=len(final_docs),
+            document_ids=sorted(set(doc_ids)),
+        )
+        return final_docs
+
+    async def _answer_without_rag(
+        self,
+        db: AsyncSession,
+        query: str,
+        user_ctx: UserKeyContext,
+        tenant_id: Optional[int],
+        user_id: Optional[int],
+    ) -> dict[str, Any]:
+        """纯 LLM 问答（跳过知识库检索）。"""
+        llm = create_chat_llm(user_ctx, temperature=0)
+        response = await llm.ainvoke(query)
+
+        if tenant_id is not None:
+            await token_usage_service.record_from_langchain_response(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                model_name=getattr(llm, "model_name", "unknown"),
+                response=response,
+            )
+
+        content = response.content if hasattr(response, "content") else str(response)
+        return {"answer": str(content), "sources": []}
+
+    async def _answer_stream_without_rag(
+        self,
+        db: AsyncSession,
+        query: str,
+        user_ctx: UserKeyContext,
+        tenant_id: Optional[int],
+        user_id: Optional[int],
+    ):
+        """纯 LLM 流式问答（跳过知识库检索）。"""
+        llm = create_chat_llm(user_ctx, temperature=0)
+        try:
+            async for chunk in llm.astream(query):
+                content = chunk.content if hasattr(chunk, "content") else str(chunk)
+                if content:
+                    yield {"type": "token", "content": content}
+            yield {"type": "sources", "sources": []}
+            yield {"type": "done"}
+        except Exception as exc:
+            logger.error("纯 LLM 流式问答失败: %s", exc)
+            yield {"type": "error", "message": str(exc)}
+
     async def retrieve(
         self,
         db: AsyncSession,
@@ -425,25 +692,14 @@ class RAGService:
         """
         执行完整检索流水线：混合检索 -> 重排序。
         """
-        user_ctx.get_embedding_provider()
-        kb = await self._get_knowledge_base(db, kb_id)
-        hybrid_retriever = await self._get_hybrid_retriever(db, kb, user_ctx)
-        chroma_filters = self._build_chroma_filters(filters)
-
-        retrieved = hybrid_retriever.retrieve(query, filters=chroma_filters, top_k=top_k * 2)
-
-        doc_dicts = [
-            {"page_content": doc.page_content, "metadata": doc.metadata}
-            for doc in retrieved
-        ]
-
-        cohere_key = user_ctx.get_provider("cohere")
-        reranker = Reranker(
-            hybrid_retriever.vector_retriever,
-            cohere_api_key=cohere_key.api_key if cohere_key else None,
+        final_docs = await self._retrieve_reranked_docs(
+            db=db,
+            kb_id=kb_id,
+            query=query,
+            user_ctx=user_ctx,
+            top_k=top_k,
+            filters=filters,
         )
-        reranked = reranker.rerank(query, doc_dicts)
-        final_docs = reranked[:top_k]
 
         return [
             {
@@ -464,27 +720,22 @@ class RAGService:
         filters: Optional[dict[str, Any]] = None,
         tenant_id: Optional[int] = None,
         user_id: Optional[int] = None,
+        use_rag: bool = True,
     ) -> dict[str, Any]:
         """完整 RAG 问答：检索 -> 上下文构建 -> 生成回答。"""
         user_ctx.get_llm_provider()
-        kb = await self._get_knowledge_base(db, kb_id)
-        hybrid_retriever = await self._get_hybrid_retriever(db, kb, user_ctx)
-        chroma_filters = self._build_chroma_filters(filters)
+        if not use_rag:
+            return await self._answer_without_rag(db, query, user_ctx, tenant_id, user_id)
 
-        retrieved = hybrid_retriever.retrieve(query, filters=chroma_filters, top_k=top_k * 2)
-        doc_dicts = [
-            {"page_content": doc.page_content, "metadata": doc.metadata}
-            for doc in retrieved
-        ]
-        cohere_key = user_ctx.get_provider("cohere")
-        reranker = Reranker(
-            hybrid_retriever.vector_retriever,
-            cohere_api_key=cohere_key.api_key if cohere_key else None,
+        reranked = await self._retrieve_reranked_docs(
+            db=db,
+            kb_id=kb_id,
+            query=query,
+            user_ctx=user_ctx,
+            top_k=top_k,
+            filters=filters,
         )
-        reranked = reranker.rerank(query, doc_dicts)[:top_k]
-
-        context_builder = ContextBuilder(db)
-        context, sources = await context_builder.build_context(reranked)
+        context, sources = await ContextBuilder(db).build_context(reranked)
 
         generator = AnswerGenerator(user_ctx)
         result = generator.generate_answer(query, context, sources)
@@ -513,27 +764,30 @@ class RAGService:
         filters: Optional[dict[str, Any]] = None,
         tenant_id: Optional[int] = None,
         user_id: Optional[int] = None,
+        use_rag: bool = True,
     ):
         """流式 RAG 问答生成器。"""
         user_ctx.get_llm_provider()
-        kb = await self._get_knowledge_base(db, kb_id)
-        hybrid_retriever = await self._get_hybrid_retriever(db, kb, user_ctx)
-        chroma_filters = self._build_chroma_filters(filters)
+        if not use_rag:
+            async for event in self._answer_stream_without_rag(
+                db=db,
+                query=query,
+                user_ctx=user_ctx,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            ):
+                yield event
+            return
 
-        retrieved = hybrid_retriever.retrieve(query, filters=chroma_filters, top_k=top_k * 2)
-        doc_dicts = [
-            {"page_content": doc.page_content, "metadata": doc.metadata}
-            for doc in retrieved
-        ]
-        cohere_key = user_ctx.get_provider("cohere")
-        reranker = Reranker(
-            hybrid_retriever.vector_retriever,
-            cohere_api_key=cohere_key.api_key if cohere_key else None,
+        reranked = await self._retrieve_reranked_docs(
+            db=db,
+            kb_id=kb_id,
+            query=query,
+            user_ctx=user_ctx,
+            top_k=top_k,
+            filters=filters,
         )
-        reranked = reranker.rerank(query, doc_dicts)[:top_k]
-
-        context_builder = ContextBuilder(db)
-        context, sources = await context_builder.build_context(reranked)
+        context, sources = await ContextBuilder(db).build_context(reranked)
 
         generator = AnswerGenerator(user_ctx)
         async for event in generator.generate_answer_stream(query, context, sources):
@@ -594,18 +848,23 @@ class RAGService:
 
         logger.error("后台解析任务超时，文档记录未找到 document_id=%s", document_id)
 
-    def schedule_parse_document(
+    async def schedule_parse_document(
         self,
         document_id: int,
         user_id: int,
         tenant_id: int,
         tags: Optional[list[str]] = None,
-    ) -> None:
+    ) -> str:
         """调度文档解析后台任务。"""
-        asyncio.create_task(
-            self.run_parse_document_task(document_id, user_id, tenant_id, tags=tags)
+        task_id = await enqueue_task(
+            "parse_document_task",
+            document_id,
+            user_id,
+            tenant_id,
+            tags=tags,
         )
-        logger.info("已调度文档解析任务 document_id=%s", document_id)
+        logger.info("已调度文档解析任务 document_id=%s task_id=%s", document_id, task_id)
+        return task_id
 
 
 rag_service = RAGService()

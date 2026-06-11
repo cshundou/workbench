@@ -2,6 +2,7 @@
 
 from app.core.database import Base
 from app.models.agent import Agent
+from app.models.audit_log import AuditLog
 from app.models.chat_history import ChatHistory
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
@@ -16,6 +17,7 @@ from app.models.workflow_execution import WorkflowExecution
 
 __all__ = [
     "Base",
+    "AuditLog",
     "Tenant",
     "Role",
     "User",

@@ -127,3 +127,16 @@ export function getErrorLogs(params?: {
 export function getMonitorHealth(): Promise<SystemHealth> {
   return request.get('/monitor/health');
 }
+
+export interface UserActivityStats {
+  dau: number;
+  wau: number;
+  mau: number;
+  top_users: { user_id: number; username: string; count: number }[];
+  module_usage: { module: string; count: number; ratio: number }[];
+}
+
+/** 用户活跃度统计 */
+export function getUserActivity(): Promise<UserActivityStats> {
+  return request.get('/monitor/user-activity');
+}

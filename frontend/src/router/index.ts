@@ -105,6 +105,18 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/workflows/Execute.vue'),
             meta: { title: '执行工作流' },
           },
+          {
+            path: ':id/edit',
+            name: 'WorkflowEdit',
+            component: () => import('@/views/workflows/Edit.vue'),
+            meta: { title: '编辑工作流', permission: 'workflow:write' },
+          },
+          {
+            path: ':id/history',
+            name: 'WorkflowHistory',
+            component: () => import('@/views/workflows/History.vue'),
+            meta: { title: '执行历史' },
+          },
         ],
       },
       {
@@ -146,6 +158,18 @@ const routes: RouteRecordRaw[] = [
             name: 'ApiKeys',
             component: () => import('@/views/settings/ApiKeys.vue'),
             meta: { title: 'API 密钥管理' },
+          },
+          {
+            path: 'tenants',
+            name: 'TenantManagement',
+            component: () => import('@/views/settings/TenantManagement.vue'),
+            meta: { title: '租户管理', permission: 'tenant:read' },
+          },
+          {
+            path: 'audit-logs',
+            name: 'AuditLogs',
+            component: () => import('@/views/settings/AuditLogs.vue'),
+            meta: { title: '审计日志', permission: 'audit:read' },
           },
         ],
       },

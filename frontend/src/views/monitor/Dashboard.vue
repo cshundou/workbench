@@ -8,10 +8,12 @@ import {
   getErrorLogs,
   getMonitorHealth,
   getTokenUsage,
+  getUserActivity,
   type ApiStats,
   type ErrorLogItem,
   type SystemHealth,
   type TokenUsageStats,
+  type UserActivityStats,
 } from '@/api/monitor';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
 import BentoCard from '@/components/layout/BentoCard.vue';
@@ -24,6 +26,7 @@ const tokenStats = ref<TokenUsageStats | null>(null);
 const apiStats = ref<ApiStats | null>(null);
 const errorLogs = ref<ErrorLogItem[]>([]);
 const health = ref<SystemHealth | null>(null);
+const userActivity = ref<UserActivityStats | null>(null);
 
 const tokenChartRef = ref<HTMLDivElement | null>(null);
 const modelChartRef = ref<HTMLDivElement | null>(null);
@@ -226,16 +229,18 @@ async function loadModelBreakdown(): Promise<void> {
 async function fetchDashboardData(): Promise<void> {
   loading.value = true;
   try {
-    const [tokenData, apiData, errorData, healthData] = await Promise.all([
+    const [tokenData, apiData, errorData, healthData, activityData] = await Promise.all([
       getTokenUsage({ group_by: tokenGroupBy.value }),
       getApiStats(statsDays.value),
       getErrorLogs({ page: 1, page_size: 10 }),
       getMonitorHealth(),
+      getUserActivity(),
     ]);
     tokenStats.value = tokenData;
     apiStats.value = apiData;
     errorLogs.value = errorData.items;
     health.value = healthData;
+    userActivity.value = activityData;
     renderCharts();
     await loadModelBreakdown();
   } catch (error) {
@@ -297,6 +302,18 @@ onUnmounted(() => {
           :unit="card.unit"
           class="summary-card"
         />
+      </el-col>
+    </el-row>
+
+    <el-row v-if="userActivity" :gutter="20" class="summary-row">
+      <el-col :xs="24" :sm="8">
+        <BentoCard title="DAU" :value="String(userActivity.dau)" unit="人" />
+      </el-col>
+      <el-col :xs="24" :sm="8">
+        <BentoCard title="WAU" :value="String(userActivity.wau)" unit="人" />
+      </el-col>
+      <el-col :xs="24" :sm="8">
+        <BentoCard title="MAU" :value="String(userActivity.mau)" unit="人" />
       </el-col>
     </el-row>
 

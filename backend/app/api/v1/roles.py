@@ -38,12 +38,12 @@ async def list_roles(
 @router.post("", summary="创建角色")
 async def create_role(
     role_data: RoleCreate,
-    _: Annotated[User, Depends(require_permission(ROLE_WRITE))],
+    current_user: Annotated[User, Depends(require_permission(ROLE_WRITE))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
     """在当前租户下创建新角色。"""
-    result = await role_service.create_role(db, tenant_id, role_data)
+    result = await role_service.create_role(db, tenant_id, role_data, current_user.id)
     return success_response(data=result.model_dump(), message="创建成功")
 
 
@@ -65,22 +65,24 @@ async def get_role(
 async def update_role(
     role_id: int,
     role_data: RoleUpdate,
-    _: Annotated[User, Depends(require_permission(ROLE_WRITE))],
+    current_user: Annotated[User, Depends(require_permission(ROLE_WRITE))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
     """更新指定角色信息。"""
-    result = await role_service.update_role(db, role_id, tenant_id, role_data)
+    result = await role_service.update_role(
+        db, role_id, tenant_id, role_data, current_user.id
+    )
     return success_response(data=result.model_dump(), message="更新成功")
 
 
 @router.delete("/{role_id}", summary="删除角色")
 async def delete_role(
     role_id: int,
-    _: Annotated[User, Depends(require_permission(ROLE_DELETE))],
+    current_user: Annotated[User, Depends(require_permission(ROLE_DELETE))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
     """删除指定角色。"""
-    await role_service.delete_role(db, role_id, tenant_id)
+    await role_service.delete_role(db, role_id, tenant_id, current_user.id)
     return success_response(message="删除成功")

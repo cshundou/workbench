@@ -13,10 +13,11 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 from langchain_core.pydantic_v1 import BaseModel, Field, create_model
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.core.permissions import KB_READ, has_permission
 from app.models.chat_history import ChatHistory
@@ -552,6 +553,36 @@ class AgentService:
             }
             for record in records
         ]
+
+    async def delete_chat_session(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        user_id: int,
+        agent_id: int,
+        session_id: str,
+    ) -> int:
+        """删除指定 Agent 会话的全部历史消息。"""
+        if not session_id.startswith(f"agent-{agent_id}-"):
+            raise ValidationError(message="会话 ID 与当前 Agent 不匹配")
+
+        stmt = delete(ChatHistory).where(
+            ChatHistory.tenant_id == tenant_id,
+            ChatHistory.user_id == user_id,
+            ChatHistory.session_id == session_id,
+        )
+        result = await db.execute(stmt)
+        deleted_count = int(result.rowcount or 0)
+        if deleted_count <= 0:
+            raise NotFoundError(message="会话不存在或已删除")
+        logger.info(
+            "删除 Agent 会话历史 tenant_id=%s user_id=%s session_id=%s rows=%s",
+            tenant_id,
+            user_id,
+            session_id,
+            deleted_count,
+        )
+        return deleted_count
 
     @staticmethod
     def generate_session_id(agent_id: int) -> str:

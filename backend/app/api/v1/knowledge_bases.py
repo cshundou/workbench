@@ -213,19 +213,41 @@ async def search_knowledge_base(
 ) -> dict[str, Any]:
     """对知识库执行混合检索。"""
     await knowledge_base_service.get_knowledge_base(db, kb_id, tenant_id, current_user)
-    results = await rag_service.retrieve(
-        db,
-        kb_id,
-        data.query,
-        user_ctx,
-        top_k=data.top_k,
-        filters=data.filters,
+    if data.use_rag:
+        results = await rag_service.retrieve(
+            db,
+            kb_id,
+            data.query,
+            user_ctx,
+            top_k=data.top_k,
+            filters=data.filters,
+        )
+        return success_response(
+            data={
+                "query": data.query,
+                "results": results,
+                "total": len(results),
+                "mode": "rag",
+            }
+        )
+
+    llm_result = await rag_service.answer(
+        db=db,
+        kb_id=kb_id,
+        query=data.query,
+        user_ctx=user_ctx,
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        use_rag=False,
     )
     return success_response(
         data={
             "query": data.query,
-            "results": results,
-            "total": len(results),
+            "results": [],
+            "total": 0,
+            "mode": "llm",
+            "answer": llm_result["answer"],
+            "sources": llm_result["sources"],
         }
     )
 
@@ -253,6 +275,7 @@ async def chat_knowledge_base(
                 filters=data.filters,
                 tenant_id=tenant_id,
                 user_id=current_user.id,
+                use_rag=data.use_rag,
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:
@@ -268,3 +291,29 @@ async def chat_knowledge_base(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/{kb_id}/search-stats", summary="知识库检索统计")
+async def get_search_stats(
+    kb_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(KB_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """查询知识库检索次数、命中率与平均延迟。"""
+    await knowledge_base_service.get_knowledge_base(db, kb_id, tenant_id, current_user)
+    result = await rag_service.get_search_stats(kb_id)
+    return success_response(data=result)
+
+
+@router.get("/{kb_id}/optimization-hints", summary="知识库检索优化建议")
+async def get_optimization_hints(
+    kb_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(KB_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """根据检索统计和分块配置生成优化建议。"""
+    await knowledge_base_service.get_knowledge_base(db, kb_id, tenant_id, current_user)
+    result = await rag_service.get_optimization_hints(db, kb_id)
+    return success_response(data=result)

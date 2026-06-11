@@ -237,14 +237,16 @@ export function searchKnowledgeBase(
   >;
 }
 
-/** 构建流式问答 SSE URL（文档 7.1 EventSource） */
+/** 构建流式问答 SSE URL（兼容旧 EventSource 调用，推荐使用 chatKnowledgeStream） */
 export function buildChatStreamUrl(
   kbId: number,
   query: string,
   sessionId?: string,
+  useRag = true,
 ): string {
   const url = new URL(`${baseURL}/knowledge-bases/${kbId}/chat/stream`, window.location.origin);
   url.searchParams.set('query', query);
+  url.searchParams.set('use_rag', String(useRag));
   if (sessionId) {
     url.searchParams.set('session_id', sessionId);
   }
@@ -253,4 +255,91 @@ export function buildChatStreamUrl(
     url.searchParams.set('token', token);
   }
   return url.pathname + url.search;
+}
+
+/** POST 流式问答（支持 use_rag 模式切换） */
+export async function chatKnowledgeStream(
+  kbId: number,
+  data: { query: string; use_rag?: boolean; top_k?: number },
+  onMessage: (msg: ChatStreamMessage) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('token');
+  const response = await fetch(`${baseURL}/knowledge-bases/${kbId}/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      query: data.query,
+      use_rag: data.use_rag ?? true,
+      top_k: data.top_k ?? 5,
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('无法读取流式响应');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) {
+        continue;
+      }
+      const payload = trimmed.slice(5).trim();
+      if (!payload) {
+        continue;
+      }
+      try {
+        onMessage(JSON.parse(payload) as ChatStreamMessage);
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+export interface SearchStats {
+  total_queries: number;
+  hit_queries: number;
+  hit_rate: number;
+  avg_latency_ms: number;
+  top_documents: { document_id: number; hit_count: number }[];
+}
+
+export interface OptimizationHint {
+  level: 'info' | 'warning';
+  title: string;
+  description: string;
+}
+
+export function getSearchStats(kbId: number): Promise<SearchStats> {
+  return request.get(`/knowledge-bases/${kbId}/search-stats`) as Promise<SearchStats>;
+}
+
+export function getOptimizationHints(
+  kbId: number,
+): Promise<{ hints: OptimizationHint[]; chunk_size: number; chunk_overlap: number }> {
+  return request.get(`/knowledge-bases/${kbId}/optimization-hints`) as Promise<{
+    hints: OptimizationHint[];
+    chunk_size: number;
+    chunk_overlap: number;
+  }>;
 }

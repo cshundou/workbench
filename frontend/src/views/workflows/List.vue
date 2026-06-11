@@ -102,6 +102,14 @@ function goExecute(wf: WorkflowInfo): void {
   router.push({ name: 'WorkflowExecute', params: { id: wf.id } });
 }
 
+function goEditGraph(wf: WorkflowInfo): void {
+  router.push({ name: 'WorkflowEdit', params: { id: wf.id } });
+}
+
+function goHistory(wf: WorkflowInfo): void {
+  router.push({ name: 'WorkflowHistory', params: { id: wf.id } });
+}
+
 onMounted(() => {
   fetchList();
 });
@@ -146,6 +154,8 @@ onMounted(() => {
               执行
             </el-button>
             <template v-if="canWrite">
+              <el-button size="small" @click="goEditGraph(wf)">编辑拓扑</el-button>
+              <el-button size="small" @click="goHistory(wf)">历史</el-button>
               <el-button size="small" :icon="Edit" @click="openEditDialog(wf)" />
               <el-button size="small" type="danger" :icon="Delete" @click="handleDelete(wf)" />
             </template>

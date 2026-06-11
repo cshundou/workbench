@@ -9,6 +9,13 @@ import App from './App.vue';
 import { setupStore } from './stores';
 import router from './router';
 import '@/assets/styles/index.scss';
+import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+
+(self as unknown as { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
+  getWorker() {
+    return new editorWorker();
+  },
+};
 
 const app = createApp(App);
 

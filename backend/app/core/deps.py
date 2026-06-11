@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.exceptions import AuthenticationError, AuthorizationError
 from app.core.logging import get_logger
-from app.core.permissions import has_any_permission, has_permission, parse_permissions
+from app.core.permissions import (
+    PERMISSION_ALL,
+    has_any_permission,
+    has_permission,
+    parse_permissions,
+)
 from app.models.user import User
 from app.services.user_key_context import UserKeyContext, user_key_resolver
 from app.services.user_service import user_service
@@ -182,6 +187,28 @@ def require_any_permission(*permissions: str) -> Callable:
         return current_user
 
     return _check_permissions
+
+
+async def require_super_admin(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """
+    要求当前用户为超级管理员（拥有全局通配权限 *）。
+
+    Args:
+        current_user: 当前登录用户。
+
+    Returns:
+        当前用户实体。
+    """
+    user_permissions = get_user_permissions(current_user)
+    if PERMISSION_ALL not in user_permissions:
+        logger.warning("超级管理员校验失败 user_id=%s", current_user.id)
+        raise AuthorizationError(
+            message="权限不足",
+            error="Required super admin permission: *",
+        )
+    return current_user
 
 
 async def get_user_key_context(

@@ -37,6 +37,17 @@ WF_READ = "workflow:read"
 WF_WRITE = "workflow:write"
 WF_DELETE = "workflow:delete"
 
+# 审计日志权限
+AUDIT_READ = "audit:read"
+
+# 租户管理权限
+TENANT_READ = "tenant:read"
+TENANT_WRITE = "tenant:write"
+TENANT_DELETE = "tenant:delete"
+
+# 异步任务权限
+TASK_READ = "task:read"
+
 # 默认管理员拥有的全部权限标识
 DEFAULT_ADMIN_PERMISSIONS: list[str] = [PERMISSION_ALL]
 
@@ -58,6 +69,11 @@ ALL_PERMISSION_CODES: list[str] = [
     WF_WRITE,
     WF_DELETE,
     MONITOR_READ,
+    AUDIT_READ,
+    TENANT_READ,
+    TENANT_WRITE,
+    TENANT_DELETE,
+    TASK_READ,
 ]
 
 

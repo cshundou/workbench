@@ -2,12 +2,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { ArrowLeft, Loading, Position, Setting, VideoPause } from '@element-plus/icons-vue';
+import { ArrowLeft, Delete, Loading, Plus, Position, Setting, VideoPause } from '@element-plus/icons-vue';
 import StreamingText from '@/components/chat/StreamingText.vue';
 import ToolCallPanel from '@/components/agent/ToolCallPanel.vue';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
-import { chatAgentStream } from '@/api/agent';
-import type { AgentChatStreamMessage, ToolCallStep } from '@/api/agent';
+import { chatAgentStream, deleteAgentSession, getAgentHistory, getAgentSessions } from '@/api/agent';
+import type { AgentChatStreamMessage, ChatHistoryItem, ToolCallStep } from '@/api/agent';
 import { useAgentStore } from '@/stores/agent';
 
 interface ChatMessage {
@@ -30,16 +30,38 @@ const thinkingText = ref('');
 const currentToolSteps = ref<ToolCallStep[]>([]);
 const activeToolSteps = ref<ToolCallStep[]>([]);
 
+const sessions = ref<{ session_id: string; last_message: string; updated_at?: string }[]>([]);
+
 let abortController: AbortController | null = null;
 
-async function loadAgent(): Promise<void> {
-  await agentStore.fetchAgent(agentId.value);
-  sessionId.value = `agent-${agentId.value}-${Date.now()}`;
+async function loadSessions(): Promise<void> {
+  sessions.value = await getAgentSessions(agentId.value);
 }
 
-onMounted(() => {
-  loadAgent();
-});
+async function loadSessionHistory(targetSessionId: string): Promise<void> {
+  sessionId.value = targetSessionId;
+  const { items } = await getAgentHistory(agentId.value, { session_id: targetSessionId, limit: 200 });
+  messages.value = items.map((item: ChatHistoryItem) => ({
+    id: `history-${item.id}`,
+    role: item.message_type === 'user' ? 'user' : 'assistant',
+    content: item.content,
+    toolSteps: (item.metadata?.intermediate_steps as ToolCallStep[]) || [],
+  }));
+}
+
+function handleNewSession(): void {
+  sessionId.value = `agent-${agentId.value}-${Date.now()}`;
+  messages.value = [];
+  activeToolSteps.value = [];
+}
+
+async function handleDeleteSession(targetSessionId: string): Promise<void> {
+  await deleteAgentSession(agentId.value, targetSessionId);
+  if (sessionId.value === targetSessionId) {
+    handleNewSession();
+  }
+  await loadSessions();
+}
 
 function handleStreamMessage(msg: AgentChatStreamMessage): void {
   if (msg.type === 'thinking') {
@@ -73,6 +95,7 @@ function handleStreamMessage(msg: AgentChatStreamMessage): void {
     thinkingText.value = '';
     if (msg.session_id) {
       sessionId.value = msg.session_id;
+      void loadSessions();
     }
     if (msg.intermediate_steps) {
       activeToolSteps.value = msg.intermediate_steps;
@@ -100,6 +123,16 @@ function handleStreamMessage(msg: AgentChatStreamMessage): void {
     }
   }
 }
+
+async function loadAgent(): Promise<void> {
+  await agentStore.fetchAgent(agentId.value);
+  handleNewSession();
+  await loadSessions();
+}
+
+onMounted(() => {
+  loadAgent();
+});
 
 async function handleSend(): Promise<void> {
   const query = inputQuery.value.trim();
@@ -199,6 +232,30 @@ onUnmounted(() => {
     <ApiKeyHintBanner scene="agent" class="chat-api-key-hint" />
 
     <div class="chat-layout">
+      <div class="session-sidebar">
+        <div class="sidebar-header flex-between">
+          <h3>会话</h3>
+          <el-button text :icon="Plus" @click="handleNewSession">新建</el-button>
+        </div>
+        <div class="session-list">
+          <div
+            v-for="session in sessions"
+            :key="session.session_id"
+            class="session-item"
+            :class="{ active: session.session_id === sessionId }"
+            @click="loadSessionHistory(session.session_id)"
+          >
+            <div class="session-text">{{ session.last_message || '新会话' }}</div>
+            <el-button
+              text
+              type="danger"
+              :icon="Delete"
+              @click.stop="handleDeleteSession(session.session_id)"
+            />
+          </div>
+        </div>
+      </div>
+
       <div class="chat-main">
         <div class="message-list">
           <el-empty v-if="messages.length === 0" description="输入问题开始与智能体对话" />
@@ -308,6 +365,56 @@ onUnmounted(() => {
   box-shadow: $shadow-card;
   overflow: hidden;
   background: #fff;
+}
+
+.session-sidebar {
+  width: 260px;
+  border-right: 1px solid $border-color;
+  display: flex;
+  flex-direction: column;
+  background: $bg-color;
+
+  .sidebar-header {
+    padding: 12px 16px;
+
+    h3 {
+      margin: 0;
+      font-size: 15px;
+    }
+  }
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: $border-radius-md;
+  cursor: pointer;
+  margin-bottom: 6px;
+
+  &.active {
+    background: rgba($primary-color, 0.12);
+  }
+
+  &:hover {
+    background: rgba($primary-color, 0.08);
+  }
+}
+
+.session-text {
+  flex: 1;
+  font-size: 13px;
+  color: $text-regular;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-main {

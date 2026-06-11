@@ -2311,4 +2311,42 @@ json
 #### 创建智能体
 
 - **请求路径**：`/agents`
-- **
+- **请求方法**：POST
+
+### 8.5 工作流管理接口
+
+- `GET /workflows`：工作流列表
+- `POST /workflows/{id}/execute`：执行工作流
+- `GET /workflows/{id}/executions`：执行历史
+
+### 8.6 流式交互接口
+
+- `POST /knowledge-bases/{kb_id}/chat`：SSE 流式问答（use_rag 切换）
+- `POST /agents/{id}/chat`：Agent 流式对话
+
+### 8.7 系统监控接口
+
+- `GET /monitor/user-activity`：DAU/WAU/MAU
+
+### 8.8 租户与审计接口
+
+- `CRUD /tenants`：租户管理
+- `GET /audit-logs`：审计日志
+
+## 九、分阶段开发计划
+
+一期 MVP 已完成；二期 P0/P1/P2 已全部落地（测试、Monaco、预览、工作流编辑、租户、审计、CI）。
+
+## 十、测试指南
+
+```bash
+cd backend && pytest tests/ -q
+cd frontend && npm run lint && npm run build
+```
+
+## 十一、部署指南
+
+```bash
+docker compose up -d
+cd backend && alembic upgrade head && arq app.worker.WorkerSettings
+```

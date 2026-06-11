@@ -5,7 +5,7 @@
 """
 
 from functools import lru_cache
-from typing import List
+from typing import List, Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -71,7 +71,25 @@ class Settings(BaseSettings):
         default="data/chroma",
         description="Chroma 向量库持久化目录",
     )
+    vector_store: Literal["chroma", "pinecone"] = Field(
+        default="chroma",
+        description="向量存储后端类型（chroma | pinecone）",
+    )
+    pinecone_index_name: str = Field(
+        default="",
+        description="Pinecone 索引名称（VECTOR_STORE=pinecone 时必填）",
+    )
     upload_dir: str = Field(default="data/uploads", description="文档上传存储目录")
+
+    # LangSmith 追踪（可选）
+    langchain_tracing_v2: bool = Field(
+        default=False,
+        description="是否启用 LangSmith 链路追踪（LANGCHAIN_TRACING_V2）",
+    )
+    langchain_api_key: str = Field(
+        default="",
+        description="LangSmith API Key（LANGCHAIN_API_KEY）",
+    )
 
     # Agent 执行配置
     agent_tool_timeout_seconds: int = Field(

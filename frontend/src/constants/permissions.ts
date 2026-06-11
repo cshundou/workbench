@@ -13,6 +13,9 @@ export const PERMISSION_OPTIONS = [
   { label: '工作流查看', value: 'workflow:read' },
   { label: '工作流管理', value: 'workflow:write' },
   { label: '监控查看', value: 'monitor:read' },
+  { label: '审计日志', value: 'audit:read' },
+  { label: '租户查看', value: 'tenant:read' },
+  { label: '租户管理', value: 'tenant:write' },
 ] as const;
 
 /** 路由权限映射 */
@@ -23,4 +26,6 @@ export const ROUTE_PERMISSIONS = {
   userManagement: 'user:read',
   roleManagement: 'role:read',
   monitor: 'monitor:read',
+  tenants: 'tenant:read',
+  auditLogs: 'audit:read',
 } as const;

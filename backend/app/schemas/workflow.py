@@ -117,6 +117,7 @@ class WorkflowExecutionResponse(BaseModel):
     completed_at: Optional[datetime] = None
     created_by: Optional[int] = None
     thread_id: Optional[str] = None
+    task_id: Optional[str] = None
     node_statuses: dict[str, str] = Field(default_factory=dict)
     logs: List[NodeExecutionLog] = Field(default_factory=list)
 

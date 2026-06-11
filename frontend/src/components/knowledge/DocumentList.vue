@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { Delete, Download, Refresh } from '@element-plus/icons-vue';
+import { Delete, Download, Refresh, View } from '@element-plus/icons-vue';
 import type { DocumentInfo } from '@/api/rag';
 
 const props = defineProps<{
@@ -13,6 +13,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   delete: [doc: DocumentInfo];
   download: [doc: DocumentInfo];
+  preview: [doc: DocumentInfo];
   refresh: [];
 }>();
 
@@ -87,8 +88,15 @@ const hasPendingDocs = computed(() =>
         </template>
       </el-table-column>
       <el-table-column prop="total_chunks" label="分块数" width="80" />
-      <el-table-column label="操作" width="140" fixed="right">
+      <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
+          <el-button
+            text
+            type="primary"
+            :icon="View"
+            :disabled="row.status !== 1"
+            @click="emit('preview', row)"
+          />
           <el-button
             text
             type="primary"

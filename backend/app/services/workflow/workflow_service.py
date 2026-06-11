@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.task_queue import enqueue_task
 from app.models.user import User
 from app.models.workflow import Workflow
 from app.models.workflow_execution import WorkflowExecution
@@ -34,12 +35,12 @@ from app.services.workflow.graph_builder import (
 )
 from app.services.user_key_context import user_key_resolver
 from app.services.workflow.ws_manager import workflow_ws_manager
+from app.services.audit_service import audit_service
 
 logger = logging.getLogger(__name__)
 
 # 内存中维护执行运行时状态（节点状态、日志），与 Redis 检查点互补
 _runtime_state: dict[int, dict[str, Any]] = {}
-_running_tasks: dict[int, asyncio.Task[None]] = {}
 
 
 class WorkflowService:
@@ -78,6 +79,7 @@ class WorkflowService:
             completed_at=execution.completed_at,
             created_by=execution.created_by,
             thread_id=runtime.get("thread_id"),
+            task_id=runtime.get("task_id"),
             node_statuses=runtime.get("node_statuses", {}),
             logs=logs,
         )
@@ -222,6 +224,15 @@ class WorkflowService:
             await db.rollback()
             raise ConflictError(message="工作流名称已存在") from exc
 
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="workflow.create",
+            resource_type="workflow",
+            resource_id=workflow.id,
+            detail={"name": workflow.name, "is_public": workflow.is_public},
+        )
         logger.info("创建工作流 id=%s name=%s", workflow.id, workflow.name)
         return self._to_workflow_response(workflow)
 
@@ -265,6 +276,15 @@ class WorkflowService:
             await db.rollback()
             raise ConflictError(message="工作流名称已存在") from exc
 
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="workflow.update",
+            resource_type="workflow",
+            resource_id=workflow.id,
+            detail=data.model_dump(exclude_unset=True),
+        )
         return self._to_workflow_response(workflow)
 
     async def delete_workflow(
@@ -278,6 +298,15 @@ class WorkflowService:
         workflow = await self._get_workflow_or_raise(db, workflow_id, tenant_id)
         await self._check_workflow_access(workflow, user, require_owner=True)
         await db.delete(workflow)
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="workflow.delete",
+            resource_type="workflow",
+            resource_id=workflow_id,
+            detail={"name": workflow.name},
+        )
         logger.info("删除工作流 id=%s", workflow_id)
 
     async def list_executions(
@@ -366,22 +395,31 @@ class WorkflowService:
         thread_id = f"execution_{execution.id}"
         self._init_runtime_state(execution.id, thread_id)
 
-        task = asyncio.create_task(
-            self._run_workflow(
-                execution.id,
-                workflow_id,
-                tenant_id,
-                user.id,
-                input_params,
-                thread_id,
-            )
-        )
-        _running_tasks[execution.id] = task
-
-        logger.info(
-            "启动工作流执行 execution_id=%s workflow_id=%s",
+        task_id = await enqueue_task(
+            "execute_workflow_task",
             execution.id,
             workflow_id,
+            tenant_id,
+            user.id,
+            input_params,
+            thread_id,
+        )
+        _runtime_state.setdefault(execution.id, {})["task_id"] = task_id
+
+        logger.info(
+            "启动工作流执行 execution_id=%s workflow_id=%s task_id=%s",
+            execution.id,
+            workflow_id,
+            task_id,
+        )
+        await audit_service.record_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="workflow.execute",
+            resource_type="workflow_execution",
+            resource_id=execution.id,
+            detail={"workflow_id": workflow_id, "task_id": task_id},
         )
         return self._to_execution_response(execution)
 
@@ -412,19 +450,18 @@ class WorkflowService:
             return self._to_execution_response(execution)
 
         input_params = execution.input_params
-        task = asyncio.create_task(
-            self._resume_workflow(
-                execution_id,
-                tenant_id,
-                input_params,
-                thread_id,
-                data.comment,
-            )
+        task_id = await enqueue_task(
+            "resume_workflow_task",
+            execution_id,
+            tenant_id,
+            input_params,
+            thread_id,
+            comment=data.comment,
         )
-        _running_tasks[execution_id] = task
+        _runtime_state.setdefault(execution_id, {})["task_id"] = task_id
         return self._to_execution_response(execution)
 
-    async def _run_workflow(
+    async def run_workflow_task(
         self,
         execution_id: int,
         workflow_id: int,
@@ -433,7 +470,7 @@ class WorkflowService:
         input_params: dict[str, Any],
         thread_id: str,
     ) -> None:
-        """在后台线程中执行 LangGraph 工作流。"""
+        """在后台任务中执行 LangGraph 工作流。"""
         from app.core.database import async_session_factory
 
         def status_callback(
@@ -503,10 +540,8 @@ class WorkflowService:
         except Exception as exc:
             logger.exception("工作流执行失败 execution_id=%s: %s", execution_id, exc)
             await self._mark_execution_failed(execution_id, str(exc))
-        finally:
-            _running_tasks.pop(execution_id, None)
 
-    async def _resume_workflow(
+    async def run_resume_workflow_task(
         self,
         execution_id: int,
         tenant_id: int,
@@ -575,8 +610,6 @@ class WorkflowService:
                 "工作流恢复失败 execution_id=%s: %s", execution_id, exc
             )
             await self._mark_execution_failed(execution_id, str(exc))
-        finally:
-            _running_tasks.pop(execution_id, None)
 
     async def _finalize_execution(
         self,

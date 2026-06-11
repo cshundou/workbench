@@ -4,7 +4,7 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUserId, get_current_user_id, get_db_session
@@ -17,6 +17,7 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 
 @router.post("/login", summary="用户登录")
 async def login(
+    request: Request,
     login_data: LoginRequest,
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
@@ -25,7 +26,8 @@ async def login(
 
     无需认证，已在 JWT 白名单中。
     """
-    result = await auth_service.authenticate(db, login_data)
+    ip_address = request.client.host if request.client else None
+    result = await auth_service.authenticate(db, login_data, ip_address=ip_address)
     return success_response(data=result.model_dump())
 
 

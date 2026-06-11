@@ -118,12 +118,19 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if not path.startswith(settings.api_v1_prefix):
             return
+        state_user_id = getattr(request.state, "user_id", None)
+        parsed_user_id = (
+            int(state_user_id)
+            if state_user_id is not None and str(state_user_id).isdigit()
+            else None
+        )
 
         await monitor_service.record_api_call(
             method=request.method,
             path=path,
             status_code=status_code,
             elapsed_ms=elapsed_ms,
+            user_id=parsed_user_id,
         )
         if status_code >= 400:
             await monitor_service.record_error_log(

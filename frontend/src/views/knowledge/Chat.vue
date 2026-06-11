@@ -5,9 +5,8 @@ import { ElMessage } from 'element-plus';
 import { ArrowLeft, Position, VideoPause } from '@element-plus/icons-vue';
 import StreamingText from '@/components/chat/StreamingText.vue';
 import CitationPanel from '@/components/knowledge/CitationPanel.vue';
-import { buildChatStreamUrl } from '@/api/rag';
+import { chatKnowledgeStream } from '@/api/rag';
 import type { ChatStreamMessage, CitationSource } from '@/api/rag';
-import { SSEClient } from '@/utils/sse';
 import { useRagStore } from '@/stores/rag';
 
 interface ChatMessage {
@@ -22,7 +21,6 @@ const router = useRouter();
 const ragStore = useRagStore();
 
 const kbId = computed(() => Number(route.params.id));
-const sessionId = ref(`kb-${kbId.value}-${Date.now()}`);
 
 const messages = ref<ChatMessage[]>([]);
 const inputQuery = ref('');
@@ -30,7 +28,8 @@ const isStreaming = ref(false);
 const activeCitationId = ref<number | null>(null);
 const currentSources = ref<CitationSource[]>([]);
 
-let sseClient: SSEClient | null = null;
+const useRag = ref(true);
+const abortController = ref<AbortController | null>(null);
 
 /** 加载知识库信息 */
 async function loadKbInfo(): Promise<void> {
@@ -54,14 +53,12 @@ function handleStreamMessage(data: unknown): void {
 
   if (msg.type === 'done') {
     isStreaming.value = false;
-    sseClient?.disconnect();
     return;
   }
 
   if (msg.type === 'error') {
     ElMessage.error(msg.message || '问答出错');
     isStreaming.value = false;
-    sseClient?.disconnect();
     return;
   }
 
@@ -74,7 +71,7 @@ function handleStreamMessage(data: unknown): void {
 }
 
 /** 发送问题 */
-function handleSend(): void {
+async function handleSend(): Promise<void> {
   const query = inputQuery.value.trim();
   if (!query || isStreaming.value) {
     return;
@@ -99,31 +96,28 @@ function handleSend(): void {
   currentSources.value = [];
   activeCitationId.value = null;
 
-  const streamUrl = buildChatStreamUrl(kbId.value, query, sessionId.value);
+  abortController.value?.abort();
+  abortController.value = new AbortController();
 
-  sseClient?.disconnect();
-  sseClient = new SSEClient({
-    url: streamUrl,
-    onMessage: handleStreamMessage,
-    onError: () => {
-      if (isStreaming.value) {
-        isStreaming.value = false;
-        ElMessage.warning('连接中断');
-      }
-    },
-    onClose: () => {
-      isStreaming.value = false;
-    },
-  });
-  sseClient.connect();
+  try {
+    await chatKnowledgeStream(
+      kbId.value,
+      { query, use_rag: useRag.value },
+      handleStreamMessage,
+      abortController.value.signal,
+    );
+  } catch (error) {
+    if ((error as Error).name !== 'AbortError') {
+      ElMessage.error('问答请求失败');
+    }
+  } finally {
+    isStreaming.value = false;
+  }
 }
 
 /** 中断当前回答 */
 function handleAbort(): void {
-  if (sseClient) {
-    sseClient.disconnect();
-    sseClient = null;
-  }
+  abortController.value?.abort();
   isStreaming.value = false;
   ElMessage.info('已停止生成');
 }
@@ -147,7 +141,7 @@ function goBack(): void {
 }
 
 onUnmounted(() => {
-  sseClient?.disconnect();
+  abortController.value?.abort();
 });
 </script>
 
@@ -158,15 +152,19 @@ onUnmounted(() => {
         <el-button text :icon="ArrowLeft" @click="goBack">返回文档</el-button>
         <h2 class="chat-title">{{ ragStore.currentKb?.name || '知识库问答' }}</h2>
       </div>
-      <el-button
-        v-if="isStreaming"
-        type="danger"
-        plain
-        :icon="VideoPause"
-        @click="handleAbort"
-      >
-        停止生成
-      </el-button>
+      <div class="header-right flex-center">
+        <span class="mode-label">知识库增强</span>
+        <el-switch v-model="useRag" :disabled="isStreaming" />
+        <el-button
+          v-if="isStreaming"
+          type="danger"
+          plain
+          :icon="VideoPause"
+          @click="handleAbort"
+        >
+          停止生成
+        </el-button>
+      </div>
     </div>
 
     <div class="chat-layout">

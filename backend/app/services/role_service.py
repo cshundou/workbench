@@ -14,6 +14,7 @@ from app.core.permissions import parse_permissions
 from app.models.role import Role
 from app.models.user import User
 from app.schemas.role import RoleCreate, RoleListResponse, RoleResponse, RoleUpdate
+from app.services.audit_service import audit_service
 
 logger = get_logger(__name__)
 
@@ -83,6 +84,7 @@ class RoleService:
         db: AsyncSession,
         tenant_id: int,
         role_data: RoleCreate,
+        actor_user_id: int,
     ) -> RoleResponse:
         """创建角色。"""
         role = Role(
@@ -96,6 +98,15 @@ class RoleService:
         try:
             await db.flush()
             await db.refresh(role)
+            await audit_service.record_crud_action(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=actor_user_id,
+                action="role.create",
+                resource_type="role",
+                resource_id=role.id,
+                detail={"name": role.name},
+            )
             logger.info("创建角色成功 role_id=%s tenant_id=%s", role.id, tenant_id)
             return self._to_response(role)
         except IntegrityError as exc:
@@ -108,6 +119,7 @@ class RoleService:
         role_id: int,
         tenant_id: int,
         role_data: RoleUpdate,
+        actor_user_id: int,
     ) -> RoleResponse:
         """更新角色。"""
         role = await self.get_role_by_id(db, role_id, tenant_id)
@@ -124,6 +136,15 @@ class RoleService:
         try:
             await db.flush()
             await db.refresh(role)
+            await audit_service.record_crud_action(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=actor_user_id,
+                action="role.update",
+                resource_type="role",
+                resource_id=role_id,
+                detail=role_data.model_dump(exclude_unset=True),
+            )
             logger.info("更新角色成功 role_id=%s", role_id)
             return self._to_response(role)
         except IntegrityError as exc:
@@ -135,6 +156,7 @@ class RoleService:
         db: AsyncSession,
         role_id: int,
         tenant_id: int,
+        actor_user_id: int,
     ) -> None:
         """
         删除角色。
@@ -156,8 +178,18 @@ class RoleService:
                 error=f"role_id={role_id} has {user_count} users",
             )
 
+        role_name = role.name
         await db.delete(role)
         await db.flush()
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=actor_user_id,
+            action="role.delete",
+            resource_type="role",
+            resource_id=role_id,
+            detail={"name": role_name},
+        )
         logger.info("删除角色成功 role_id=%s tenant_id=%s", role_id, tenant_id)
 
 

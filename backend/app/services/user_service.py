@@ -16,6 +16,7 @@ from app.models.role import Role
 from app.models.user import User
 from app.schemas.auth import RoleBrief
 from app.schemas.user import UserCreate, UserListResponse, UserResponse, UserUpdate
+from app.services.audit_service import audit_service
 
 logger = get_logger(__name__)
 
@@ -128,6 +129,7 @@ class UserService:
         db: AsyncSession,
         tenant_id: int,
         user_data: UserCreate,
+        actor_user_id: int,
     ) -> UserResponse:
         """
         创建用户。
@@ -163,6 +165,15 @@ class UserService:
             loaded = await self.get_user_by_id(db, user.id, tenant_id)
             if loaded is None:
                 raise NotFoundError(message="用户创建失败")
+            await audit_service.record_crud_action(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=actor_user_id,
+                action="user.create",
+                resource_type="user",
+                resource_id=loaded.id,
+                detail={"username": loaded.username, "email": loaded.email},
+            )
             logger.info("创建用户成功 user_id=%s tenant_id=%s", loaded.id, tenant_id)
             return self._to_response(loaded)
         except IntegrityError as exc:
@@ -175,6 +186,7 @@ class UserService:
         user_id: int,
         tenant_id: int,
         user_data: UserUpdate,
+        actor_user_id: int,
     ) -> UserResponse:
         """
         更新用户信息。
@@ -212,6 +224,15 @@ class UserService:
             loaded = await self.get_user_by_id(db, user_id, tenant_id)
             if loaded is None:
                 raise NotFoundError(message="用户不存在")
+            await audit_service.record_crud_action(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=actor_user_id,
+                action="user.update",
+                resource_type="user",
+                resource_id=user_id,
+                detail=user_data.model_dump(exclude_unset=True),
+            )
             logger.info("更新用户成功 user_id=%s", user_id)
             return self._to_response(loaded)
         except IntegrityError as exc:
@@ -245,8 +266,18 @@ class UserService:
         if user is None:
             raise NotFoundError(message="用户不存在")
 
+        detail = {"username": user.username, "email": user.email}
         await db.delete(user)
         await db.flush()
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=current_user_id,
+            action="user.delete",
+            resource_type="user",
+            resource_id=user_id,
+            detail=detail,
+        )
         logger.info("删除用户成功 user_id=%s tenant_id=%s", user_id, tenant_id)
 
 
