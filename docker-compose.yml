@@ -96,6 +96,30 @@ services:
     networks:
       - ai-workbench-network
 
+  arq-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai-workbench-arq-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ai_workbench}:${POSTGRES_PASSWORD:-ai_workbench_secret}@postgres:5432/${POSTGRES_DB:-ai_workbench}
+      REDIS_URL: redis://redis:6379/${REDIS_DB:-0}
+    command: arq app.worker.WorkerSettings
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - chroma_data:/app/chroma_data
+      - upload_data:/app/uploads
+    networks:
+      - ai-workbench-network
+
   nginx:
     image: nginx:1.25-alpine
     container_name: ai-workbench-nginx
@@ -107,6 +131,7 @@ services:
     depends_on:
       - backend
       - frontend
+      - arq-worker
     networks:
       - ai-workbench-network
 

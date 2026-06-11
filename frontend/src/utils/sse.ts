@@ -1,6 +1,23 @@
 // frontend/src/utils/sse.ts
 import { ref, Ref, onUnmounted } from 'vue';
 
+/** 解析单行 SSE data 负载 */
+export function parseSSELine(line: string): Record<string, unknown> | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('data:')) {
+    return null;
+  }
+  const payload = trimmed.slice(5).trim();
+  if (!payload) {
+    return null;
+  }
+  try {
+    return JSON.parse(payload) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 interface SSEOptions {
   url: string;
   headers?: Record<string, string>;
