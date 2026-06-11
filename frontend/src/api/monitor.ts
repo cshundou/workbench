@@ -75,6 +75,33 @@ export interface ApiStats {
   daily_series: ApiDailyStat[];
 }
 
+/** 工具调用统计 */
+export interface ToolStatsSummary {
+  total_count: number;
+  success_count: number;
+  failure_count: number;
+  success_rate: number;
+}
+
+export interface ToolDailyStat {
+  date: string;
+  total_count: number;
+  success_count: number;
+  success_rate: number;
+}
+
+export interface ToolStats {
+  summary: ToolStatsSummary;
+  tools: Array<{
+    tool_name: string;
+    total_count: number;
+    success_count: number;
+    failure_count: number;
+    success_rate: number;
+  }>;
+  daily_series: ToolDailyStat[];
+}
+
 /** 错误日志条目 */
 export interface ErrorLogItem {
   timestamp: string;
@@ -114,6 +141,11 @@ export function getTokenUsage(params?: TokenUsageQuery): Promise<TokenUsageStats
 /** 查询 API 调用统计 */
 export function getApiStats(days = 7): Promise<ApiStats> {
   return request.get('/monitor/api-stats', { params: { days } });
+}
+
+/** 工具调用成功率统计 */
+export function getToolStats(days = 7): Promise<ToolStats> {
+  return request.get('/monitor/tool-stats', { params: { days } });
 }
 
 /** 分页查询错误日志 */

@@ -80,6 +80,16 @@ async def get_api_stats(
     return success_response(data=result)
 
 
+@router.get("/tool-stats", summary="工具调用成功率统计")
+async def get_tool_stats(
+    _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],
+    days: int = Query(default=7, ge=1, le=30, description="统计最近天数"),
+) -> dict[str, Any]:
+    """查询各工具调用次数、成功次数与成功率趋势。"""
+    result = await monitor_service.get_tool_stats(days=days)
+    return success_response(data=result)
+
+
 @router.get("/error-logs", summary="错误日志查询")
 async def get_error_logs(
     _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],

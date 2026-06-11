@@ -137,42 +137,6 @@ class AgentService:
             field_definitions["input"] = (str, Field(description="工具输入"))
         return create_model(f"{tool.name}_Args", **field_definitions)
 
-    async def _execute_with_retry(
-        self,
-        tool: BaseTool,
-        parameters: Dict[str, Any],
-    ) -> ToolResult:
-        """工具调用失败自动重试（最多 3 次）。"""
-        max_retries = settings.agent_tool_max_retries
-        timeout = settings.agent_tool_timeout_seconds
-        last_error = "未知错误"
-
-        for attempt in range(1, max_retries + 1):
-            try:
-                result = await asyncio.wait_for(
-                    tool.execute(parameters),
-                    timeout=timeout,
-                )
-                if result.success:
-                    return result
-                last_error = result.error or "工具执行失败"
-            except asyncio.TimeoutError:
-                last_error = f"工具调用超时（>{timeout}s）"
-            except Exception as exc:
-                last_error = str(exc)
-
-            logger.warning(
-                "工具执行失败，准备重试 tool=%s attempt=%s/%s error=%s",
-                tool.name,
-                attempt,
-                max_retries,
-                last_error,
-            )
-            if attempt < max_retries:
-                await asyncio.sleep(0.5 * attempt)
-
-        return ToolResult(success=False, content=None, error=last_error)
-
     def _to_langchain_tools(
         self,
         base_tools: list[BaseTool],
@@ -197,12 +161,15 @@ class AgentService:
                         ensure_ascii=False,
                     )
                 clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
-                result = await self._execute_with_retry(_tool, clean_kwargs)
+                result = await _tool.execute_with_retry(clean_kwargs)
                 if result.success:
                     if isinstance(result.content, (dict, list)):
                         return json.dumps(result.content, ensure_ascii=False)
                     return str(result.content)
-                return f"工具执行失败: {result.error}"
+                return json.dumps(
+                    {"success": False, "error": result.error or "工具执行失败"},
+                    ensure_ascii=False,
+                )
 
             lc_tools.append(
                 StructuredTool(

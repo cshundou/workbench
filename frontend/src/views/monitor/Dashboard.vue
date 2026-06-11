@@ -12,12 +12,14 @@ import {
   getAlertConfig,
   getAlertHistory,
   getUserActivity,
+  getToolStats,
   type AlertConfig,
   type AlertHistoryItem,
   type ApiStats,
   type ErrorLogItem,
   type SystemHealth,
   type TokenUsageStats,
+  type ToolStats,
   type UserActivityStats,
 } from '@/api/monitor';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
@@ -29,6 +31,7 @@ const statsDays = ref(7);
 
 const tokenStats = ref<TokenUsageStats | null>(null);
 const apiStats = ref<ApiStats | null>(null);
+const toolStats = ref<ToolStats | null>(null);
 const errorLogs = ref<ErrorLogItem[]>([]);
 const health = ref<SystemHealth | null>(null);
 const userActivity = ref<UserActivityStats | null>(null);
@@ -38,10 +41,12 @@ const exportLoading = ref(false);
 const tokenChartRef = ref<HTMLDivElement | null>(null);
 const modelChartRef = ref<HTMLDivElement | null>(null);
 const apiChartRef = ref<HTMLDivElement | null>(null);
+const toolChartRef = ref<HTMLDivElement | null>(null);
 
 let tokenChart: echarts.ECharts | null = null;
 let modelChart: echarts.ECharts | null = null;
 let apiChart: echarts.ECharts | null = null;
+let toolChart: echarts.ECharts | null = null;
 
 const summaryCards = computed(() => [
   {
@@ -187,6 +192,43 @@ function buildModelPieOption(data: TokenUsageStats): EChartsOption {
   };
 }
 
+function buildToolChartOption(data: ToolStats): EChartsOption {
+  const series = data.daily_series;
+  return {
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: unknown) => {
+        const items = params as { axisValue: string; seriesName: string; value: number }[];
+        const date = items[0]?.axisValue ?? '';
+        const rateItem = items.find((item) => item.seriesName === '成功率');
+        const rate = rateItem ? (rateItem.value * 100).toFixed(1) : '100.0';
+        return `${date}<br/>工具调用成功率：${rate}%`;
+      },
+    },
+    grid: { left: 48, right: 24, bottom: 48, top: 40 },
+    xAxis: {
+      type: 'category',
+      data: series.map((item) => item.date),
+    },
+    yAxis: {
+      type: 'value',
+      name: '成功率',
+      min: 0,
+      max: 1,
+      axisLabel: { formatter: (value: number) => `${(value * 100).toFixed(0)}%` },
+    },
+    series: [
+      {
+        name: '成功率',
+        type: 'line',
+        smooth: true,
+        data: series.map((item) => item.success_rate),
+        itemStyle: { color: '#165DFF' },
+      },
+    ],
+  };
+}
+
 function buildApiChartOption(data: ApiStats): EChartsOption {
   const series = data.daily_series;
   return {
@@ -227,6 +269,9 @@ function renderCharts(): void {
   if (apiStats.value && apiChart) {
     apiChart.setOption(buildApiChartOption(apiStats.value), true);
   }
+  if (toolStats.value && toolChart) {
+    toolChart.setOption(buildToolChartOption(toolStats.value), true);
+  }
 }
 
 async function loadModelBreakdown(): Promise<void> {
@@ -242,10 +287,11 @@ async function loadModelBreakdown(): Promise<void> {
 async function fetchDashboardData(): Promise<void> {
   loading.value = true;
   try {
-    const [tokenData, apiData, errorData, healthData, activityData, alertCfg, alerts] =
+    const [tokenData, apiData, toolData, errorData, healthData, activityData, alertCfg, alerts] =
       await Promise.all([
         getTokenUsage({ group_by: tokenGroupBy.value }),
         getApiStats(statsDays.value),
+        getToolStats(statsDays.value),
         getErrorLogs({ page: 1, page_size: 10 }),
         getMonitorHealth(),
         getUserActivity(),
@@ -254,6 +300,7 @@ async function fetchDashboardData(): Promise<void> {
       ]);
     tokenStats.value = tokenData;
     apiStats.value = apiData;
+    toolStats.value = toolData;
     errorLogs.value = errorData.items;
     health.value = healthData;
     userActivity.value = activityData;
@@ -273,6 +320,7 @@ function handleResize(): void {
   tokenChart?.resize();
   modelChart?.resize();
   apiChart?.resize();
+  toolChart?.resize();
 }
 
 function healthTagType(status: string): 'success' | 'warning' | 'danger' | 'info' {
@@ -306,6 +354,7 @@ onMounted(() => {
   tokenChart = initChart(tokenChartRef.value);
   modelChart = initChart(modelChartRef.value);
   apiChart = initChart(apiChartRef.value);
+  toolChart = initChart(toolChartRef.value);
   window.addEventListener('resize', handleResize);
   void fetchDashboardData();
 });
@@ -315,6 +364,7 @@ onUnmounted(() => {
   tokenChart?.dispose();
   modelChart?.dispose();
   apiChart?.dispose();
+  toolChart?.dispose();
 });
 </script>
 
@@ -408,7 +458,21 @@ onUnmounted(() => {
     </el-row>
 
     <el-row :gutter="20">
-      <el-col :xs="24" :lg="14">
+      <el-col :xs="24" :lg="12">
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-header flex-between">
+              <span>工具调用成功率</span>
+              <el-tag v-if="toolStats" type="success" size="small">
+                当前 {{ ((toolStats.summary.success_rate ?? 1) * 100).toFixed(1) }}%
+              </el-tag>
+            </div>
+          </template>
+          <div ref="toolChartRef" class="chart-container" />
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :lg="12">
         <el-card shadow="never">
           <template #header>
             <div class="card-header flex-between">
@@ -428,7 +492,9 @@ onUnmounted(() => {
           <div ref="apiChartRef" class="chart-container" />
         </el-card>
       </el-col>
+    </el-row>
 
+    <el-row :gutter="20">
       <el-col :xs="24" :lg="10">
         <el-card v-if="alertConfig" shadow="never" class="alert-card">
           <template #header>

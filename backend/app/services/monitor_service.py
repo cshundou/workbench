@@ -39,6 +39,8 @@ USER_ACTIVITY_TTL_SECONDS = 60 * 60 * 24 * 35
 ALERT_COOLDOWN_KEY_PREFIX = "monitor:alert:cooldown:"
 ALERT_HISTORY_KEY = "monitor:alert:history"
 ALERT_HISTORY_MAX_SIZE = 100
+TOOL_STATS_PREFIX = "monitor:tool:stats:"
+TOOL_DAILY_PREFIX = "monitor:tool:daily:"
 
 
 class MonitorService:
@@ -141,6 +143,122 @@ class MonitorService:
             await redis.ltrim(ERROR_LOG_KEY, 0, ERROR_LOG_MAX_SIZE - 1)
         except Exception as exc:
             logger.error("记录错误日志失败: %s", exc)
+
+    async def record_tool_call(self, tool_name: str, success: bool) -> None:
+        """
+        记录工具调用成功/失败次数到 Redis。
+
+        Args:
+            tool_name: 工具名称。
+            success: 是否调用成功。
+        """
+        try:
+            redis = await get_redis()
+            pipe = redis.pipeline()
+            tool_key = f"{TOOL_STATS_PREFIX}{tool_name}"
+            pipe.hincrby(tool_key, "total_count", 1)
+            if success:
+                pipe.hincrby(tool_key, "success_count", 1)
+            else:
+                pipe.hincrby(tool_key, "failure_count", 1)
+
+            day_key = f"{TOOL_DAILY_PREFIX}{date.today().isoformat()}:{tool_name}"
+            pipe.hincrby(day_key, "total_count", 1)
+            if success:
+                pipe.hincrby(day_key, "success_count", 1)
+            else:
+                pipe.hincrby(day_key, "failure_count", 1)
+            pipe.expire(day_key, 60 * 60 * 24 * 30)
+            await pipe.execute()
+        except Exception as exc:
+            logger.error("记录工具调用统计失败 tool=%s: %s", tool_name, exc)
+
+    async def get_tool_stats(self, days: int = 7) -> dict[str, Any]:
+        """
+        获取工具调用成功率统计。
+
+        Args:
+            days: 统计最近天数。
+
+        Returns:
+            工具汇总与按日趋势数据。
+        """
+        try:
+            redis = await get_redis()
+            tool_names = [
+                "knowledge_base_search",
+                "tavily_search",
+                "python_repl",
+                "sql_query",
+                "calculator",
+            ]
+            tools_summary: list[dict[str, Any]] = []
+            total_calls = 0
+            total_success = 0
+
+            for tool_name in tool_names:
+                stats = await redis.hgetall(f"{TOOL_STATS_PREFIX}{tool_name}")
+                count = int(stats.get("total_count", 0))
+                success = int(stats.get("success_count", 0))
+                failure = int(stats.get("failure_count", 0))
+                total_calls += count
+                total_success += success
+                tools_summary.append(
+                    {
+                        "tool_name": tool_name,
+                        "total_count": count,
+                        "success_count": success,
+                        "failure_count": failure,
+                        "success_rate": round(success / count, 4) if count else 1.0,
+                    }
+                )
+
+            daily_series: list[dict[str, Any]] = []
+            for offset in range(days - 1, -1, -1):
+                day = (date.today() - timedelta(days=offset)).isoformat()
+                day_total = 0
+                day_success = 0
+                for tool_name in tool_names:
+                    day_stats = await redis.hgetall(
+                        f"{TOOL_DAILY_PREFIX}{day}:{tool_name}"
+                    )
+                    day_total += int(day_stats.get("total_count", 0))
+                    day_success += int(day_stats.get("success_count", 0))
+                daily_series.append(
+                    {
+                        "date": day,
+                        "total_count": day_total,
+                        "success_count": day_success,
+                        "success_rate": round(day_success / day_total, 4)
+                        if day_total
+                        else 1.0,
+                    }
+                )
+
+            return {
+                "summary": {
+                    "total_count": total_calls,
+                    "success_count": total_success,
+                    "failure_count": total_calls - total_success,
+                    "success_rate": round(total_success / total_calls, 4)
+                    if total_calls
+                    else 1.0,
+                },
+                "tools": tools_summary,
+                "daily_series": daily_series,
+            }
+        except Exception as exc:
+            logger.error("获取工具调用统计失败: %s", exc)
+            return {
+                "summary": {
+                    "total_count": 0,
+                    "success_count": 0,
+                    "failure_count": 0,
+                    "success_rate": 1.0,
+                },
+                "tools": [],
+                "daily_series": [],
+            }
 
     async def get_token_usage_stats(
         self,
