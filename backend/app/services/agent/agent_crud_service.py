@@ -71,6 +71,7 @@ class AgentCrudService:
             temperature=agent.temperature,
             top_p=agent.top_p,
             max_tokens=agent.max_tokens,
+            model_priorities=list(agent.model_priorities or []),
             owner_id=agent.owner_id,
             is_public=agent.is_public,
             tools=list(agent.tools or []),
@@ -144,6 +145,7 @@ class AgentCrudService:
             temperature=data.temperature,
             top_p=data.top_p,
             max_tokens=data.max_tokens,
+            model_priorities=data.model_priorities,
             owner_id=user.id,
             is_public=data.is_public,
             tools=data.tools,
@@ -296,6 +298,7 @@ class AgentCrudService:
             temperature=agent.temperature,
             top_p=agent.top_p,
             max_tokens=agent.max_tokens,
+            model_priorities=list(agent.model_priorities or []),
             owner_id=user.id,
             is_public=False,
             tools=list(agent.tools or []),
@@ -331,6 +334,7 @@ class AgentCrudService:
             "temperature": agent.temperature,
             "top_p": agent.top_p,
             "max_tokens": agent.max_tokens,
+            "model_priorities": list(agent.model_priorities or []),
             "tools": list(agent.tools or []),
         }
 

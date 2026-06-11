@@ -20,7 +20,14 @@ from app.core.deps import (
 from app.core.permissions import AGENT_DELETE, AGENT_READ, AGENT_WRITE
 from app.core.response import success_response
 from app.models.agent import Agent
-from app.schemas.agent import AgentChatRequest, AgentCreate, AgentUpdate
+from app.core.constants import LLM_MODEL_DEFINITIONS, LLM_PROVIDER_ORDER
+from app.schemas.agent import (
+    AgentChatRequest,
+    AgentCreate,
+    AgentUpdate,
+    ModelDefinitionResponse,
+    ModelListResponse,
+)
 from app.services.agent.agent_crud_service import agent_crud_service
 from app.services.agent.agent_service import agent_service
 
@@ -62,6 +69,27 @@ async def list_available_tools(
     """返回系统内置 Agent 工具定义。"""
     tools = agent_service.list_available_tools()
     return success_response(data=tools)
+
+
+@router.get("/models", summary="获取支持的大模型列表")
+async def list_supported_models(
+    current_user: Annotated[CurrentUser, Depends(require_permission(AGENT_READ))],
+) -> dict[str, Any]:
+    """按厂商分组返回所有支持的大模型及参数约束。"""
+    models = [
+        ModelDefinitionResponse(
+            name=item["name"],
+            label=item["label"],
+            provider=item["provider"],
+            provider_label=item["provider_label"],
+            max_tokens=item["max_tokens"],
+            default_temperature=item["default_temperature"],
+            default_top_p=item["default_top_p"],
+        )
+        for item in LLM_MODEL_DEFINITIONS
+    ]
+    result = ModelListResponse(models=models, providers=LLM_PROVIDER_ORDER)
+    return success_response(data=result.model_dump())
 
 
 @router.get("/{agent_id}", summary="获取智能体详情")

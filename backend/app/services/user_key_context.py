@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import LLM_MODEL_MAP, SUPPORTED_LLM_MODEL_NAMES
 from app.core.encryption import decrypt_api_key
 from app.core.exceptions import ApiKeyMissingError, ValidationError
 from app.core.logging import get_logger
@@ -75,8 +76,10 @@ def infer_llm_provider_from_model(model_name: Optional[str]) -> Optional[str]:
         return "tongyi"
     if name.startswith("doubao"):
         return "doubao"
-    if name.startswith(("abab", "minimax", "embo")):
+    if name.startswith(("abab", "minimax", "embo", "m3")):
         return "minimax"
+    if name in SUPPORTED_LLM_MODEL_NAMES:
+        return LLM_MODEL_MAP[name]["provider"]
     return None
 
 

@@ -13,6 +13,7 @@ export interface AgentInfo {
   temperature: number;
   top_p: number;
   max_tokens: number;
+  model_priorities?: string[];
   owner_id?: number | null;
   is_public: boolean;
   tools: string[];
@@ -29,6 +30,7 @@ export interface CreateAgentParams {
   temperature?: number;
   top_p?: number;
   max_tokens?: number;
+  model_priorities?: string[];
   is_public?: boolean;
   tools?: string[];
 }
@@ -42,6 +44,7 @@ export interface UpdateAgentParams {
   temperature?: number;
   top_p?: number;
   max_tokens?: number;
+  model_priorities?: string[];
   is_public?: boolean;
   tools?: string[];
 }

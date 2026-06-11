@@ -48,6 +48,11 @@ class Agent(Base, TimestampMixin):
         nullable=False,
         server_default="[]",
     )
+    model_priorities: Mapped[list[Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default="[]",
+    )
 
     tenant: Mapped["Tenant"] = relationship(back_populates="agents")
     owner: Mapped[Optional["User"]] = relationship(back_populates="owned_agents")
