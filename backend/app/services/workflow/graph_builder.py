@@ -11,7 +11,8 @@ import logging
 import operator
 import re
 from datetime import datetime, timezone
-from typing import Annotated, Any, Callable, Optional, Sequence, TypedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Annotated, Any, Callable, NamedTuple, Optional, Sequence, TypedDict, Union
 
 import redis
 from langchain_core.messages import BaseMessage
@@ -25,6 +26,28 @@ from app.services.workflow.redis_saver import RedisSaver
 logger = logging.getLogger(__name__)
 
 EXECUTION_TIMEOUT_SECONDS = 30
+
+
+class Send(NamedTuple):
+    """LangGraph Send 兼容结构，用于调度后 fan-out 并行分发。"""
+
+    node: str
+    arg: dict[str, Any]
+
+
+def merge_results(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    """合并并行节点写入的 results 字段。"""
+    merged = dict(left or {})
+    merged.update(right or {})
+    return merged
+
+
+def merge_execution_logs(
+    left: list[dict[str, Any]],
+    right: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """合并并行节点追加的执行日志。"""
+    return list(left or []) + list(right or [])
 
 # 标准工作流拓扑（供前端 vue-flow 渲染）
 STANDARD_GRAPH_DEFINITION: dict[str, Any] = {
@@ -92,14 +115,14 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
     task: str
     subtasks: list[dict[str, Any]]
-    results: dict[str, Any]
+    results: Annotated[dict[str, Any], merge_results]
     current_step: str
     status: str
     error: str
     require_human_approval: bool
     human_approved: bool
     kb_id: Optional[int]
-    execution_logs: list[dict[str, Any]]
+    execution_logs: Annotated[list[dict[str, Any]], merge_execution_logs]
 
 
 StatusCallback = Callable[[str, str, dict[str, Any]], None]
@@ -118,6 +141,12 @@ class WorkflowBuilder:
         self.checkpointer = RedisSaver(self.redis)
         self._status_callback: Optional[StatusCallback] = None
         self.user_ctx = user_ctx
+        # agent 类型 -> 图节点 id（build 时按 graph_definition 填充）
+        self._node_id_by_agent: dict[str, str] = {
+            "knowledge": "knowledge_agent",
+            "search": "search_agent",
+            "execution": "execution_agent",
+        }
 
     def set_status_callback(self, callback: StatusCallback) -> None:
         """设置节点状态回调，用于 WebSocket 推送。"""
@@ -173,7 +202,14 @@ class WorkflowBuilder:
         """
         workflow = StateGraph(AgentState)
 
+        self._node_id_by_agent = {
+            "knowledge": "knowledge_agent",
+            "search": "search_agent",
+            "execution": "execution_agent",
+        }
+
         workflow.add_node("scheduler", self.scheduler_node)
+        workflow.add_node("parallel_dispatch", self.parallel_dispatch_node)
         workflow.add_node("knowledge_agent", self.knowledge_agent_node)
         workflow.add_node("search_agent", self.search_agent_node)
         workflow.add_node("execution_agent", self.execution_agent_node)
@@ -189,10 +225,13 @@ class WorkflowBuilder:
                 "knowledge": "knowledge_agent",
                 "search": "search_agent",
                 "execution": "execution_agent",
+                "parallel": "parallel_dispatch",
                 "review": "human_intervention",
                 "end": END,
             },
         )
+
+        workflow.add_edge("parallel_dispatch", "human_intervention")
 
         workflow.add_edge("knowledge_agent", "human_intervention")
         workflow.add_edge("search_agent", "human_intervention")
@@ -301,6 +340,12 @@ class WorkflowBuilder:
         human_id = type_to_node_id.get("human")
         reviewer_id = type_to_node_id.get("reviewer")
 
+        self._node_id_by_agent = {
+            agent: type_to_node_id[agent]
+            for agent in ("knowledge", "search", "execution")
+            if agent in type_to_node_id
+        }
+
         handler_map = {
             "scheduler": self.scheduler_node,
             "knowledge": self.knowledge_agent_node,
@@ -311,12 +356,13 @@ class WorkflowBuilder:
         }
 
         workflow = StateGraph(AgentState)
+        workflow.add_node("parallel_dispatch", self.parallel_dispatch_node)
         for node in nodes:
             workflow.add_node(node["id"], handler_map[node["type"]])
 
         workflow.set_entry_point(scheduler_id)
 
-        scheduler_targets: dict[str, Any] = {"end": END}
+        scheduler_targets: dict[str, Any] = {"end": END, "parallel": "parallel_dispatch"}
         for route_key, node_type in (
             ("knowledge", "knowledge"),
             ("search", "search"),
@@ -333,6 +379,13 @@ class WorkflowBuilder:
             self.route_after_scheduler,
             scheduler_targets,
         )
+
+        if human_id:
+            workflow.add_edge("parallel_dispatch", human_id)
+        elif reviewer_id:
+            workflow.add_edge("parallel_dispatch", reviewer_id)
+        else:
+            workflow.add_edge("parallel_dispatch", END)
 
         agent_types = {"knowledge", "search", "execution"}
         edges_by_source: dict[str, list[str]] = {}
@@ -802,19 +855,120 @@ class WorkflowBuilder:
 
         return state
 
-    def route_after_scheduler(self, state: AgentState) -> str:
-        """调度后的路由逻辑。"""
+    def fan_out_after_scheduler(
+        self, state: AgentState
+    ) -> Union[list[Send], str]:
+        """
+        调度后 fan-out：返回 Send 列表触发并行 Agent，或单路由键 / end。
+        """
         if state.get("status") == "failed":
             return "end"
 
+        sends = self._build_parallel_sends(state)
+        if not sends:
+            return "review"
+        if len(sends) == 1:
+            agent_type = next(
+                (
+                    agent
+                    for agent, node_id in self._node_id_by_agent.items()
+                    if node_id == sends[0].node
+                ),
+                None,
+            )
+            if agent_type:
+                return agent_type
+        return "parallel"
+
+    def route_after_scheduler(self, state: AgentState) -> str:
+        """调度后的路由逻辑（兼容 fan_out_after_scheduler）。"""
+        result = self.fan_out_after_scheduler(state)
+        if isinstance(result, str):
+            return result
+        return "parallel"
+
+    def _build_parallel_sends(self, state: AgentState) -> list[Send]:
+        """根据子任务构建 LangGraph Send 列表。"""
         subtasks = state.get("subtasks", [])
-        if any(t.get("agent") == "knowledge" for t in subtasks):
-            return "knowledge"
-        if any(t.get("agent") == "search" for t in subtasks):
-            return "search"
-        if any(t.get("agent") == "execution" for t in subtasks):
-            return "execution"
-        return "review"
+        state_snapshot = dict(state)
+        sends: list[Send] = []
+        for agent_type, node_id in self._node_id_by_agent.items():
+            if any(task.get("agent") == agent_type for task in subtasks):
+                sends.append(Send(node_id, state_snapshot))
+        return sends
+
+    def _agent_handler_for_node(self, node_id: str) -> Optional[Callable[[AgentState], AgentState]]:
+        """按节点 id 解析 Agent 处理函数。"""
+        reverse_map = {v: k for k, v in self._node_id_by_agent.items()}
+        agent_type = reverse_map.get(node_id)
+        handler_map: dict[str, Callable[[AgentState], AgentState]] = {
+            "knowledge": self.knowledge_agent_node,
+            "search": self.search_agent_node,
+            "execution": self.execution_agent_node,
+        }
+        if agent_type is None:
+            return None
+        return handler_map.get(agent_type)
+
+    def merge_parallel_states(
+        self,
+        base_state: AgentState,
+        branch_states: list[AgentState],
+    ) -> AgentState:
+        """合并并行分支状态（results / execution_logs）。"""
+        merged = dict(base_state)
+        merged_results: dict[str, Any] = dict(base_state.get("results") or {})
+        merged_logs: list[dict[str, Any]] = list(base_state.get("execution_logs") or [])
+
+        for branch in branch_states:
+            merged_results.update(branch.get("results") or {})
+            merged_logs.extend(branch.get("execution_logs") or [])
+            if branch.get("error"):
+                merged["error"] = branch["error"]
+            if branch.get("status") == "failed":
+                merged["status"] = "failed"
+
+        merged["results"] = merged_results
+        merged["execution_logs"] = merged_logs
+        return merged
+
+    def parallel_dispatch_node(self, state: AgentState) -> AgentState:
+        """
+        并行调度节点：按 Send 语义 fan-out 执行多个 Agent（langgraph 0.0.26 兼容实现）。
+        """
+        sends = self._build_parallel_sends(state)
+        if not sends:
+            return state
+
+        handlers: list[tuple[str, Callable[[AgentState], AgentState]]] = []
+        for send in sends:
+            handler = self._agent_handler_for_node(send.node)
+            if handler is not None:
+                handlers.append((send.node, handler))
+
+        if not handlers:
+            return state
+
+        branch_states: list[AgentState] = []
+        max_workers = min(len(handlers), 3)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(handler, dict(send.arg)): node_id
+                for node_id, handler in handlers
+                for send in sends
+                if send.node == node_id
+            }
+            for future in as_completed(futures):
+                try:
+                    branch_states.append(future.result())
+                except Exception as exc:
+                    logger.exception("并行节点执行失败: %s", exc)
+                    failed_state = dict(state)
+                    failed_state["status"] = "failed"
+                    failed_state["error"] = f"并行执行失败: {exc}"
+                    branch_states.append(failed_state)
+
+        return self.merge_parallel_states(state, branch_states)
 
     def route_after_human_intervention(self, state: AgentState) -> str:
         """人工介入后的路由：未启用人工介入或已批准则继续审核，否则暂停。"""

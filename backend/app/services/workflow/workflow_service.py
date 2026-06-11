@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 # 内存中维护执行运行时状态（节点状态、日志），与 Redis 检查点互补
 _runtime_state: dict[int, dict[str, Any]] = {}
+# 用户主动终止的执行 ID 集合
+_cancelled_executions: set[int] = set()
 
 
 class WorkflowService:
@@ -152,6 +154,13 @@ class WorkflowService:
         )
         runtime["node_statuses"][node_id] = status
         runtime["logs"].append(log_entry)
+        running_nodes = [
+            nid
+            for nid, node_status in runtime["node_statuses"].items()
+            if node_status == "running"
+        ]
+        runtime["parallel_running_nodes"] = running_nodes
+        runtime["is_parallel_active"] = len(running_nodes) > 1
 
     async def list_workflows(
         self,
@@ -423,6 +432,53 @@ class WorkflowService:
         )
         return self._to_execution_response(execution)
 
+    def is_execution_cancelled(self, execution_id: int) -> bool:
+        """检查执行是否已被用户终止。"""
+        return execution_id in _cancelled_executions
+
+    async def cancel_execution(
+        self,
+        db: AsyncSession,
+        execution_id: int,
+        tenant_id: int,
+        user: User,
+    ) -> WorkflowExecutionResponse:
+        """终止正在执行的工作流并撤销 ARQ 任务。"""
+        from app.core.task_queue import revoke_task
+
+        execution = await self._get_execution_or_raise(db, execution_id, tenant_id)
+
+        if execution.status not in ("pending", "running", "interrupted"):
+            raise ValidationError(message="当前执行无法终止")
+
+        runtime = _runtime_state.get(execution_id, {})
+        task_id = runtime.get("task_id")
+        if task_id:
+            await revoke_task(task_id)
+
+        _cancelled_executions.add(execution_id)
+        execution.status = "failed"
+        execution.error_message = "工作流已被用户终止"
+        execution.completed_at = datetime.now(timezone.utc)
+        await db.flush()
+
+        await workflow_ws_manager.broadcast_execution_status(
+            execution_id,
+            "failed",
+            {"error": execution.error_message, "cancelled": True},
+        )
+        await audit_service.record_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="workflow.cancel",
+            resource_type="workflow_execution",
+            resource_id=execution_id,
+            detail={"task_id": task_id},
+        )
+        logger.info("工作流已终止 execution_id=%s task_id=%s", execution_id, task_id)
+        return self._to_execution_response(execution)
+
     async def handle_human_intervention(
         self,
         db: AsyncSession,
@@ -484,6 +540,10 @@ class WorkflowService:
             )
 
         try:
+            if self.is_execution_cancelled(execution_id):
+                await self._mark_execution_failed(execution_id, "工作流已被用户终止")
+                return
+
             user_ctx = None
             graph_definition: dict[str, Any] | None = None
             async with async_session_factory() as db:
@@ -528,18 +588,32 @@ class WorkflowService:
 
             config = {"configurable": {"thread_id": thread_id}}
 
+            if self.is_execution_cancelled(execution_id):
+                await self._mark_execution_failed(execution_id, "工作流已被用户终止")
+                return
+
             loop = asyncio.get_event_loop()
             final_state = await loop.run_in_executor(
                 None,
                 lambda: graph.invoke(initial_state, config),
             )
 
+            if self.is_execution_cancelled(execution_id):
+                await self._mark_execution_failed(execution_id, "工作流已被用户终止")
+                return
+
             await self._finalize_execution(
                 execution_id, final_state, require_human
             )
+        except asyncio.CancelledError:
+            logger.info("工作流任务已撤销 execution_id=%s", execution_id)
+            await self._mark_execution_failed(execution_id, "工作流已被用户终止")
         except Exception as exc:
             logger.exception("工作流执行失败 execution_id=%s: %s", execution_id, exc)
-            await self._mark_execution_failed(execution_id, str(exc))
+            if self.is_execution_cancelled(execution_id):
+                await self._mark_execution_failed(execution_id, "工作流已被用户终止")
+            else:
+                await self._mark_execution_failed(execution_id, str(exc))
 
     async def run_resume_workflow_task(
         self,
@@ -561,6 +635,10 @@ class WorkflowService:
             )
 
         try:
+            if self.is_execution_cancelled(execution_id):
+                await self._mark_execution_failed(execution_id, "工作流已被用户终止")
+                return
+
             from app.core.database import async_session_factory
 
             async with async_session_factory() as db:
@@ -583,6 +661,10 @@ class WorkflowService:
                 )
                 await db.commit()
 
+            if self.is_execution_cancelled(execution_id):
+                await self._mark_execution_failed(execution_id, "工作流已被用户终止")
+                return
+
             require_human = bool(input_params.get("require_human_approval"))
             builder = WorkflowBuilder(settings.redis_url, user_ctx=user_ctx)
             builder.set_status_callback(status_callback)
@@ -602,14 +684,24 @@ class WorkflowService:
                 lambda: graph.invoke(resume_state, config),
             )
 
+            if self.is_execution_cancelled(execution_id):
+                await self._mark_execution_failed(execution_id, "工作流已被用户终止")
+                return
+
             await self._finalize_execution(
                 execution_id, final_state, require_human
             )
+        except asyncio.CancelledError:
+            logger.info("工作流恢复任务已撤销 execution_id=%s", execution_id)
+            await self._mark_execution_failed(execution_id, "工作流已被用户终止")
         except Exception as exc:
             logger.exception(
                 "工作流恢复失败 execution_id=%s: %s", execution_id, exc
             )
-            await self._mark_execution_failed(execution_id, str(exc))
+            if self.is_execution_cancelled(execution_id):
+                await self._mark_execution_failed(execution_id, "工作流已被用户终止")
+            else:
+                await self._mark_execution_failed(execution_id, str(exc))
 
     async def _finalize_execution(
         self,

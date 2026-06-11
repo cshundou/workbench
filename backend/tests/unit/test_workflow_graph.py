@@ -7,6 +7,7 @@ import pytest
 from app.core.exceptions import ValidationError
 from app.services.workflow.graph_builder import (
     STANDARD_GRAPH_DEFINITION,
+    Send,
     WorkflowBuilder,
 )
 
@@ -74,6 +75,55 @@ class TestExecutionToolResolver:
             )
             == "sql"
         )
+
+
+class TestParallelFanOut:
+    """调度后 fan-out 并行 Send 构建。"""
+
+    @pytest.fixture
+    def builder(self) -> WorkflowBuilder:
+        return WorkflowBuilder(redis_url="redis://localhost:6379/15")
+
+    def test_fan_out_returns_parallel_for_multiple_agents(
+        self, builder: WorkflowBuilder
+    ) -> None:
+        state = {
+            "status": "running",
+            "subtasks": [
+                {"agent": "knowledge", "task": "查政策"},
+                {"agent": "search", "task": "查法规"},
+            ],
+        }
+        result = builder.fan_out_after_scheduler(state)
+        assert result == "parallel"
+
+    def test_build_parallel_sends_creates_send_per_agent(
+        self, builder: WorkflowBuilder
+    ) -> None:
+        state = {
+            "task": "综合查询",
+            "subtasks": [
+                {"agent": "knowledge", "task": "a"},
+                {"agent": "execution", "task": "b"},
+            ],
+        }
+        sends = builder._build_parallel_sends(state)
+        assert len(sends) == 2
+        assert all(isinstance(item, Send) for item in sends)
+        node_ids = {item.node for item in sends}
+        assert node_ids == {"knowledge_agent", "execution_agent"}
+
+    def test_merge_parallel_states_merges_results(
+        self, builder: WorkflowBuilder
+    ) -> None:
+        base = {"results": {}, "execution_logs": []}
+        branches = [
+            {"results": {"knowledge": "k"}, "execution_logs": [{"node_id": "k1"}]},
+            {"results": {"search": "s"}, "execution_logs": [{"node_id": "s1"}]},
+        ]
+        merged = builder.merge_parallel_states(base, branches)
+        assert merged["results"] == {"knowledge": "k", "search": "s"}
+        assert len(merged["execution_logs"]) == 2
 
 
 class TestBuildFromDefinition:
