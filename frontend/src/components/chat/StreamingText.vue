@@ -32,6 +32,15 @@ const props = withDefaults(
 
 const markdownRef = ref<HTMLElement | null>(null);
 
+/** 过滤 XSS 危险标签与事件属性 */
+function sanitizeHtml(html: string): string {
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+    .replace(/\s+on\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/javascript:/gi, '');
+}
+
 /** 简易 Markdown 渲染：标题、粗体、行内代码、代码块、表格、链接 */
 function renderMarkdown(text: string): string {
   if (!text) {
@@ -99,7 +108,7 @@ function renderMarkdown(text: string): string {
   // 换行
   html = html.replace(/\n/g, '<br />');
 
-  return html;
+  return sanitizeHtml(html);
 }
 
 const renderedHtml = computed(() => renderMarkdown(props.content));
