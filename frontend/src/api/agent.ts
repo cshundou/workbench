@@ -16,6 +16,8 @@ export interface AgentInfo {
   model_priorities?: string[];
   owner_id?: number | null;
   is_public: boolean;
+  is_share_enabled?: boolean;
+  share_token?: string | null;
   tools: string[];
   created_at?: string;
   updated_at?: string;
@@ -126,6 +128,14 @@ export function deleteAgent(id: number): Promise<void> {
 /** 复制智能体 */
 export function copyAgent(id: number): Promise<AgentInfo> {
   return request.post(`/agents/${id}/copy`) as Promise<AgentInfo>;
+}
+
+export function enableAgentShare(id: number): Promise<AgentInfo> {
+  return request.post(`/agents/${id}/share`) as Promise<AgentInfo>;
+}
+
+export function disableAgentShare(id: number): Promise<AgentInfo> {
+  return request.delete(`/agents/${id}/share`) as Promise<AgentInfo>;
 }
 
 /** 获取可用工具列表 */

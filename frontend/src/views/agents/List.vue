@@ -6,7 +6,7 @@ import { Plus, Search } from '@element-plus/icons-vue';
 import AgentCard from '@/components/agent/AgentCard.vue';
 import AgentConfigForm from '@/components/agent/AgentConfigForm.vue';
 import type { AgentFormData } from '@/components/agent/AgentConfigForm.vue';
-import { createAgent, updateAgent, deleteAgent, copyAgent } from '@/api/agent';
+import { createAgent, updateAgent, deleteAgent, copyAgent, enableAgentShare } from '@/api/agent';
 import type { AgentInfo } from '@/api/agent';
 import { useAgentStore } from '@/stores/agent';
 import { useUserStore } from '@/stores/user';
@@ -87,6 +87,22 @@ async function handleCopy(agent: AgentInfo): Promise<void> {
   }
 }
 
+async function handleShare(agent: AgentInfo): Promise<void> {
+  try {
+    const result = await enableAgentShare(agent.id);
+    const shareUrl = `${window.location.origin}/agents/share/${result.share_token}`;
+    await ElMessageBox.alert(
+      `分享链接：${shareUrl}`,
+      '分享成功',
+      { confirmButtonText: '复制链接' },
+    );
+    await navigator.clipboard.writeText(shareUrl);
+    ElMessage.success('链接已复制到剪贴板');
+  } catch (error) {
+    console.error('[Share Agent Error]', error);
+  }
+}
+
 async function handleDelete(agent: AgentInfo): Promise<void> {
   try {
     await ElMessageBox.confirm(`确定删除智能体「${agent.name}」吗？`, '删除确认', {
@@ -163,6 +179,7 @@ onMounted(() => {
             @edit="openEditDialog"
             @delete="handleDelete"
             @copy="handleCopy"
+            @share="handleShare"
             @chat="goChat"
             @config="goConfig"
           />

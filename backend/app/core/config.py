@@ -171,6 +171,7 @@ class Settings(BaseSettings):
             "/api/v1/auth/refresh",
             "/api/v1/auth/forgot-password",
             "/api/v1/auth/reset-password",
+            "/api/v1/agents/share",
             "/api/v1/config/auth",
             "/metrics",
             "/docs",

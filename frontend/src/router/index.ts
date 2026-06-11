@@ -11,6 +11,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false, title: '登录' },
   },
   {
+    path: '/agents/share/:token',
+    name: 'AgentShare',
+    component: () => import('@/views/agents/Share.vue'),
+    meta: { requiresAuth: false, title: '智能体分享' },
+  },
+  {
     path: '/',
     name: 'Layout',
     component: () => import('@/views/Layout.vue'),

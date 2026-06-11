@@ -140,6 +140,54 @@ async def delete_agent(
     return success_response(message="删除成功")
 
 
+@router.post("/{agent_id}/share", summary="开启智能体分享")
+async def enable_agent_share(
+    agent_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(AGENT_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """生成智能体分享链接。"""
+    result = await agent_crud_service.enable_share(db, agent_id, tenant_id, current_user)
+    return success_response(data=result.model_dump(), message="分享已开启")
+
+
+@router.delete("/{agent_id}/share", summary="取消智能体分享")
+async def disable_agent_share(
+    agent_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(AGENT_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """取消分享，原链接立即失效。"""
+    result = await agent_crud_service.disable_share(db, agent_id, tenant_id, current_user)
+    return success_response(data=result.model_dump(), message="分享已取消")
+
+
+@router.get("/share/{share_token}", summary="查看分享的智能体")
+async def get_shared_agent(
+    share_token: str,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """通过分享链接查看智能体详情（无需登录）。"""
+    result = await agent_crud_service.get_shared_agent(db, share_token)
+    return success_response(data=result.model_dump())
+
+
+@router.post("/share/{share_token}/copy", summary="复制分享的智能体")
+async def copy_shared_agent(
+    share_token: str,
+    current_user: Annotated[CurrentUser, Depends(require_permission(AGENT_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """将分享的智能体复制到当前用户。"""
+    result = await agent_crud_service.copy_shared_agent(
+        db, share_token, tenant_id, current_user
+    )
+    return success_response(data=result.model_dump(), message="复制成功")
+
+
 @router.post("/{agent_id}/copy", summary="复制智能体")
 async def copy_agent(
     agent_id: int,

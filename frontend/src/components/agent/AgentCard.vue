@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChatDotRound, CopyDocument, Delete, Edit, Setting } from '@element-plus/icons-vue';
+import { ChatDotRound, CopyDocument, Delete, Edit, Setting, Share } from '@element-plus/icons-vue';
 import type { AgentInfo } from '@/api/agent';
 
 defineProps<{
@@ -12,6 +12,7 @@ const emit = defineEmits<{
   edit: [agent: AgentInfo];
   delete: [agent: AgentInfo];
   copy: [agent: AgentInfo];
+  share: [agent: AgentInfo];
   chat: [agent: AgentInfo];
   config: [agent: AgentInfo];
 }>();
@@ -42,6 +43,9 @@ const emit = defineEmits<{
       <el-button v-if="canWrite" text :icon="Edit" @click="emit('edit', agent)">编辑</el-button>
       <el-button v-if="canWrite" text :icon="CopyDocument" @click="emit('copy', agent)">
         复制
+      </el-button>
+      <el-button v-if="canWrite" text :icon="Share" @click="emit('share', agent)">
+        分享
       </el-button>
       <el-button v-if="canDelete" text type="danger" :icon="Delete" @click="emit('delete', agent)">
         删除

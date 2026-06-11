@@ -43,6 +43,8 @@ class Agent(Base, TimestampMixin):
         index=True,
     )
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    share_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True)
+    is_share_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     tools: Mapped[list[Any]] = mapped_column(
         JSONB,
         nullable=False,

@@ -2,6 +2,7 @@
 智能体 CRUD 业务服务。
 """
 
+import secrets
 from typing import Optional
 
 from sqlalchemy import func, or_, select
@@ -74,6 +75,8 @@ class AgentCrudService:
             model_priorities=list(agent.model_priorities or []),
             owner_id=agent.owner_id,
             is_public=agent.is_public,
+            is_share_enabled=agent.is_share_enabled,
+            share_token=agent.share_token if agent.is_share_enabled else None,
             tools=list(agent.tools or []),
             created_at=agent.created_at,
             updated_at=agent.updated_at,
@@ -276,7 +279,7 @@ class AgentCrudService:
         agent = await self._get_agent_or_raise(db, agent_id, tenant_id)
         await self._check_agent_access(agent, user)
 
-        copy_name = f"{agent.name}_副本"
+        copy_name = f"{agent.name} (副本)"
         suffix = 1
         while True:
             check_stmt = select(Agent.id).where(
@@ -323,6 +326,89 @@ class AgentCrudService:
         )
         await db.commit()
         logger.info("复制智能体成功 source_id=%s new_id=%s", agent_id, new_agent.id)
+        return self._to_response(new_agent)
+
+    async def enable_share(
+        self,
+        db: AsyncSession,
+        agent_id: int,
+        tenant_id: int,
+        user: User,
+    ) -> AgentResponse:
+        """开启智能体分享并生成唯一链接令牌。"""
+        agent = await self._get_agent_or_raise(db, agent_id, tenant_id)
+        await self._check_agent_access(agent, user, require_owner=True)
+        agent.is_share_enabled = True
+        agent.share_token = secrets.token_urlsafe(32)
+        await db.commit()
+        await db.refresh(agent)
+        return self._to_response(agent)
+
+    async def disable_share(
+        self,
+        db: AsyncSession,
+        agent_id: int,
+        tenant_id: int,
+        user: User,
+    ) -> AgentResponse:
+        """取消智能体分享。"""
+        agent = await self._get_agent_or_raise(db, agent_id, tenant_id)
+        await self._check_agent_access(agent, user, require_owner=True)
+        agent.is_share_enabled = False
+        agent.share_token = None
+        await db.commit()
+        await db.refresh(agent)
+        return self._to_response(agent)
+
+    async def get_shared_agent(
+        self,
+        db: AsyncSession,
+        share_token: str,
+    ) -> AgentResponse:
+        """通过分享令牌获取智能体（只读）。"""
+        stmt = select(Agent).where(
+            Agent.share_token == share_token,
+            Agent.is_share_enabled.is_(True),
+        )
+        agent = (await db.execute(stmt)).scalar_one_or_none()
+        if agent is None:
+            raise NotFoundError(message="分享链接无效或已失效")
+        return self._to_response(agent)
+
+    async def copy_shared_agent(
+        self,
+        db: AsyncSession,
+        share_token: str,
+        tenant_id: int,
+        user: User,
+    ) -> AgentResponse:
+        """从分享链接复制智能体到当前用户。"""
+        stmt = select(Agent).where(
+            Agent.share_token == share_token,
+            Agent.is_share_enabled.is_(True),
+        )
+        agent = (await db.execute(stmt)).scalar_one_or_none()
+        if agent is None:
+            raise NotFoundError(message="分享链接无效或已失效")
+
+        copy_name = f"{agent.name} (副本)"
+        new_agent = Agent(
+            tenant_id=tenant_id,
+            name=copy_name,
+            description=agent.description,
+            system_prompt=agent.system_prompt,
+            model_name=agent.model_name,
+            temperature=agent.temperature,
+            top_p=agent.top_p,
+            max_tokens=agent.max_tokens,
+            model_priorities=list(agent.model_priorities or []),
+            owner_id=user.id,
+            is_public=False,
+            tools=list(agent.tools or []),
+        )
+        db.add(new_agent)
+        await db.commit()
+        await db.refresh(new_agent)
         return self._to_response(new_agent)
 
     def to_agent_config(self, agent: Agent) -> dict:

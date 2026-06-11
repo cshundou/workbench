@@ -106,6 +106,8 @@ class AgentResponse(BaseModel):
     model_priorities: List[str] = Field(default_factory=list)
     owner_id: Optional[int] = None
     is_public: bool
+    is_share_enabled: bool = False
+    share_token: Optional[str] = None
     tools: List[str]
     created_at: datetime
     updated_at: datetime
