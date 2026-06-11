@@ -31,10 +31,21 @@ export interface AgentFormData {
   system_prompt: string;
   model_name: string;
   temperature: number;
+  top_p: number;
   max_tokens: number;
   is_public: boolean;
   tools: string[];
 }
+
+const modelOptions = [
+  { label: 'GPT-3.5 Turbo', value: 'gpt-3.5-turbo', group: 'OpenAI' },
+  { label: 'GPT-4o', value: 'gpt-4o', group: 'OpenAI' },
+  { label: 'GPT-4o Mini', value: 'gpt-4o-mini', group: 'OpenAI' },
+  { label: '通义千问 Max', value: 'qwen-max', group: '通义千问' },
+  { label: '通义千问 Plus', value: 'qwen-plus', group: '通义千问' },
+  { label: '豆包 Pro 32K', value: 'doubao-pro-32k', group: '豆包' },
+  { label: 'MiniMax abab6.5', value: 'abab6.5-chat', group: 'MiniMax' },
+];
 
 const formRef = ref<FormInstance>();
 
@@ -44,6 +55,7 @@ const form = reactive<AgentFormData>({
   system_prompt: '你是一个专业的企业智能助手，能够使用工具帮助用户解决问题。',
   model_name: 'gpt-3.5-turbo',
   temperature: 0.7,
+  top_p: 1,
   max_tokens: 2048,
   is_public: false,
   tools: [],
@@ -70,6 +82,7 @@ function fillForm(agent: AgentInfo): void {
   form.system_prompt = agent.system_prompt;
   form.model_name = agent.model_name;
   form.temperature = agent.temperature;
+  form.top_p = agent.top_p ?? 1;
   form.max_tokens = agent.max_tokens;
   form.is_public = agent.is_public;
   form.tools = [...agent.tools];
@@ -136,14 +149,27 @@ async function handleSubmit(): Promise<void> {
 
       <el-form-item label="模型">
         <el-select v-model="form.model_name" style="width: 100%">
-          <el-option label="GPT-3.5 Turbo" value="gpt-3.5-turbo" />
-          <el-option label="GPT-4o" value="gpt-4o" />
-          <el-option label="GPT-4o Mini" value="gpt-4o-mini" />
+          <el-option-group
+            v-for="group in ['OpenAI', '通义千问', '豆包', 'MiniMax']"
+            :key="group"
+            :label="group"
+          >
+            <el-option
+              v-for="item in modelOptions.filter((m) => m.group === group)"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-option-group>
         </el-select>
       </el-form-item>
 
       <el-form-item label="温度">
         <el-slider v-model="form.temperature" :min="0" :max="2" :step="0.1" show-input />
+      </el-form-item>
+
+      <el-form-item label="Top P">
+        <el-slider v-model="form.top_p" :min="0" :max="1" :step="0.05" show-input />
       </el-form-item>
 
       <el-form-item label="最大 Token">
@@ -195,14 +221,27 @@ async function handleSubmit(): Promise<void> {
 
     <el-form-item label="模型">
       <el-select v-model="form.model_name" style="width: 100%">
-        <el-option label="GPT-3.5 Turbo" value="gpt-3.5-turbo" />
-        <el-option label="GPT-4o" value="gpt-4o" />
-        <el-option label="GPT-4o Mini" value="gpt-4o-mini" />
+        <el-option-group
+          v-for="group in ['OpenAI', '通义千问', '豆包', 'MiniMax']"
+          :key="group"
+          :label="group"
+        >
+          <el-option
+            v-for="item in modelOptions.filter((m) => m.group === group)"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-option-group>
       </el-select>
     </el-form-item>
 
     <el-form-item label="温度">
       <el-slider v-model="form.temperature" :min="0" :max="2" :step="0.1" show-input />
+    </el-form-item>
+
+    <el-form-item label="Top P">
+      <el-slider v-model="form.top_p" :min="0" :max="1" :step="0.05" show-input />
     </el-form-item>
 
     <el-form-item label="最大 Token">

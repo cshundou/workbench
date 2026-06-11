@@ -35,6 +35,7 @@ class Agent(Base, TimestampMixin):
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     model_name: Mapped[str] = mapped_column(String(50), default="gpt-3.5-turbo", nullable=False)
     temperature: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
+    top_p: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     max_tokens: Mapped[int] = mapped_column(Integer, default=2048, nullable=False)
     owner_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),

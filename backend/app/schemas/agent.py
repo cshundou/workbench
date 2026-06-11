@@ -16,6 +16,7 @@ class AgentCreate(BaseModel):
     system_prompt: str = Field(..., min_length=1, description="系统提示词")
     model_name: str = Field(default="gpt-3.5-turbo", max_length=50, description="模型名称")
     temperature: float = Field(default=0.7, ge=0, le=2, description="温度参数")
+    top_p: float = Field(default=1.0, ge=0, le=1, description="核采样 top_p 参数")
     max_tokens: int = Field(default=2048, ge=256, le=8192, description="最大 Token 数")
     is_public: bool = Field(default=False, description="是否公开")
     tools: List[str] = Field(default_factory=list, description="可用工具列表")
@@ -29,6 +30,7 @@ class AgentUpdate(BaseModel):
     system_prompt: Optional[str] = Field(default=None, min_length=1)
     model_name: Optional[str] = Field(default=None, max_length=50)
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
+    top_p: Optional[float] = Field(default=None, ge=0, le=1)
     max_tokens: Optional[int] = Field(default=None, ge=256, le=8192)
     is_public: Optional[bool] = None
     tools: Optional[List[str]] = None
@@ -44,6 +46,7 @@ class AgentResponse(BaseModel):
     system_prompt: str
     model_name: str
     temperature: float
+    top_p: float
     max_tokens: int
     owner_id: Optional[int] = None
     is_public: bool

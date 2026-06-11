@@ -237,6 +237,7 @@ class AgentService:
             user_ctx,
             model_name=agent_config.get("model_name"),
             temperature=agent_config["temperature"],
+            top_p=agent_config.get("top_p"),
             max_tokens=agent_config["max_tokens"],
         )
 

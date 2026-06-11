@@ -321,6 +321,7 @@ def create_chat_llm(
     model_name: Optional[str] = None,
     preferred_provider: Optional[str] = None,
     temperature: float = 0.7,
+    top_p: Optional[float] = None,
     max_tokens: Optional[int] = None,
 ) -> ChatOpenAI:
     """
@@ -331,6 +332,7 @@ def create_chat_llm(
         model_name: 覆盖模型名称。
         preferred_provider: 优先提供商。
         temperature: 温度参数。
+        top_p: 核采样参数。
         max_tokens: 最大 Token 数。
 
     Returns:
@@ -358,6 +360,8 @@ def create_chat_llm(
         kwargs["base_url"] = base_url
     if max_tokens:
         kwargs["max_tokens"] = max_tokens
+    if top_p is not None:
+        kwargs["top_p"] = top_p
 
     return ChatOpenAI(**kwargs)
 

@@ -10,6 +10,7 @@ export interface AgentInfo {
   system_prompt: string;
   model_name: string;
   temperature: number;
+  top_p: number;
   max_tokens: number;
   owner_id?: number | null;
   is_public: boolean;
@@ -25,6 +26,7 @@ export interface CreateAgentParams {
   system_prompt: string;
   model_name?: string;
   temperature?: number;
+  top_p?: number;
   max_tokens?: number;
   is_public?: boolean;
   tools?: string[];
@@ -37,6 +39,7 @@ export interface UpdateAgentParams {
   system_prompt?: string;
   model_name?: string;
   temperature?: number;
+  top_p?: number;
   max_tokens?: number;
   is_public?: boolean;
   tools?: string[];
