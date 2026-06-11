@@ -309,7 +309,7 @@ class KnowledgeBaseService:
         kb = await self._get_kb_or_raise(db, kb_id, tenant_id)
         await self._check_kb_access(kb, user, require_owner=True)
 
-        await rag_service.delete_kb_vectors(kb_id, kb.embedding_model, user_ctx)
+        await rag_service.delete_kb_vectors(tenant_id, kb_id, kb.embedding_model, user_ctx)
 
         docs_stmt = select(Document).where(Document.kb_id == kb_id)
         documents = (await db.execute(docs_stmt)).scalars().all()

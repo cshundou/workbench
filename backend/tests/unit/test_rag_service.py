@@ -34,7 +34,7 @@ class TestRAGServiceHelpers:
     def test_collection_name(self) -> None:
         from app.services.rag.rag_service import rag_service
 
-        assert rag_service._collection_name(7) == "kb_7"
+        assert rag_service._collection_name(1, 7) == "t1_kb_7"
 
     def test_invalidate_retriever(self) -> None:
         from app.services.rag.rag_service import rag_service

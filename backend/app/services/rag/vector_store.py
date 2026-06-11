@@ -17,6 +17,11 @@ from app.services.user_key_context import UserKeyContext
 logger = get_logger(__name__)
 
 
+def build_collection_name(tenant_id: int, kb_id: int) -> str:
+    """生成带租户前缀的向量集合名称，确保跨租户物理隔离。"""
+    return f"t{tenant_id}_kb_{kb_id}"
+
+
 class VectorStoreBackend(ABC):
     """向量存储后端抽象接口。"""
 
@@ -50,11 +55,13 @@ class ChromaVectorStoreBackend(VectorStoreBackend):
 
     def __init__(
         self,
+        tenant_id: int,
         kb_id: int,
         embeddings: OpenAIEmbeddings,
     ) -> None:
+        self.tenant_id = tenant_id
         self.kb_id = kb_id
-        self.collection_name = f"kb_{kb_id}"
+        self.collection_name = build_collection_name(tenant_id, kb_id)
         self.store = Chroma(
             collection_name=self.collection_name,
             embedding_function=embeddings,
@@ -93,6 +100,7 @@ class PineconeVectorStoreBackend(VectorStoreBackend):
 
     def __init__(
         self,
+        tenant_id: int,
         kb_id: int,
         embeddings: OpenAIEmbeddings,
         user_ctx: UserKeyContext,
@@ -111,8 +119,9 @@ class PineconeVectorStoreBackend(VectorStoreBackend):
 
         client = Pinecone(api_key=pinecone_key.api_key)
         index = client.Index(settings.pinecone_index_name)
+        self.tenant_id = tenant_id
         self.kb_id = kb_id
-        self.namespace = f"kb_{kb_id}"
+        self.namespace = build_collection_name(tenant_id, kb_id)
         self._pinecone_index = index
         self.store = PineconeVectorStore(
             index=index,
@@ -151,6 +160,7 @@ def get_chroma_collection_path(kb_id: int) -> str:
 
 
 def create_vector_store_backend(
+    tenant_id: int,
     kb_id: int,
     embeddings: OpenAIEmbeddings,
     user_ctx: UserKeyContext,
@@ -158,7 +168,17 @@ def create_vector_store_backend(
     """按配置创建向量存储后端，Pinecone 不可用时自动降级到 Chroma。"""
     if settings.vector_store == "pinecone":
         try:
-            return PineconeVectorStoreBackend(kb_id=kb_id, embeddings=embeddings, user_ctx=user_ctx)
+            return PineconeVectorStoreBackend(
+                tenant_id=tenant_id,
+                kb_id=kb_id,
+                embeddings=embeddings,
+                user_ctx=user_ctx,
+            )
         except Exception as exc:
-            logger.warning("Pinecone 初始化失败，已降级到 Chroma kb_id=%s error=%s", kb_id, exc)
-    return ChromaVectorStoreBackend(kb_id=kb_id, embeddings=embeddings)
+            logger.warning(
+                "Pinecone 初始化失败，已降级到 Chroma tenant_id=%s kb_id=%s error=%s",
+                tenant_id,
+                kb_id,
+                exc,
+            )
+    return ChromaVectorStoreBackend(tenant_id=tenant_id, kb_id=kb_id, embeddings=embeddings)

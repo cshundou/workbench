@@ -31,7 +31,11 @@ from app.services.rag.context_builder import ContextBuilder
 from app.services.rag.document_loader import DocumentLoader
 from app.services.rag.reranker import Reranker
 from app.services.rag.retriever import HybridRetriever
-from app.services.rag.vector_store import VectorStoreBackend, create_vector_store_backend
+from app.services.rag.vector_store import (
+    VectorStoreBackend,
+    build_collection_name,
+    create_vector_store_backend,
+)
 from app.services.user_key_context import (
     UserKeyContext,
     create_chat_llm,
@@ -74,12 +78,13 @@ class RAGService:
             self._embeddings_cache[cache_key] = create_embeddings(user_ctx, model_name)
         return self._embeddings_cache[cache_key]
 
-    def _collection_name(self, kb_id: int) -> str:
-        """生成 Chroma 集合名称。"""
-        return f"kb_{kb_id}"
+    def _collection_name(self, tenant_id: int, kb_id: int) -> str:
+        """生成带租户前缀的 Chroma 集合名称。"""
+        return build_collection_name(tenant_id, kb_id)
 
     def get_vector_store(
         self,
+        tenant_id: int,
         kb_id: int,
         embedding_model: str,
         user_ctx: UserKeyContext,
@@ -88,20 +93,23 @@ class RAGService:
         获取或创建知识库对应的向量存储后端。
 
         Args:
+            tenant_id: 租户 ID。
             kb_id: 知识库 ID。
             embedding_model: 嵌入模型名称。
 
         Returns:
             向量存储后端实例。
         """
-        if kb_id not in self._vector_stores:
+        cache_key = f"{tenant_id}:{kb_id}"
+        if cache_key not in self._vector_stores:
             embeddings = self._get_embeddings(user_ctx, embedding_model)
-            self._vector_stores[kb_id] = create_vector_store_backend(
+            self._vector_stores[cache_key] = create_vector_store_backend(
+                tenant_id=tenant_id,
                 kb_id=kb_id,
                 embeddings=embeddings,
                 user_ctx=user_ctx,
             )
-        return self._vector_stores[kb_id]
+        return self._vector_stores[cache_key]
 
     async def _get_hybrid_retriever(
         self,
@@ -110,7 +118,7 @@ class RAGService:
         user_ctx: UserKeyContext,
     ) -> HybridRetriever:
         """获取或初始化混合检索器（含 BM25 语料）。"""
-        vector_store = self.get_vector_store(kb.id, kb.embedding_model, user_ctx)
+        vector_store = self.get_vector_store(kb.tenant_id, kb.id, kb.embedding_model, user_ctx)
 
         if kb.id not in self._retrievers:
             retriever = HybridRetriever(vector_store)
@@ -458,7 +466,7 @@ class RAGService:
             # 删除该文档旧分块（增量更新：仅重建当前文档）
             await self._delete_document_vectors(db, document, user_ctx)
 
-            vector_store = self.get_vector_store(kb.id, kb.embedding_model, user_ctx)
+            vector_store = self.get_vector_store(kb.tenant_id, kb.id, kb.embedding_model, user_ctx)
             parent_db_ids: dict[int, int] = {}
             saved_count = 0
             total = len(raw_chunks)
@@ -552,7 +560,7 @@ class RAGService:
         kb_stmt = select(KnowledgeBase).where(KnowledgeBase.id == document.kb_id)
         kb = (await db.execute(kb_stmt)).scalar_one_or_none()
         if chunks and kb:
-            vector_store = self.get_vector_store(kb.id, kb.embedding_model, user_ctx)
+            vector_store = self.get_vector_store(kb.tenant_id, kb.id, kb.embedding_model, user_ctx)
             vector_ids = [chunk.vector_id for chunk in chunks]
             try:
                 vector_store.delete(ids=vector_ids)
@@ -577,20 +585,27 @@ class RAGService:
 
     async def delete_kb_vectors(
         self,
+        tenant_id: int,
         kb_id: int,
         embedding_model: str,
         user_ctx: UserKeyContext,
     ) -> None:
         """删除知识库对应的整个向量集合。"""
-        vector_store = self.get_vector_store(kb_id, embedding_model, user_ctx)
+        cache_key = f"{tenant_id}:{kb_id}"
+        vector_store = self.get_vector_store(tenant_id, kb_id, embedding_model, user_ctx)
         try:
             vector_store.delete_collection()
             vector_store.persist()
         except Exception as exc:
-            logger.warning("删除知识库向量集合失败 kb_id=%s: %s", kb_id, exc)
-        self._vector_stores.pop(kb_id, None)
+            logger.warning(
+                "删除知识库向量集合失败 tenant_id=%s kb_id=%s: %s",
+                tenant_id,
+                kb_id,
+                exc,
+            )
+        self._vector_stores.pop(cache_key, None)
         self._invalidate_retriever(kb_id)
-        logger.info("已清理知识库向量 kb_id=%s", kb_id)
+        logger.info("已清理知识库向量 tenant_id=%s kb_id=%s", tenant_id, kb_id)
 
     async def rebuild_knowledge_base_vectors(
         self,
@@ -622,7 +637,7 @@ class RAGService:
             raise NotFoundError(message="知识库不存在")
 
         user_ctx.get_embedding_provider()
-        await self.delete_kb_vectors(kb_id, kb.embedding_model, user_ctx)
+        await self.delete_kb_vectors(tenant_id, kb_id, kb.embedding_model, user_ctx)
 
         doc_stmt = select(DocumentModel).where(DocumentModel.kb_id == kb_id)
         documents = list((await db.execute(doc_stmt)).scalars().all())
@@ -743,8 +758,8 @@ class RAGService:
 
         cohere_key = user_ctx.get_provider("cohere")
         reranker = Reranker(
-            hybrid_retriever.vector_retriever,
             cohere_api_key=cohere_key.api_key if cohere_key else None,
+            top_n=top_k,
         )
         final_docs = reranker.rerank(query, doc_dicts)[:top_k]
         latency_ms = (time.perf_counter() - started) * 1000
