@@ -53,3 +53,11 @@ class UserListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class UserImportResult(BaseModel):
+    """用户批量导入结果。"""
+
+    success_count: int
+    failed_count: int
+    errors: List[str] = Field(default_factory=list)

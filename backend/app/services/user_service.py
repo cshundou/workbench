@@ -2,6 +2,8 @@
 用户业务服务。
 """
 
+import csv
+import io
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -15,7 +17,7 @@ from app.core.security import get_password_hash
 from app.models.role import Role
 from app.models.user import User
 from app.schemas.auth import RoleBrief
-from app.schemas.user import UserCreate, UserListResponse, UserResponse, UserUpdate
+from app.schemas.user import UserCreate, UserImportResult, UserListResponse, UserResponse, UserUpdate
 from app.services.audit_service import audit_service
 
 logger = get_logger(__name__)
@@ -279,6 +281,114 @@ class UserService:
             detail=detail,
         )
         logger.info("删除用户成功 user_id=%s tenant_id=%s", user_id, tenant_id)
+
+    async def export_users_csv(self, db: AsyncSession, tenant_id: int) -> str:
+        """
+        导出当前租户全部用户为 CSV 文本。
+
+        Args:
+            db: 数据库会话。
+            tenant_id: 租户 ID。
+
+        Returns:
+            CSV 格式字符串（含表头）。
+        """
+        stmt = (
+            select(User)
+            .options(selectinload(User.role))
+            .where(User.tenant_id == tenant_id)
+            .order_by(User.id.asc())
+        )
+        result = await db.execute(stmt)
+        users = result.scalars().all()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["username", "email", "role_id", "role_name", "status", "created_at"])
+        for user in users:
+            writer.writerow([
+                user.username,
+                user.email,
+                user.role_id or "",
+                user.role.name if user.role else "",
+                user.status,
+                user.created_at.isoformat() if user.created_at else "",
+            ])
+        return output.getvalue()
+
+    async def import_users_csv(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        csv_content: str,
+        actor_user_id: int,
+    ) -> UserImportResult:
+        """
+        从 CSV 批量导入用户。
+
+        CSV 表头：username,email,password,role_id,status
+
+        Args:
+            db: 数据库会话。
+            tenant_id: 租户 ID。
+            csv_content: CSV 文件内容。
+            actor_user_id: 操作人用户 ID。
+
+        Returns:
+            导入结果统计。
+        """
+        reader = csv.DictReader(io.StringIO(csv_content))
+        required_fields = {"username", "email", "password"}
+        if not reader.fieldnames or not required_fields.issubset(set(reader.fieldnames)):
+            raise ValidationError(
+                message="CSV 格式错误",
+                error="表头必须包含 username,email,password",
+            )
+
+        success_count = 0
+        failed_count = 0
+        errors: list[str] = []
+
+        for row_num, row in enumerate(reader, start=2):
+            username = (row.get("username") or "").strip()
+            email = (row.get("email") or "").strip()
+            password = (row.get("password") or "").strip()
+            role_id_raw = (row.get("role_id") or "").strip()
+            status_raw = (row.get("status") or "1").strip()
+
+            if not username or not email or not password:
+                failed_count += 1
+                errors.append(f"第 {row_num} 行：username/email/password 不能为空")
+                continue
+
+            try:
+                role_id = int(role_id_raw) if role_id_raw else None
+                status = int(status_raw) if status_raw else 1
+                user_data = UserCreate(
+                    username=username,
+                    email=email,
+                    password=password,
+                    role_id=role_id,
+                    status=status,
+                )
+                await self.create_user(db, tenant_id, user_data, actor_user_id)
+                success_count += 1
+            except Exception as exc:
+                failed_count += 1
+                errors.append(f"第 {row_num} 行（{username}）：{getattr(exc, 'message', str(exc))}")
+                logger.warning("CSV 导入用户失败 row=%s: %s", row_num, exc)
+
+        logger.info(
+            "用户 CSV 导入完成 tenant_id=%s success=%s failed=%s",
+            tenant_id,
+            success_count,
+            failed_count,
+        )
+        return UserImportResult(
+            success_count=success_count,
+            failed_count=failed_count,
+            errors=errors[:50],
+        )
 
 
 user_service = UserService()

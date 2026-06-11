@@ -90,3 +90,39 @@ export function updateUser(id: number, data: UpdateUserParams): Promise<UserList
 export function deleteUser(id: number): Promise<void> {
   return request.delete(`/users/${id}`) as Promise<void>;
 }
+
+/** 用户导入结果 */
+export interface UserImportResult {
+  success_count: number;
+  failed_count: number;
+  errors: string[];
+}
+
+const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+
+/** 导出用户 CSV */
+export async function exportUsersCsv(): Promise<void> {
+  const token = localStorage.getItem('token');
+  const response = await fetch(`${baseURL}/users/export`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    throw new Error('导出失败');
+  }
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'users_export.csv';
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
+/** 批量导入用户 CSV */
+export function importUsersCsv(file: File): Promise<UserImportResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post('/users/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }) as Promise<UserImportResult>;
+}

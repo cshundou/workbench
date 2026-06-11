@@ -2,8 +2,8 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
-import { Plus, Search } from '@element-plus/icons-vue';
-import { createUser, deleteUser, getUsers, updateUser } from '@/api/user';
+import { Download, Plus, Search, Upload } from '@element-plus/icons-vue';
+import { createUser, deleteUser, exportUsersCsv, getUsers, importUsersCsv, updateUser } from '@/api/user';
 import { getRoles } from '@/api/role';
 import { useUserStore } from '@/stores/user';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
@@ -54,6 +54,8 @@ const formRules: FormRules = {
 };
 
 const canWrite = computed(() => userStore.hasPermission('user:write'));
+const importLoading = ref(false);
+const fileInputRef = ref<HTMLInputElement | null>(null);
 
 /** 加载用户列表 */
 async function fetchUsers(): Promise<void> {
@@ -176,6 +178,47 @@ function formatStatus(status: number): string {
   return status === 1 ? '启用' : '禁用';
 }
 
+async function handleExport(): Promise<void> {
+  try {
+    await exportUsersCsv();
+    ElMessage.success('用户导出成功');
+  } catch (error) {
+    console.error('[Export Users Error]', error);
+    ElMessage.error('用户导出失败');
+  }
+}
+
+function triggerImport(): void {
+  fileInputRef.value?.click();
+}
+
+async function handleImportFile(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) {
+    return;
+  }
+
+  importLoading.value = true;
+  try {
+    const result = await importUsersCsv(file);
+    if (result.failed_count > 0) {
+      ElMessage.warning(
+        `导入完成：成功 ${result.success_count} 条，失败 ${result.failed_count} 条`,
+      );
+    } else {
+      ElMessage.success(`导入成功，共 ${result.success_count} 条`);
+    }
+    fetchUsers();
+  } catch (error) {
+    console.error('[Import Users Error]', error);
+    ElMessage.error('用户导入失败');
+  } finally {
+    importLoading.value = false;
+  }
+}
+
 onMounted(() => {
   fetchUsers();
   fetchRoleOptions();
@@ -189,9 +232,20 @@ onMounted(() => {
       description="管理系统用户账号、角色分配与状态"
     >
       <template #actions>
+        <el-button v-if="canWrite" :icon="Upload" :loading="importLoading" round @click="triggerImport">
+          导入 CSV
+        </el-button>
+        <el-button :icon="Download" round @click="handleExport">导出 CSV</el-button>
         <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
           新建用户
         </el-button>
+        <input
+          ref="fileInputRef"
+          type="file"
+          accept=".csv"
+          class="hidden-file-input"
+          @change="handleImportFile"
+        />
       </template>
     </SectionHeader>
 
@@ -325,5 +379,9 @@ onMounted(() => {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+.hidden-file-input {
+  display: none;
 }
 </style>
