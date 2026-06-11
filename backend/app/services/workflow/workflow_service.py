@@ -599,25 +599,50 @@ class WorkflowService:
 
         execution = await self._get_execution_or_raise(db, execution_id, tenant_id)
 
+        if execution.status in ("completed", "failed"):
+            raise ValidationError(message="已完成或已失败的工作流无法终止")
+
         if execution.status not in ("pending", "running", "interrupted"):
             raise ValidationError(message="当前执行无法终止")
 
         runtime = _runtime_state.get(execution_id, {})
+        thread_id = runtime.get("thread_id", f"execution_{execution_id}")
         task_id = runtime.get("task_id")
         if task_id:
             await revoke_task(task_id)
 
+        # 清理 Redis checkpoint 与运行时状态
+        try:
+            import redis as sync_redis
+
+            from app.services.workflow.redis_saver import RedisSaver
+
+            redis_client = sync_redis.from_url(settings.redis_url, decode_responses=True)
+            RedisSaver(redis_client).delete_checkpoint(thread_id)
+        except Exception as exc:
+            logger.warning("终止时清理 Redis 检查点失败 execution_id=%s: %s", execution_id, exc)
+
         _cancelled_executions.add(execution_id)
-        execution.status = "failed"
+
+        node_statuses = dict(runtime.get("node_statuses") or execution.node_statuses or {})
+        for node_id, node_status in list(node_statuses.items()):
+            if node_status in ("running", "waiting", "pending"):
+                node_statuses[node_id] = "failed"
+        execution.node_statuses = node_statuses
+
+        execution.status = "interrupted"
         execution.error_message = "工作流已被用户终止"
         execution.completed_at = datetime.now(timezone.utc)
         await db.flush()
 
+        _runtime_state.pop(execution_id, None)
+
         await workflow_ws_manager.broadcast_execution_status(
             execution_id,
-            "failed",
+            "interrupted",
             {"error": execution.error_message, "cancelled": True},
         )
+        await workflow_ws_manager.disconnect_execution(execution_id)
         await audit_service.record_action(
             db=db,
             tenant_id=tenant_id,

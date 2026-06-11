@@ -100,5 +100,20 @@ class WorkflowWebSocketManager:
             message["data"] = data
         await self.broadcast(execution_id, message)
 
+    async def disconnect_execution(self, execution_id: int) -> None:
+        """关闭指定执行实例的全部 WebSocket 连接。"""
+        async with self._lock:
+            connections = list(self._connections.pop(execution_id, set()))
+
+        for ws in connections:
+            try:
+                await ws.close(code=1000, reason="工作流已终止")
+            except Exception as exc:
+                logger.warning(
+                    "关闭 WebSocket 失败 execution_id=%s: %s",
+                    execution_id,
+                    exc,
+                )
+
 
 workflow_ws_manager = WorkflowWebSocketManager()

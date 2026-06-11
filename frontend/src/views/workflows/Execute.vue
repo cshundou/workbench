@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft, VideoPlay, Check, Close, CircleClose } from '@element-plus/icons-vue';
 import WorkflowCanvas from '@/components/workflow/WorkflowCanvas.vue';
 import ExecutionLogPanel from '@/components/workflow/ExecutionLogPanel.vue';
@@ -86,6 +86,16 @@ async function handleApprove(): Promise<void> {
 
 async function handleTerminate(): Promise<void> {
   if (!graphStore.currentExecution) return;
+  try {
+    await ElMessageBox.confirm('确定要终止当前工作流吗？', '终止确认', {
+      type: 'warning',
+      confirmButtonText: '确定终止',
+      cancelButtonText: '取消',
+    });
+  } catch {
+    return;
+  }
+
   isTerminating.value = true;
   try {
     await graphStore.cancelExecution(graphStore.currentExecution.id);

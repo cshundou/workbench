@@ -63,3 +63,11 @@ class RedisSaver(BaseCheckpointSaver):
         except (TypeError, ValueError) as exc:
             logger.error("序列化检查点失败 thread_id=%s: %s", thread_id, exc)
             raise
+
+    def delete_checkpoint(self, thread_id: str) -> None:
+        """删除指定线程的 Redis 检查点。"""
+        try:
+            self.redis.delete(self._key(thread_id))
+            logger.info("已清理工作流检查点 thread_id=%s", thread_id)
+        except Exception as exc:
+            logger.warning("清理检查点失败 thread_id=%s: %s", thread_id, exc)
