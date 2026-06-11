@@ -15,6 +15,7 @@ class WorkflowNodeDef(BaseModel):
     type: str
     label: str
     position: dict[str, float] = Field(default_factory=lambda: {"x": 0, "y": 0})
+    config: dict[str, Any] = Field(default_factory=dict, description="节点配置")
 
 
 class WorkflowEdgeDef(BaseModel):

@@ -4,7 +4,7 @@
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import func, or_, select
@@ -37,6 +37,7 @@ from app.services.workflow.graph_builder import (
 from app.services.user_key_context import user_key_resolver
 from app.services.workflow.ws_manager import workflow_ws_manager
 from app.services.audit_service import audit_service
+from app.services.token_quota_service import token_quota_service
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,31 @@ class WorkflowService:
             "node_statuses": node_statuses,
             "logs": [],
         }
+
+    def _hydrate_runtime_state_from_execution(self, execution: WorkflowExecution) -> None:
+        """当内存态缺失时，从数据库执行记录回填运行时状态。"""
+        existing = _runtime_state.get(execution.id)
+        if existing and existing.get("logs") and existing.get("node_statuses"):
+            return
+
+        persisted_logs = list(execution.execution_logs or [])
+        persisted_statuses = dict(execution.node_statuses or {})
+        if not persisted_statuses:
+            persisted_statuses = {node_id: "waiting" for node_id in NODE_LABELS}
+
+        hydrated = {
+            "thread_id": (existing or {}).get("thread_id", f"execution_{execution.id}"),
+            "task_id": (existing or {}).get("task_id"),
+            "node_statuses": persisted_statuses,
+            "logs": persisted_logs,
+        }
+        _runtime_state[execution.id] = hydrated
+        logger.info(
+            "已回填工作流运行时状态 execution_id=%s logs=%s nodes=%s",
+            execution.id,
+            len(persisted_logs),
+            len(persisted_statuses),
+        )
 
     def _update_node_status(
         self,
@@ -450,7 +476,45 @@ class WorkflowService:
     ) -> WorkflowExecutionResponse:
         """获取执行状态与节点日志。"""
         execution = await self._get_execution_or_raise(db, execution_id, tenant_id)
+        runtime = _runtime_state.get(execution_id)
+        if not runtime or (
+            not runtime.get("logs") and not runtime.get("node_statuses")
+        ):
+            self._hydrate_runtime_state_from_execution(execution)
         return self._to_execution_response(execution)
+
+    async def recover_stale_executions(
+        self,
+        db: AsyncSession,
+        stale_after_minutes: int = 10,
+    ) -> int:
+        """将长时间处于 running 的执行标记为 interrupted。"""
+        if stale_after_minutes <= 0:
+            stale_after_minutes = 10
+
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=stale_after_minutes)
+        stmt = select(WorkflowExecution).where(
+            WorkflowExecution.status == "running",
+            WorkflowExecution.started_at < cutoff,
+        )
+        result = await db.execute(stmt)
+        stale_executions = result.scalars().all()
+        if not stale_executions:
+            return 0
+
+        for execution in stale_executions:
+            execution.status = "interrupted"
+            if not execution.error_message:
+                execution.error_message = "检测到执行中断，请人工确认后恢复执行"
+            self._hydrate_runtime_state_from_execution(execution)
+
+        await db.flush()
+        logger.warning(
+            "已恢复陈旧工作流执行 stale_count=%s cutoff=%s",
+            len(stale_executions),
+            cutoff.isoformat(),
+        )
+        return len(stale_executions)
 
     async def execute_workflow(
         self,
@@ -468,6 +532,7 @@ class WorkflowService:
             raise ValidationError(message="仅已发布的工作流可以执行")
 
         await guardrails_service.validate_user_input(data.task)
+        await token_quota_service.check_tenant_quota(db, tenant_id)
 
         input_params = {
             "task": data.task,
@@ -670,6 +735,7 @@ class WorkflowService:
                 "human_approved": False,
                 "kb_id": input_params.get("kb_id"),
                 "execution_logs": [],
+                "loop_counters": {},
             }
 
             config = {"configurable": {"thread_id": thread_id}}

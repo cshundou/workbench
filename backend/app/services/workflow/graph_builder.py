@@ -105,7 +105,7 @@ NODE_LABELS: dict[str, str] = {
 }
 
 VALID_NODE_TYPES = frozenset(
-    {"scheduler", "knowledge", "search", "execution", "human", "reviewer"}
+    {"scheduler", "knowledge", "search", "execution", "human", "reviewer", "loop"}
 )
 
 
@@ -123,6 +123,7 @@ class AgentState(TypedDict):
     human_approved: bool
     kb_id: Optional[int]
     execution_logs: Annotated[list[dict[str, Any]], merge_execution_logs]
+    loop_counters: dict[str, int]
 
 
 StatusCallback = Callable[[str, str, dict[str, Any]], None]
@@ -147,6 +148,7 @@ class WorkflowBuilder:
             "search": "search_agent",
             "execution": "execution_agent",
         }
+        self._loop_node_max_iterations: dict[str, int] = {}
 
     def set_status_callback(self, callback: StatusCallback) -> None:
         """设置节点状态回调，用于 WebSocket 推送。"""
@@ -254,7 +256,8 @@ class WorkflowBuilder:
         """
         校验自定义工作流图定义。
 
-        要求：有且仅有一个 scheduler 入口、节点类型合法、边引用有效、无环（DAG）。
+        要求：有且仅有一个 scheduler 入口、节点类型合法、边引用有效。
+        默认只允许 DAG；当存在 loop 节点时允许环。
         """
         nodes = definition.get("nodes") or []
         edges = definition.get("edges") or []
@@ -264,6 +267,7 @@ class WorkflowBuilder:
 
         node_ids: set[str] = set()
         scheduler_ids: list[str] = []
+        has_loop_node = False
 
         for node in nodes:
             node_id = node.get("id")
@@ -277,6 +281,8 @@ class WorkflowBuilder:
             node_ids.add(node_id)
             if node_type == "scheduler":
                 scheduler_ids.append(node_id)
+            if node_type == "loop":
+                has_loop_node = True
 
         if len(scheduler_ids) != 1:
             raise ValidationError(message="必须有且仅有一个 scheduler 入口节点")
@@ -308,7 +314,51 @@ class WorkflowBuilder:
 
         for node_id in node_ids:
             if node_id not in visited and _has_cycle(node_id):
-                raise ValidationError(message="工作流图存在环，仅支持 DAG")
+                if not has_loop_node:
+                    raise ValidationError(
+                        message="工作流图存在环，需添加 loop 节点后才允许循环"
+                    )
+                break
+
+    def _parse_loop_max_iterations(self, node: dict[str, Any]) -> int:
+        """解析 loop 节点最大迭代次数，默认 5。"""
+        config = node.get("config") if isinstance(node.get("config"), dict) else {}
+        raw_value = config.get("max_iterations", node.get("max_iterations", 5))
+        try:
+            parsed = int(raw_value)
+            if parsed <= 0:
+                return 5
+            return parsed
+        except (TypeError, ValueError):
+            return 5
+
+    def _build_loop_node_handler(
+        self, node_id: str, max_iterations: int
+    ) -> Callable[[AgentState], AgentState]:
+        """为指定 loop 节点构建处理函数。"""
+
+        def _handler(state: AgentState) -> AgentState:
+            return self.loop_node(
+                state,
+                node_id=node_id,
+                max_iterations=max_iterations,
+            )
+
+        return _handler
+
+    def _build_loop_router(
+        self, node_id: str, max_iterations: int
+    ) -> Callable[[AgentState], str]:
+        """为指定 loop 节点构建路由函数。"""
+
+        def _router(state: AgentState) -> str:
+            return self.route_after_loop_node(
+                state,
+                node_id=node_id,
+                max_iterations=max_iterations,
+            )
+
+        return _router
 
     def build_from_definition(
         self,
@@ -330,11 +380,19 @@ class WorkflowBuilder:
             node["id"]: node.get("label", node["id"]) for node in nodes
         }
 
+        self._loop_node_max_iterations = {}
+
         type_to_node_id: dict[str, str] = {}
+        loop_node_ids: set[str] = set()
         for node in nodes:
             node_type = node["type"]
             if node_type not in type_to_node_id:
                 type_to_node_id[node_type] = node["id"]
+            if node_type == "loop":
+                loop_node_ids.add(node["id"])
+                self._loop_node_max_iterations[node["id"]] = self._parse_loop_max_iterations(
+                    node
+                )
 
         scheduler_id = type_to_node_id["scheduler"]
         human_id = type_to_node_id.get("human")
@@ -353,12 +411,22 @@ class WorkflowBuilder:
             "execution": self.execution_agent_node,
             "human": self.human_intervention_node,
             "reviewer": self.reviewer_node,
+            "loop": self.loop_node,
         }
 
         workflow = StateGraph(AgentState)
         workflow.add_node("parallel_dispatch", self.parallel_dispatch_node)
         for node in nodes:
-            workflow.add_node(node["id"], handler_map[node["type"]])
+            node_id = node["id"]
+            node_type = node["type"]
+            if node_type == "loop":
+                max_iterations = self._loop_node_max_iterations.get(node_id, 5)
+                workflow.add_node(
+                    node_id,
+                    self._build_loop_node_handler(node_id, max_iterations),
+                )
+            else:
+                workflow.add_node(node_id, handler_map[node_type])
 
         workflow.set_entry_point(scheduler_id)
 
@@ -380,6 +448,10 @@ class WorkflowBuilder:
             scheduler_targets,
         )
 
+        edges_by_source: dict[str, list[str]] = {}
+        for edge in edges:
+            edges_by_source.setdefault(edge["source"], []).append(edge["target"])
+
         if human_id:
             workflow.add_edge("parallel_dispatch", human_id)
         elif reviewer_id:
@@ -388,14 +460,10 @@ class WorkflowBuilder:
             workflow.add_edge("parallel_dispatch", END)
 
         agent_types = {"knowledge", "search", "execution"}
-        edges_by_source: dict[str, list[str]] = {}
-        for edge in edges:
-            edges_by_source.setdefault(edge["source"], []).append(edge["target"])
-
         for node in nodes:
+            node_id = node["id"]
             if node["type"] not in agent_types:
                 continue
-            node_id = node["id"]
             outgoing = edges_by_source.get(node_id, [])
             if outgoing:
                 for target in outgoing:
@@ -406,6 +474,26 @@ class WorkflowBuilder:
                 workflow.add_edge(node_id, reviewer_id)
             else:
                 workflow.add_edge(node_id, END)
+
+        for loop_node_id in loop_node_ids:
+            outgoing = edges_by_source.get(loop_node_id, [])
+            if outgoing:
+                continue_target = outgoing[0]
+            elif human_id:
+                continue_target = human_id
+            elif reviewer_id:
+                continue_target = reviewer_id
+            else:
+                continue_target = END
+            max_iterations = self._loop_node_max_iterations.get(loop_node_id, 5)
+            workflow.add_conditional_edges(
+                loop_node_id,
+                self._build_loop_router(loop_node_id, max_iterations),
+                {
+                    "continue": continue_target,
+                    "end": END,
+                },
+            )
 
         if human_id:
             workflow.add_conditional_edges(
@@ -780,6 +868,58 @@ class WorkflowBuilder:
             self._append_log(state, node_id, "failed", error=str(exc))
 
         return state
+
+    def loop_node(
+        self,
+        state: AgentState,
+        node_id: str = "loop",
+        max_iterations: int = 5,
+    ) -> AgentState:
+        """循环控制节点：累计迭代次数并限制最大循环次数。"""
+        state = dict(state)
+        loop_counters = dict(state.get("loop_counters") or {})
+        current_iteration = int(loop_counters.get(node_id, 0)) + 1
+        loop_counters[node_id] = current_iteration
+        state["loop_counters"] = loop_counters
+        state.setdefault("results", {})["loop"] = {
+            "node_id": node_id,
+            "current_iteration": current_iteration,
+            "max_iterations": max_iterations,
+        }
+        self._append_log(
+            state,
+            node_id,
+            "running",
+            input_data={
+                "current_iteration": current_iteration,
+                "max_iterations": max_iterations,
+            },
+        )
+        self._append_log(
+            state,
+            node_id,
+            "completed",
+            output_data=state["results"]["loop"],
+        )
+        return state
+
+    def route_after_loop_node(
+        self,
+        state: AgentState,
+        node_id: str = "loop",
+        max_iterations: int = 5,
+    ) -> str:
+        """循环节点路由：达到最大迭代次数后结束，否则继续下一节点。"""
+        current_iteration = int((state.get("loop_counters") or {}).get(node_id, 0))
+        if current_iteration >= max_iterations:
+            logger.info(
+                "loop 节点达到最大迭代次数，结束循环 node_id=%s current=%s max=%s",
+                node_id,
+                current_iteration,
+                max_iterations,
+            )
+            return "end"
+        return "continue"
 
     def human_intervention_node(self, state: AgentState) -> AgentState:
         """
