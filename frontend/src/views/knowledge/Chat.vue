@@ -2,7 +2,15 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { ArrowLeft, Delete, Plus, Position, VideoPause } from '@element-plus/icons-vue';
+import {
+  ArrowLeft,
+  CopyDocument,
+  Delete,
+  Plus,
+  Position,
+  RefreshRight,
+  VideoPause,
+} from '@element-plus/icons-vue';
 import StreamingText from '@/components/chat/StreamingText.vue';
 import CitationPanel from '@/components/knowledge/CitationPanel.vue';
 import {
@@ -149,8 +157,7 @@ function handleStreamMessage(data: unknown): void {
 }
 
 /** 发送问题 */
-async function handleSend(): Promise<void> {
-  const query = inputQuery.value.trim();
+async function streamQuery(query: string, appendUserMessage: boolean): Promise<void> {
   if (!query || isStreaming.value) {
     return;
   }
@@ -159,11 +166,13 @@ async function handleSend(): Promise<void> {
     handleNewSession();
   }
 
-  messages.value.push({
-    id: `user-${Date.now()}`,
-    role: 'user',
-    content: query,
-  });
+  if (appendUserMessage) {
+    messages.value.push({
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: query,
+    });
+  }
 
   const assistantMsg: ChatMessage = {
     id: `assistant-${Date.now()}`,
@@ -199,6 +208,47 @@ async function handleSend(): Promise<void> {
     }
   } finally {
     isStreaming.value = false;
+  }
+}
+
+async function handleSend(): Promise<void> {
+  const query = inputQuery.value.trim();
+  if (!query) {
+    return;
+  }
+  inputQuery.value = '';
+  await streamQuery(query, true);
+}
+
+async function handleRegenerateLast(): Promise<void> {
+  if (isStreaming.value) {
+    return;
+  }
+  const lastUser = [...messages.value].reverse().find((msg) => msg.role === 'user');
+  if (!lastUser) {
+    ElMessage.warning('暂无可重新生成的问题');
+    return;
+  }
+
+  const lastMessage = messages.value[messages.value.length - 1];
+  if (lastMessage && lastMessage.role === 'assistant') {
+    messages.value.pop();
+  }
+
+  await streamQuery(lastUser.content, false);
+}
+
+async function handleCopyAnswer(content: string): Promise<void> {
+  if (!content.trim()) {
+    ElMessage.warning('暂无可复制内容');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(content);
+    ElMessage.success('已复制完整回答');
+  } catch (error) {
+    console.error('[Copy Answer Error]', error);
+    ElMessage.error('复制失败');
   }
 }
 
@@ -254,13 +304,7 @@ onUnmounted(() => {
       <div class="header-right flex-center">
         <span class="mode-label">知识库增强</span>
         <el-switch v-model="useRag" :disabled="isStreaming" />
-        <el-button
-          v-if="isStreaming"
-          type="danger"
-          plain
-          :icon="VideoPause"
-          @click="handleAbort"
-        >
+        <el-button v-if="isStreaming" type="danger" plain :icon="VideoPause" @click="handleAbort">
           停止生成
         </el-button>
       </div>
@@ -306,18 +350,8 @@ onUnmounted(() => {
               clearable
               size="small"
             />
-            <el-select
-              v-model="filterFileType"
-              placeholder="文档类型"
-              clearable
-              size="small"
-            >
-              <el-option
-                v-for="type in fileTypeOptions"
-                :key="type"
-                :label="type"
-                :value="type"
-              />
+            <el-select v-model="filterFileType" placeholder="文档类型" clearable size="small">
+              <el-option v-for="type in fileTypeOptions" :key="type" :label="type" :value="type" />
             </el-select>
             <el-date-picker
               v-model="filterDateRange"
@@ -333,17 +367,9 @@ onUnmounted(() => {
         </div>
 
         <div class="message-list">
-          <el-empty
-            v-if="messages.length === 0"
-            description="输入问题开始与知识库对话"
-          />
+          <el-empty v-if="messages.length === 0" description="输入问题开始与知识库对话" />
 
-          <div
-            v-for="msg in messages"
-            :key="msg.id"
-            class="message-item"
-            :class="msg.role"
-          >
+          <div v-for="msg in messages" :key="msg.id" class="message-item" :class="msg.role">
             <div class="message-bubble">
               <template v-if="msg.role === 'user'">
                 <p class="user-text">{{ msg.content }}</p>
@@ -353,6 +379,25 @@ onUnmounted(() => {
                   :content="msg.content"
                   :streaming="isStreaming && msg === messages[messages.length - 1]"
                 />
+                <div class="assistant-actions">
+                  <el-button
+                    text
+                    size="small"
+                    :icon="CopyDocument"
+                    @click="handleCopyAnswer(msg.content)"
+                  >
+                    复制完整回答
+                  </el-button>
+                  <el-button
+                    v-if="msg === messages[messages.length - 1] && !isStreaming"
+                    text
+                    size="small"
+                    :icon="RefreshRight"
+                    @click="handleRegenerateLast"
+                  >
+                    重新生成
+                  </el-button>
+                </div>
               </template>
             </div>
           </div>
@@ -369,6 +414,13 @@ onUnmounted(() => {
           />
           <div class="input-actions">
             <el-button
+              :icon="RefreshRight"
+              :disabled="isStreaming || !messages.some((msg) => msg.role === 'user')"
+              @click="handleRegenerateLast"
+            >
+              重新生成上次回答
+            </el-button>
+            <el-button
               type="primary"
               :icon="Position"
               :loading="isStreaming"
@@ -383,7 +435,11 @@ onUnmounted(() => {
 
       <div class="chat-sidebar">
         <CitationPanel
-          :sources="currentSources.length > 0 ? currentSources : (messages.filter(m => m.role === 'assistant').at(-1)?.sources || [])"
+          :sources="
+            currentSources.length > 0
+              ? currentSources
+              : messages.filter((m) => m.role === 'assistant').at(-1)?.sources || []
+          "
           :active-id="activeCitationId"
           @select="handleCitationSelect"
         />
@@ -560,6 +616,7 @@ onUnmounted(() => {
 .input-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 12px;
 }
 
@@ -567,5 +624,12 @@ onUnmounted(() => {
   width: 320px;
   flex-shrink: 0;
   background: $bg-color;
+}
+
+.assistant-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
 }
 </style>
