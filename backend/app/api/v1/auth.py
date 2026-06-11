@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUserId, get_current_user_id, get_db_session
 from app.core.response import success_response
-from app.schemas.auth import LoginRequest, LogoutRequest, RefreshTokenRequest
+from app.schemas.auth import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    LogoutRequest,
+    RefreshTokenRequest,
+    ResetPasswordRequest,
+)
 from app.services.auth_service import auth_service
 
 router = APIRouter(prefix="/auth", tags=["认证"])
@@ -49,6 +55,26 @@ async def refresh_token(
     """使用 Refresh Token 获取新的 Access Token。"""
     result = await auth_service.refresh_access_token(db, data)
     return success_response(data=result.model_dump())
+
+
+@router.post("/forgot-password", summary="忘记密码")
+async def forgot_password(
+    data: ForgotPasswordRequest,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """发送密码重置邮件（邮箱不存在时同样返回成功，防止用户枚举）。"""
+    await auth_service.request_password_reset(db, data)
+    return success_response(message="如邮箱已注册，重置链接已发送")
+
+
+@router.post("/reset-password", summary="重置密码")
+async def reset_password(
+    data: ResetPasswordRequest,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """使用邮件中的令牌设置新密码。"""
+    await auth_service.reset_password(db, data)
+    return success_response(message="密码重置成功，请使用新密码登录")
 
 
 @router.post("/logout", summary="用户登出")

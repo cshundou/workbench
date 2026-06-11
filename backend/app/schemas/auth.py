@@ -41,6 +41,19 @@ class LogoutRequest(BaseModel):
     refresh_token: Optional[str] = Field(default=None, description="Refresh Token")
 
 
+class ForgotPasswordRequest(BaseModel):
+    """忘记密码请求。"""
+
+    email: EmailStr = Field(..., description="注册邮箱")
+
+
+class ResetPasswordRequest(BaseModel):
+    """重置密码请求。"""
+
+    token: str = Field(..., min_length=32, description="重置令牌")
+    new_password: str = Field(..., min_length=8, max_length=128, description="新密码")
+
+
 class RoleBrief(BaseModel):
     """角色简要信息。"""
 
