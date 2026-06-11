@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.guardrails import guardrails_service
 from app.core.task_queue import enqueue_task
 from app.models.user import User
 from app.models.workflow import Workflow
@@ -465,6 +466,8 @@ class WorkflowService:
 
         if workflow.status != "published":
             raise ValidationError(message="仅已发布的工作流可以执行")
+
+        await guardrails_service.validate_user_input(data.task)
 
         input_params = {
             "task": data.task,
