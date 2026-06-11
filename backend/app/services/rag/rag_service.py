@@ -674,7 +674,7 @@ class RAGService:
                 content = chunk.content if hasattr(chunk, "content") else str(chunk)
                 if content:
                     yield {"type": "token", "content": content}
-            yield {"type": "sources", "sources": []}
+            yield {"type": "citation", "sources": []}
             yield {"type": "done"}
         except Exception as exc:
             logger.error("纯 LLM 流式问答失败: %s", exc)

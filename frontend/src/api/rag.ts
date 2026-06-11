@@ -92,7 +92,7 @@ export interface CitationSource {
 
 /** 流式问答 SSE 消息 */
 export interface ChatStreamMessage {
-  type?: 'content' | 'citation' | 'done' | 'error';
+  type?: 'token' | 'content' | 'citation' | 'done' | 'error';
   content?: string;
   sources?: CitationSource[];
   message?: string;

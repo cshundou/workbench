@@ -62,10 +62,11 @@ function handleStreamMessage(data: unknown): void {
     return;
   }
 
-  if (msg.content) {
+  const tokenContent = msg.type === 'token' ? msg.content : msg.content;
+  if (tokenContent) {
     const lastAssistant = [...messages.value].reverse().find((m) => m.role === 'assistant');
     if (lastAssistant) {
-      lastAssistant.content += msg.content;
+      lastAssistant.content += tokenContent;
     }
   }
 }
@@ -122,10 +123,22 @@ function handleAbort(): void {
   ElMessage.info('已停止生成');
 }
 
-/** 点击引用来源 */
+/** 点击引用来源，跳转到文档详情并打开预览 */
 function handleCitationSelect(source: CitationSource): void {
   activeCitationId.value = source.id;
-  ElMessage.info(`查看引用 [${source.id}]：${source.document_name}`);
+  if (!source.document_id) {
+    ElMessage.warning('无法定位原文档');
+    return;
+  }
+  router.push({
+    name: 'KnowledgeDetail',
+    params: { id: kbId.value },
+    query: {
+      docId: String(source.document_id),
+      chunkIndex: source.chunk_index !== undefined ? String(source.chunk_index) : undefined,
+      highlight: '1',
+    },
+  });
 }
 
 /** 回车发送 */

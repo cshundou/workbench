@@ -90,7 +90,7 @@ class AnswerGenerator:
             sources: 引用来源列表。
 
         Yields:
-            SSE 事件字典，type 为 token / sources / done。
+            SSE 事件字典，type 为 token / citation / done。
         """
         chain = self.prompt_template | self.llm
         last_chunk: Any = None
@@ -100,7 +100,7 @@ class AnswerGenerator:
                 content = chunk.content if hasattr(chunk, "content") else str(chunk)
                 if content:
                     yield {"type": "token", "content": content}
-            yield {"type": "sources", "sources": sources}
+            yield {"type": "citation", "sources": sources}
             if last_chunk is not None:
                 yield {
                     "type": "usage",

@@ -146,8 +146,32 @@ function goChat(): void {
   router.push({ name: 'KnowledgeChat', params: { id: kbId.value } });
 }
 
+/** 从引用溯源跳转时自动打开文档预览 */
+async function openCitationPreview(): Promise<void> {
+  const docId = Number(route.query.docId);
+  if (!docId || Number.isNaN(docId)) {
+    return;
+  }
+  const doc = ragStore.documents.find((item) => item.id === docId);
+  if (doc) {
+    previewDoc.value = doc;
+    previewVisible.value = true;
+    if (route.query.highlight === '1') {
+      ElMessage.info(
+        route.query.chunkIndex
+          ? `已定位到片段 #${route.query.chunkIndex}`
+          : '已打开引用文档',
+      );
+    }
+  }
+}
+
 onMounted(() => {
-  loadData().then(() => startProgressPolling());
+  loadData()
+    .then(() => {
+      startProgressPolling();
+      return openCitationPreview();
+    });
   loadSearchAnalysis();
 });
 

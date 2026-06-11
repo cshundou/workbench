@@ -51,6 +51,7 @@ class ContextBuilder:
 
             context_parts.append(f"[{index + 1}] {chunk.page_content}")
 
+            snippet = chunk.page_content[:300] if chunk.page_content else ""
             sources.append(
                 {
                     "id": index + 1,
@@ -58,6 +59,7 @@ class ContextBuilder:
                     "page_number": chunk_metadata.get("page_number", "未知"),
                     "chunk_index": chunk_metadata.get("chunk_index", "未知"),
                     "document_id": chunk_metadata.get("document_id"),
+                    "content": snippet,
                 }
             )
             context_parts.append("---")
