@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.models.token_usage import TokenUsage
+from app.services.token_quota_service import token_quota_service
 
 logger = get_logger(__name__)
 
@@ -102,6 +103,7 @@ class TokenUsageService:
         )
         db.add(record)
         await db.flush()
+        await token_quota_service.add_usage(tenant_id, total_tokens)
         logger.info(
             "记录 Token 消耗 tenant=%s user=%s model=%s total=%s",
             tenant_id,

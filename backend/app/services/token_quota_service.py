@@ -4,10 +4,12 @@
 
 from datetime import date
 
-from app.core.config import settings
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.exceptions import AppException
 from app.core.logging import get_logger
 from app.core.redis import get_redis
+from app.services.tenant_service import tenant_service
 
 logger = get_logger(__name__)
 
@@ -41,6 +43,13 @@ class TokenQuotaService:
         key = self._usage_key(tenant_id)
         await redis.incrby(key, tokens)
         await redis.expire(key, 60 * 60 * 24 * 35)
+
+    async def check_tenant_quota(self, db: AsyncSession, tenant_id: int) -> None:
+        """根据租户配置的月度上限执行配额检查。"""
+        tenant = await tenant_service.get_tenant_by_id(db, tenant_id)
+        if tenant is None:
+            return
+        await self.check_quota(tenant_id, tenant.monthly_token_limit)
 
     async def check_quota(self, tenant_id: int, limit: int) -> None:
         """

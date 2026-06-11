@@ -37,6 +37,8 @@ from app.services.agent.tools.python_repl import PythonReplTool
 from app.services.agent.tools.sql_query import SqlQueryTool
 from app.services.agent.tools.tavily_search import TavilySearchTool
 from app.core.deps import get_user_permissions
+from app.core.guardrails import guardrails_service
+from app.services.token_quota_service import token_quota_service
 from app.services.token_usage_service import token_usage_service
 from app.services.user_key_context import UserKeyContext, create_chat_llm, format_llm_error_message
 
@@ -269,6 +271,8 @@ class AgentService:
         chat_history: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         """非流式运行智能体。"""
+        await guardrails_service.validate_user_input(user_query)
+        await token_quota_service.check_tenant_quota(db, tenant_id)
         user_permissions = get_user_permissions(user)
         base_tools = self._build_tool_instances(
             agent_config.get("tools", []),
@@ -344,6 +348,8 @@ class AgentService:
         Yields:
             SSE 事件字典。
         """
+        await guardrails_service.validate_user_input(user_query)
+        await token_quota_service.check_tenant_quota(db, tenant_id)
         yield {"type": "thinking", "content": "正在分析问题..."}
 
         user_permissions = get_user_permissions(user)
@@ -426,8 +432,9 @@ class AgentService:
                     if chunk and hasattr(chunk, "content") and chunk.content:
                         token = chunk.content
                         if isinstance(token, str) and token:
-                            final_answer += token
-                            yield {"type": "content", "content": token}
+                            safe_token = await guardrails_service.sanitize_output(token)
+                            final_answer += safe_token
+                            yield {"type": "content", "content": safe_token}
 
             if not final_answer:
                 # 兜底：若流式未捕获到 token，使用 invoke 获取最终答案

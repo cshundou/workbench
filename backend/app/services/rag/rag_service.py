@@ -38,6 +38,8 @@ from app.services.user_key_context import (
     create_embeddings,
     user_key_resolver,
 )
+from app.core.guardrails import guardrails_service
+from app.services.token_quota_service import token_quota_service
 from app.services.token_usage_service import token_usage_service
 
 logger = get_logger(__name__)
@@ -572,6 +574,22 @@ class RAGService:
         """对外暴露的文档向量删除接口。"""
         await self._delete_document_vectors(db, document, user_ctx)
 
+    async def delete_kb_vectors(
+        self,
+        kb_id: int,
+        embedding_model: str,
+        user_ctx: UserKeyContext,
+    ) -> None:
+        """删除知识库对应的整个向量集合。"""
+        vector_store = self.get_vector_store(kb_id, embedding_model, user_ctx)
+        try:
+            vector_store.delete_collection()
+            vector_store.persist()
+        except Exception as exc:
+            logger.warning("删除知识库向量集合失败 kb_id=%s: %s", kb_id, exc)
+        self._invalidate_retriever(kb_id)
+        logger.info("已清理知识库向量 kb_id=%s", kb_id)
+
     def _build_chroma_filters(self, filters: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
         """将 API 过滤条件转换为 Chroma 元数据过滤格式。"""
         if not filters:
@@ -723,6 +741,8 @@ class RAGService:
         use_rag: bool = True,
     ) -> dict[str, Any]:
         """完整 RAG 问答：检索 -> 上下文构建 -> 生成回答。"""
+        if tenant_id is not None:
+            await token_quota_service.check_tenant_quota(db, tenant_id)
         user_ctx.get_llm_provider()
         if not use_rag:
             return await self._answer_without_rag(db, query, user_ctx, tenant_id, user_id)
@@ -767,6 +787,9 @@ class RAGService:
         use_rag: bool = True,
     ):
         """流式 RAG 问答生成器。"""
+        await guardrails_service.validate_user_input(query)
+        if tenant_id is not None:
+            await token_quota_service.check_tenant_quota(db, tenant_id)
         user_ctx.get_llm_provider()
         if not use_rag:
             async for event in self._answer_stream_without_rag(
@@ -791,6 +814,11 @@ class RAGService:
 
         generator = AnswerGenerator(user_ctx)
         async for event in generator.generate_answer_stream(query, context, sources):
+            if event.get("type") == "token" and event.get("content"):
+                event = {
+                    **event,
+                    "content": await guardrails_service.sanitize_output(str(event["content"])),
+                }
             if event.get("type") == "usage" and tenant_id is not None:
                 await token_usage_service.record_from_langchain_response(
                     db=db,
