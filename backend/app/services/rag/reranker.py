@@ -20,6 +20,7 @@ class Reranker:
         cohere_api_key: Optional[str] = None,
         top_n: int = 5,
     ) -> None:
+        self.top_n = top_n
         self.compressor = (
             CohereRerank(
                 cohere_api_key=cohere_api_key,
@@ -29,6 +30,24 @@ class Reranker:
             if cohere_api_key
             else None
         )
+        self._local_reranker: Any | None = None
+        self._local_reranker_checked = False
+
+    def _get_local_reranker(self) -> Any | None:
+        """加载本地 BGE CrossEncoder，依赖缺失时返回 None。"""
+        if self._local_reranker_checked:
+            return self._local_reranker
+
+        self._local_reranker_checked = True
+        try:
+            from sentence_transformers import CrossEncoder
+
+            self._local_reranker = CrossEncoder("BAAI/bge-reranker-base")
+            logger.info("已启用本地 BGE 重排序降级")
+        except Exception as exc:
+            logger.info("sentence-transformers 不可用，跳过本地重排序: %s", exc)
+            self._local_reranker = None
+        return self._local_reranker
 
     def rerank(self, query: str, documents: list[dict[str, Any]]) -> list[Document]:
         """
@@ -50,13 +69,23 @@ class Reranker:
 
         try:
             if not self.compressor:
-                logger.debug("未配置 Cohere 密钥，跳过重排序")
-                return base_docs
+                local_reranker = self._get_local_reranker()
+                if local_reranker is None:
+                    logger.debug("未配置 Cohere 且无本地 BGE，跳过重排序")
+                    return base_docs
+                pairs = [(query, doc.page_content) for doc in base_docs]
+                scores = local_reranker.predict(pairs)
+                scored_docs = sorted(
+                    zip(base_docs, scores),
+                    key=lambda item: float(item[1]),
+                    reverse=True,
+                )
+                return [doc for doc, _ in scored_docs[: self.top_n]]
 
             # 对已有混合检索结果直接重排，避免重新查询向量库
             results = self.compressor.compress_documents(base_docs, query)
-            logger.debug("重排序完成 query=%s results=%s", query[:50], len(results))
+            logger.debug("Cohere 重排序完成 query=%s results=%s", query[:50], len(results))
             return results
         except Exception as exc:
-            logger.warning("Cohere 重排序失败，返回原始结果: %s", exc)
+            logger.warning("重排序失败，返回原始结果: %s", exc)
             return base_docs
