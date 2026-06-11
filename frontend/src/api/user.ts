@@ -17,12 +17,15 @@ interface LoginApiData {
   expires_in: number;
 }
 
-/** 后端 /auth/me 响应（蛇形命名，文档 8.2） */
+/** 后端 /auth/me 响应（嵌套 user 对象） */
 interface MeApiData {
-  id: number;
-  username: string;
-  email: string;
-  role: UserInfo['role'];
+  user: {
+    id: number;
+    username: string;
+    email: string;
+    role: UserInfo['role'];
+    permissions: string[];
+  };
   permissions: string[];
 }
 
@@ -39,13 +42,7 @@ export async function login(data: LoginParams): Promise<LoginResult> {
 export async function getUserInfo(): Promise<UserInfoResult> {
   const res = (await request.get('/auth/me')) as MeApiData;
   return {
-    user: {
-      id: res.id,
-      username: res.username,
-      email: res.email,
-      role: res.role,
-      permissions: res.permissions,
-    },
+    user: res.user,
     permissions: res.permissions,
   };
 }

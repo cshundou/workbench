@@ -16,11 +16,12 @@ const request: AxiosInstance = axios.create({
   },
 });
 
-/** 请求拦截：自动附加 Bearer Token */
+/** 请求拦截：自动附加 Bearer Token（登录接口不携带旧 token，避免干扰） */
 request.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    const isLoginRequest = config.url?.includes('/auth/login');
     const token = localStorage.getItem('token');
-    if (token && config.headers) {
+    if (token && config.headers && !isLoginRequest) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
