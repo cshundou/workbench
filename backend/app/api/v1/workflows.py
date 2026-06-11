@@ -75,6 +75,23 @@ async def get_execution_status(
 
 
 @router.post(
+    "/executions/{execution_id}/cancel",
+    summary="终止工作流执行",
+)
+async def cancel_workflow_execution(
+    execution_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """终止正在执行的工作流。"""
+    result = await workflow_service.cancel_execution(
+        db, execution_id, tenant_id, current_user
+    )
+    return success_response(data=result.model_dump(), message="工作流已终止")
+
+
+@router.post(
     "/executions/{execution_id}/intervene",
     summary="人工介入确认",
 )

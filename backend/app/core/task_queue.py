@@ -55,6 +55,29 @@ async def enqueue_task(function_name: str, *args: Any, **kwargs: Any) -> str:
     return job.job_id
 
 
+async def revoke_task(task_id: str) -> bool:
+    """
+    撤销 ARQ 任务（abort）。
+
+    Args:
+        task_id: ARQ 任务 ID。
+
+    Returns:
+        bool: 是否成功发起撤销。
+    """
+    from arq.jobs import Job
+
+    queue = await get_task_queue()
+    job = Job(task_id, redis=queue)
+    try:
+        aborted = await job.abort(timeout=5)
+        logger.info("任务撤销 task_id=%s aborted=%s", task_id, aborted)
+        return bool(aborted)
+    except Exception as exc:
+        logger.warning("任务撤销失败 task_id=%s: %s", task_id, exc)
+        return False
+
+
 async def close_task_queue() -> None:
     """关闭 ARQ 队列连接。"""
     global _task_queue

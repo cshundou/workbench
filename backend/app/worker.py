@@ -23,3 +23,4 @@ class WorkerSettings:
     ]
     job_timeout = 1800  # 30 分钟
     keep_result = 3600  # 结果保留 1 小时
+    allow_abort_jobs = True  # 支持 Job.abort() 撤销正在执行的任务

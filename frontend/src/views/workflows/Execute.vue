@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { ArrowLeft, VideoPlay, Check, Close } from '@element-plus/icons-vue';
+import { ArrowLeft, VideoPlay, Check, Close, CircleClose } from '@element-plus/icons-vue';
 import WorkflowCanvas from '@/components/workflow/WorkflowCanvas.vue';
 import ExecutionLogPanel from '@/components/workflow/ExecutionLogPanel.vue';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
@@ -29,6 +29,12 @@ const graphDefinition = computed(
 const executionStatus = computed(() => graphStore.currentExecution?.status || 'idle');
 
 const isWaitingHuman = computed(() => executionStatus.value === 'interrupted');
+
+const canTerminate = computed(() =>
+  ['pending', 'running'].includes(executionStatus.value),
+);
+
+const isTerminating = ref(false);
 
 const statusTagType = computed(() => {
   const map: Record<string, string> = {
@@ -79,6 +85,19 @@ async function handleApprove(): Promise<void> {
   graphStore.connectWebSocket(graphStore.currentExecution.id);
   ElMessage.success('已批准，工作流继续执行');
   interventionComment.value = '';
+}
+
+async function handleTerminate(): Promise<void> {
+  if (!graphStore.currentExecution) return;
+  isTerminating.value = true;
+  try {
+    await graphStore.cancelExecution(graphStore.currentExecution.id);
+    ElMessage.warning('工作流已终止');
+  } catch {
+    ElMessage.error('终止失败');
+  } finally {
+    isTerminating.value = false;
+  }
 }
 
 async function handleReject(): Promise<void> {
@@ -178,16 +197,27 @@ onUnmounted(() => {
                 启用人工介入（审核前需人工确认）
               </el-checkbox>
             </el-form-item>
-            <el-button
-              type="primary"
-              :icon="VideoPlay"
-              :loading="isExecuting"
-              :disabled="executionStatus === 'running'"
-              block
-              @click="handleExecute"
-            >
-              {{ executionStatus === 'running' ? '执行中...' : '开始执行' }}
-            </el-button>
+            <div class="execute-actions">
+              <el-button
+                type="primary"
+                :icon="VideoPlay"
+                :loading="isExecuting"
+                :disabled="executionStatus === 'running'"
+                @click="handleExecute"
+              >
+                {{ executionStatus === 'running' ? '执行中...' : '开始执行' }}
+              </el-button>
+              <el-button
+                v-if="canTerminate"
+                type="danger"
+                :icon="CircleClose"
+                :loading="isTerminating"
+                plain
+                @click="handleTerminate"
+              >
+                终止执行
+              </el-button>
+            </div>
           </el-form>
         </el-card>
 
@@ -309,6 +339,12 @@ onUnmounted(() => {
 
 .mb-3 {
   margin-bottom: 12px;
+}
+
+.execute-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .json-pre {

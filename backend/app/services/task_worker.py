@@ -39,6 +39,9 @@ async def execute_workflow_task(
     thread_id: str,
 ) -> dict[str, Any]:
     """执行工作流任务。"""
+    if workflow_service.is_execution_cancelled(execution_id):
+        logger.info("工作流任务已取消，跳过执行 execution_id=%s", execution_id)
+        return {"execution_id": execution_id, "status": "cancelled"}
     await workflow_service.run_workflow_task(
         execution_id=execution_id,
         workflow_id=workflow_id,
@@ -60,6 +63,9 @@ async def resume_workflow_task(
     comment: Optional[str] = None,
 ) -> dict[str, Any]:
     """恢复工作流任务。"""
+    if workflow_service.is_execution_cancelled(execution_id):
+        logger.info("工作流恢复任务已取消 execution_id=%s", execution_id)
+        return {"execution_id": execution_id, "status": "cancelled"}
     await workflow_service.run_resume_workflow_task(
         execution_id=execution_id,
         tenant_id=tenant_id,

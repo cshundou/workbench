@@ -151,6 +151,11 @@ export function getExecutionHistory(
   return request.get(`/workflows/${workflowId}/executions`, { params });
 }
 
+/** 终止工作流执行 */
+export function cancelWorkflowExecution(executionId: number): Promise<WorkflowExecution> {
+  return request.post(`/workflows/executions/${executionId}/cancel`);
+}
+
 /** 人工介入确认 */
 export function submitHumanIntervention(
   executionId: number,

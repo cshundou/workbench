@@ -9,6 +9,7 @@ import {
   executeWorkflow,
   getExecutionStatus,
   submitHumanIntervention,
+  cancelWorkflowExecution,
   buildWorkflowWsUrl,
   type WorkflowInfo,
   type WorkflowExecution,
@@ -99,6 +100,15 @@ export const useGraphStore = defineStore('graph', () => {
     currentExecution.value = execution;
     nodeStatuses.value = execution.node_statuses || {};
     executionLogs.value = execution.logs || [];
+  }
+
+  /** 终止工作流执行 */
+  async function cancelExecution(executionId: number): Promise<void> {
+    const execution = await cancelWorkflowExecution(executionId);
+    currentExecution.value = execution;
+    nodeStatuses.value = execution.node_statuses || {};
+    executionLogs.value = execution.logs || [];
+    disconnectWebSocket();
   }
 
   /** 人工介入 */
@@ -196,6 +206,7 @@ export const useGraphStore = defineStore('graph', () => {
     runWorkflow,
     refreshExecution,
     intervene,
+    cancelExecution,
     connectWebSocket,
     disconnectWebSocket,
     resetExecution,
