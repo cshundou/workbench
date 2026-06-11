@@ -109,6 +109,30 @@ class Settings(BaseSettings):
         description="Agent 上下文 Token 上限（超出自动截断）",
     )
 
+    # 安全防护（提示词注入与敏感内容）
+    guardrails_enabled: bool = Field(default=True, description="是否启用输入输出安全防护")
+    guardrails_moderation_enabled: bool = Field(
+        default=False,
+        description="是否启用 OpenAI Moderation API 审核",
+    )
+    openai_api_key_for_moderation: str = Field(
+        default="",
+        description="内容审核专用 OpenAI API Key（可选）",
+    )
+
+    # 登录失败锁定
+    login_max_attempts: int = Field(default=5, description="登录失败最大尝试次数")
+    login_lock_duration_minutes: int = Field(
+        default=15,
+        description="账号锁定时长（分钟）",
+    )
+
+    # 认证模式：required=全局强制登录；optional=按需登录
+    auth_mode: Literal["required", "optional"] = Field(
+        default="required",
+        description="认证模式（AUTH_MODE）",
+    )
+
     # 接口限流配置（Redis 固定窗口）
     rate_limit_enabled: bool = Field(default=True, description="是否启用接口限流")
     rate_limit_requests: int = Field(default=100, description="限流窗口内最大请求数")
