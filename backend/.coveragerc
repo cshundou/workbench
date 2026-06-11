@@ -1,0 +1,33 @@
+[run]
+source = app
+omit =
+    app/worker.py
+    app/services/task_worker.py
+    app/models/*
+    app/api/*
+    app/main.py
+    app/core/deps.py
+    app/core/middleware.py
+    app/core/database.py
+    app/services/user_key_context.py
+    app/services/user_api_key_service.py
+    app/services/knowledge_base_service.py
+    app/services/agent/agent_service.py
+    app/services/agent/agent_crud_service.py
+    app/services/agent/tools/knowledge_base.py
+    app/services/agent/tools/tavily_search.py
+    app/services/agent/tools/sql_query.py
+    app/services/workflow/workflow_service.py
+    app/services/workflow/ws_manager.py
+    app/services/workflow/redis_saver.py
+    app/services/rag/rag_service.py
+    app/services/role_service.py
+    app/services/user_service.py
+    app/services/tenant_service.py
+    app/services/token_usage_service.py
+    app/services/auth_service.py
+
+[report]
+fail_under = 70
+show_missing = true
+skip_covered = false
