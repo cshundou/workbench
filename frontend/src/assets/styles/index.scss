@@ -306,3 +306,15 @@ a {
 .pill-btn {
   border-radius: $border-radius-pill !important;
 }
+
+html.dark {
+  --el-bg-color: #1d2129;
+  --el-bg-color-page: #141820;
+  --el-text-color-primary: #e5e6eb;
+  --el-text-color-regular: #c9cdd4;
+  color-scheme: dark;
+}
+
+html.dark body {
+  background: #141820;
+}

@@ -4,7 +4,9 @@
 
 from typing import TYPE_CHECKING, Any, List, Optional
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,6 +41,8 @@ class Workflow(Base, TimestampMixin):
         nullable=True,
     )
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="draft", nullable=False)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="workflows")
     owner: Mapped[Optional["User"]] = relationship(back_populates="owned_workflows")

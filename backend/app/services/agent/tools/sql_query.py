@@ -8,6 +8,7 @@ from typing import Any, Dict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.agent.tools.base import BaseTool, ToolResult
 from app.services.user_key_context import UserKeyContext, create_chat_llm
@@ -51,6 +52,13 @@ class SqlQueryTool(BaseTool):
             return "SQL 包含不允许的操作类型"
         if ";" in normalized:
             return "不允许多条 SQL 语句"
+        allowed_tables = settings.sql_tool_allowed_tables.strip()
+        if allowed_tables:
+            whitelist = {name.strip().lower() for name in allowed_tables.split(",") if name.strip()}
+            referenced = re.findall(r"\b(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)", normalized, re.IGNORECASE)
+            for table_name in referenced:
+                if table_name.lower() not in whitelist:
+                    return f"表 {table_name} 不在白名单内"
         return None
 
     async def _generate_sql(self, question: str) -> str:

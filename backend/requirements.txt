@@ -47,6 +47,9 @@ cohere>=5.11.0  # >=5.11 兼容 tokenizers 0.20+（Python 3.13 wheel）
 tokenizers>=0.20.0
 tavily-python==0.3.3
 
+# Observability
+prometheus-fastapi-instrumentator==7.0.0
+
 # Testing
 pytest==8.3.3
 pytest-asyncio==0.24.0

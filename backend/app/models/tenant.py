@@ -4,7 +4,7 @@
 
 from typing import TYPE_CHECKING, List
 
-from sqlalchemy import CheckConstraint, SmallInteger, String
+from sqlalchemy import CheckConstraint, Integer, SmallInteger, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -33,6 +33,7 @@ class Tenant(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     domain: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     status: Mapped[int] = mapped_column(SmallInteger, default=1, nullable=False)
+    monthly_token_limit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     roles: Mapped[List["Role"]] = relationship(back_populates="tenant")
     users: Mapped[List["User"]] = relationship(back_populates="tenant")

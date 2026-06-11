@@ -17,6 +17,7 @@ import type { Component } from 'vue';
 import { useUserStore } from '@/stores/user';
 import { ROUTE_PERMISSIONS } from '@/constants/permissions';
 import AppLogo from '@/components/layout/AppLogo.vue';
+import ThemeSwitch from '@/components/layout/ThemeSwitch.vue';
 
 interface NavItem {
   path: string;
@@ -168,6 +169,7 @@ async function handleLogout(): Promise<void> {
 
       <!-- 右侧用户区 -->
       <div class="header-right flex-center">
+        <ThemeSwitch class="theme-switch" />
         <el-dropdown trigger="click">
           <span class="user-dropdown flex-center">
             <el-avatar :size="32" class="user-avatar">

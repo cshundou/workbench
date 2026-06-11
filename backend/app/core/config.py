@@ -121,6 +121,7 @@ class Settings(BaseSettings):
             "/api/v1/monitor/health",
             "/api/v1/auth/login",
             "/api/v1/auth/refresh",
+            "/metrics",
             "/docs",
             "/redoc",
             "/openapi.json",

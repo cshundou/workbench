@@ -111,6 +111,20 @@ def create_app() -> FastAPI:
     # 注册 API 路由
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
+    # Prometheus 指标（可选）
+    if settings.prometheus_enabled:
+        try:
+            from prometheus_fastapi_instrumentator import Instrumentator
+
+            Instrumentator().instrument(app).expose(
+                app,
+                endpoint="/metrics",
+                include_in_schema=False,
+            )
+            logger.info("Prometheus 指标端点已启用: /metrics")
+        except Exception as exc:
+            logger.warning("Prometheus 初始化失败: %s", exc)
+
     # FastAPI 内置异常处理器
     _register_exception_handlers(app)
 

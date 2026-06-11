@@ -9,6 +9,7 @@ import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from typing import Any, Dict
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.agent.tools.base import BaseTool, ToolResult
 
@@ -91,6 +92,33 @@ class PythonReplTool(BaseTool):
 
         return stdout_buffer.getvalue(), stderr_buffer.getvalue()
 
+    async def _run_code_docker(self, code: str) -> tuple[str, str]:
+        """在 Docker 容器中隔离执行 Python 代码。"""
+        timeout = settings.python_repl_timeout_seconds
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "run",
+            "--rm",
+            "--network=none",
+            "--memory=128m",
+            "--cpus=0.5",
+            settings.python_repl_docker_image,
+            "python",
+            "-c",
+            code,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            return "", f"执行超时（{timeout}s）"
+        return (
+            stdout_bytes.decode("utf-8", errors="replace"),
+            stderr_bytes.decode("utf-8", errors="replace"),
+        )
+
     async def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """异步执行 Python 代码。"""
         try:
@@ -99,8 +127,11 @@ class PythonReplTool(BaseTool):
             if validation_error:
                 return ToolResult(success=False, content=None, error=validation_error)
 
-            loop = asyncio.get_running_loop()
-            stdout, stderr = await loop.run_in_executor(None, self._run_code_sync, code)
+            if settings.python_repl_mode == "docker":
+                stdout, stderr = await self._run_code_docker(code)
+            else:
+                loop = asyncio.get_running_loop()
+                stdout, stderr = await loop.run_in_executor(None, self._run_code_sync, code)
 
             return ToolResult(
                 success=True,
