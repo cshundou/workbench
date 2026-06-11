@@ -5,6 +5,7 @@
 """
 
 import hashlib
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import uuid4
@@ -13,6 +14,7 @@ import bcrypt
 from jose import JWTError, jwt
 
 from app.core.config import settings
+from app.core.exceptions import ValidationError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -40,6 +42,35 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception as exc:
         logger.warning("密码校验异常: %s", exc)
         return False
+
+
+def validate_password_complexity(password: str) -> None:
+    """
+    校验密码是否符合复杂度策略。
+
+    Args:
+        password: 明文密码。
+
+    Raises:
+        ValidationError: 密码不符合策略要求。
+    """
+    min_length = settings.password_min_length
+    if len(password) < min_length:
+        raise ValidationError(message=f"密码长度不能少于 {min_length} 位")
+
+    if settings.password_require_uppercase and not re.search(r"[A-Z]", password):
+        raise ValidationError(message="密码必须包含至少一个大写字母")
+
+    if settings.password_require_lowercase and not re.search(r"[a-z]", password):
+        raise ValidationError(message="密码必须包含至少一个小写字母")
+
+    if settings.password_require_digit and not re.search(r"\d", password):
+        raise ValidationError(message="密码必须包含至少一个数字")
+
+    if settings.password_require_special and not re.search(
+        r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?`~]", password
+    ):
+        raise ValidationError(message="密码必须包含至少一个特殊字符")
 
 
 def get_password_hash(password: str) -> str:

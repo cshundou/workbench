@@ -120,6 +120,13 @@ class Settings(BaseSettings):
         description="内容审核专用 OpenAI API Key（可选）",
     )
 
+    # 密码复杂度策略
+    password_min_length: int = Field(default=8, description="密码最小长度")
+    password_require_uppercase: bool = Field(default=True, description="密码需包含大写字母")
+    password_require_lowercase: bool = Field(default=True, description="密码需包含小写字母")
+    password_require_digit: bool = Field(default=True, description="密码需包含数字")
+    password_require_special: bool = Field(default=True, description="密码需包含特殊字符")
+
     # 登录失败锁定
     login_max_attempts: int = Field(default=5, description="登录失败最大尝试次数")
     login_lock_duration_minutes: int = Field(

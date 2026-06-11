@@ -5,8 +5,9 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.core.security import validate_password_complexity
 from app.schemas.auth import RoleBrief
 
 
@@ -15,18 +16,33 @@ class UserCreate(BaseModel):
 
     username: str = Field(..., min_length=1, max_length=50)
     email: EmailStr = Field(..., max_length=100)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     role_id: Optional[int] = Field(default=None, description="角色 ID")
     status: int = Field(default=1, ge=0, le=1, description="0:禁用, 1:启用")
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        """校验密码复杂度。"""
+        validate_password_complexity(value)
+        return value
 
 
 class UserUpdate(BaseModel):
     """更新用户请求。"""
 
     email: Optional[EmailStr] = Field(default=None, max_length=100)
-    password: Optional[str] = Field(default=None, min_length=6, max_length=128)
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
     role_id: Optional[int] = Field(default=None, description="角色 ID")
     status: Optional[int] = Field(default=None, ge=0, le=1, description="0:禁用, 1:启用")
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: Optional[str]) -> Optional[str]:
+        """校验密码复杂度（留空则跳过）。"""
+        if value:
+            validate_password_complexity(value)
+        return value
 
 
 class UserResponse(BaseModel):

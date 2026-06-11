@@ -37,6 +37,37 @@ const userForm = reactive({
   status: 1,
 });
 
+const PASSWORD_MIN_LENGTH = 8;
+
+function checkPasswordStrength(password: string): {
+  score: number;
+  label: string;
+  color: string;
+  checks: { label: string; passed: boolean }[];
+} {
+  const checks = [
+    { label: `至少 ${PASSWORD_MIN_LENGTH} 位`, passed: password.length >= PASSWORD_MIN_LENGTH },
+    { label: '包含大写字母', passed: /[A-Z]/.test(password) },
+    { label: '包含小写字母', passed: /[a-z]/.test(password) },
+    { label: '包含数字', passed: /\d/.test(password) },
+    { label: '包含特殊字符', passed: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(password) },
+  ];
+  const passedCount = checks.filter((item) => item.passed).length;
+  const score = password ? Math.round((passedCount / checks.length) * 100) : 0;
+  let label = '弱';
+  let color = '#f56c6c';
+  if (score >= 100) {
+    label = '强';
+    color = '#67c23a';
+  } else if (score >= 60) {
+    label = '中';
+    color = '#e6a23c';
+  }
+  return { score, label, color, checks };
+}
+
+const passwordStrength = computed(() => checkPasswordStrength(userForm.password));
+
 const formRules: FormRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' },
@@ -48,7 +79,22 @@ const formRules: FormRules = {
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, max: 50, message: '密码长度不能少于 6 位', trigger: 'blur' },
+    {
+      validator: (_rule, value: string, callback) => {
+        if (!value) {
+          callback(new Error('请输入密码'));
+          return;
+        }
+        const { checks } = checkPasswordStrength(value);
+        const failed = checks.find((item) => !item.passed);
+        if (failed) {
+          callback(new Error(`密码需满足：${failed.label}`));
+          return;
+        }
+        callback();
+      },
+      trigger: 'blur',
+    },
   ],
   role_id: [{ required: true, message: '请选择角色', trigger: 'change' }],
 };
@@ -320,7 +366,22 @@ onMounted(() => {
           prop="password"
           :rules="
             isEdit
-              ? [{ min: 6, max: 50, message: '密码长度不能少于 6 位', trigger: 'blur' }]
+              ? [{
+                  validator: (_rule, value: string, callback) => {
+                    if (!value) {
+                      callback();
+                      return;
+                    }
+                    const { checks } = checkPasswordStrength(value);
+                    const failed = checks.find((item) => !item.passed);
+                    if (failed) {
+                      callback(new Error(`密码需满足：${failed.label}`));
+                      return;
+                    }
+                    callback();
+                  },
+                  trigger: 'blur',
+                }]
               : formRules.password
           "
         >
@@ -330,6 +391,27 @@ onMounted(() => {
             show-password
             :placeholder="isEdit ? '留空则不修改密码' : '请输入密码'"
           />
+          <div v-if="userForm.password" class="password-strength">
+            <div class="strength-header">
+              <span>密码强度</span>
+              <span :style="{ color: passwordStrength.color }">{{ passwordStrength.label }}</span>
+            </div>
+            <el-progress
+              :percentage="passwordStrength.score"
+              :color="passwordStrength.color"
+              :show-text="false"
+              :stroke-width="6"
+            />
+            <ul class="strength-checks">
+              <li
+                v-for="item in passwordStrength.checks"
+                :key="item.label"
+                :class="{ passed: item.passed }"
+              >
+                {{ item.label }}
+              </li>
+            </ul>
+          </div>
         </el-form-item>
         <el-form-item label="角色" prop="role_id">
           <el-select v-model="userForm.role_id" placeholder="请选择角色" style="width: 100%">
@@ -383,5 +465,33 @@ onMounted(() => {
 
 .hidden-file-input {
   display: none;
+}
+
+.password-strength {
+  margin-top: 8px;
+  width: 100%;
+}
+
+.strength-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: $text-secondary;
+  margin-bottom: 4px;
+}
+
+.strength-checks {
+  margin: 8px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: $text-secondary;
+
+  li {
+    margin-bottom: 2px;
+
+    &.passed {
+      color: #67c23a;
+    }
+  }
 }
 </style>
