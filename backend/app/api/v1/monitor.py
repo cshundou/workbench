@@ -114,3 +114,23 @@ async def get_user_activity(
     """查询 DAU/WAU/MAU、活跃用户 Top10 与模块访问占比。"""
     result = await monitor_service.get_user_activity(db)
     return success_response(data=result)
+
+
+@router.get("/alerts/config", summary="告警配置")
+async def get_alert_config(
+    _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],
+) -> dict[str, Any]:
+    """查询监控告警阈值与通知渠道配置。"""
+    result = await monitor_service.get_alert_config()
+    return success_response(data=result)
+
+
+@router.get("/alerts/history", summary="告警历史")
+async def get_alert_history(
+    _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],
+    limit: int = Query(default=20, ge=1, le=100, description="返回条数"),
+) -> dict[str, Any]:
+    """查询最近监控告警记录。"""
+    items = await monitor_service.get_alert_history(limit=limit)
+    return success_response(data={"items": items, "total": len(items)})
+

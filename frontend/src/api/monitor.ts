@@ -48,6 +48,8 @@ export interface TokenUsageStats {
 export interface ApiStatsSummary {
   total_count: number;
   error_count: number;
+  success_count?: number;
+  success_rate?: number;
   avg_response_ms: number;
 }
 
@@ -139,4 +141,29 @@ export interface UserActivityStats {
 /** 用户活跃度统计 */
 export function getUserActivity(): Promise<UserActivityStats> {
   return request.get('/monitor/user-activity');
+}
+
+export interface AlertConfig {
+  enabled: boolean;
+  slow_api_threshold_ms: number;
+  error_rate_threshold: number;
+  cooldown_seconds: number;
+  email_configured: boolean;
+  dingtalk_configured: boolean;
+}
+
+export interface AlertHistoryItem {
+  timestamp: string;
+  type: string;
+  message: string;
+}
+
+/** 查询告警配置 */
+export function getAlertConfig(): Promise<AlertConfig> {
+  return request.get('/monitor/alerts/config');
+}
+
+/** 查询告警历史 */
+export function getAlertHistory(limit = 20): Promise<{ items: AlertHistoryItem[]; total: number }> {
+  return request.get('/monitor/alerts/history', { params: { limit } });
 }

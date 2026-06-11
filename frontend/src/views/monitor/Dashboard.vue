@@ -8,7 +8,11 @@ import {
   getErrorLogs,
   getMonitorHealth,
   getTokenUsage,
+  getAlertConfig,
+  getAlertHistory,
   getUserActivity,
+  type AlertConfig,
+  type AlertHistoryItem,
   type ApiStats,
   type ErrorLogItem,
   type SystemHealth,
@@ -27,7 +31,8 @@ const apiStats = ref<ApiStats | null>(null);
 const errorLogs = ref<ErrorLogItem[]>([]);
 const health = ref<SystemHealth | null>(null);
 const userActivity = ref<UserActivityStats | null>(null);
-
+const alertConfig = ref<AlertConfig | null>(null);
+const alertHistory = ref<AlertHistoryItem[]>([]);
 const tokenChartRef = ref<HTMLDivElement | null>(null);
 const modelChartRef = ref<HTMLDivElement | null>(null);
 const apiChartRef = ref<HTMLDivElement | null>(null);
@@ -60,6 +65,12 @@ const summaryCards = computed(() => [
     value: apiStats.value?.summary.error_count ?? 0,
     unit: '次',
     color: '#F53F3F',
+  },
+  {
+    title: '接口成功率',
+    value: ((apiStats.value?.summary.success_rate ?? 1) * 100).toFixed(1),
+    unit: '%',
+    color: '#00B42A',
   },
 ]);
 
@@ -229,18 +240,23 @@ async function loadModelBreakdown(): Promise<void> {
 async function fetchDashboardData(): Promise<void> {
   loading.value = true;
   try {
-    const [tokenData, apiData, errorData, healthData, activityData] = await Promise.all([
+    const [tokenData, apiData, errorData, healthData, activityData, alertCfg, alerts] =
+      await Promise.all([
       getTokenUsage({ group_by: tokenGroupBy.value }),
       getApiStats(statsDays.value),
       getErrorLogs({ page: 1, page_size: 10 }),
       getMonitorHealth(),
       getUserActivity(),
+      getAlertConfig(),
+      getAlertHistory(10),
     ]);
     tokenStats.value = tokenData;
     apiStats.value = apiData;
     errorLogs.value = errorData.items;
     health.value = healthData;
     userActivity.value = activityData;
+    alertConfig.value = alertCfg;
+    alertHistory.value = alerts.items;
     renderCharts();
     await loadModelBreakdown();
   } catch (error) {
@@ -385,6 +401,32 @@ onUnmounted(() => {
       </el-col>
 
       <el-col :xs="24" :lg="10">
+        <el-card v-if="alertConfig" shadow="never" class="alert-card">
+          <template #header>
+            <span>监控告警</span>
+          </template>
+          <div class="alert-config">
+            <p>状态：{{ alertConfig.enabled ? '已启用' : '未启用' }}</p>
+            <p>慢接口阈值：{{ alertConfig.slow_api_threshold_ms }} ms</p>
+            <p>错误率阈值：{{ (alertConfig.error_rate_threshold * 100).toFixed(1) }}%</p>
+            <p>
+              通知渠道：
+              <el-tag v-if="alertConfig.email_configured" size="small" type="success">邮件</el-tag>
+              <el-tag v-if="alertConfig.dingtalk_configured" size="small" type="success">钉钉</el-tag>
+              <span
+                v-if="!alertConfig.email_configured && !alertConfig.dingtalk_configured"
+              >
+                未配置
+              </span>
+            </p>
+          </div>
+          <el-table :data="alertHistory" stripe size="small" max-height="180">
+            <el-table-column prop="timestamp" label="时间" width="170" />
+            <el-table-column prop="type" label="类型" width="100" />
+            <el-table-column prop="message" label="消息" min-width="160" show-overflow-tooltip />
+          </el-table>
+        </el-card>
+
         <el-card shadow="never">
           <template #header>
             <span>最近错误日志</span>
@@ -414,6 +456,20 @@ onUnmounted(() => {
 
 .card-header {
   width: 100%;
+}
+
+.alert-card {
+  margin-bottom: 20px;
+}
+
+.alert-config {
+  font-size: 13px;
+  color: $text-secondary;
+  margin-bottom: 12px;
+
+  p {
+    margin: 4px 0;
+  }
 }
 
 .chart-container {

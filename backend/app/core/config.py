@@ -201,6 +201,34 @@ class Settings(BaseSettings):
         description="LangSmith 组织 slug（前端 trace 链接）",
     )
 
+    # 监控告警配置
+    alert_enabled: bool = Field(default=False, description="是否启用监控告警")
+    alert_slow_api_threshold_ms: float = Field(
+        default=2000.0,
+        description="慢接口告警阈值（毫秒）",
+    )
+    alert_error_rate_threshold: float = Field(
+        default=0.05,
+        description="错误率告警阈值（0-1）",
+    )
+    alert_cooldown_seconds: int = Field(
+        default=300,
+        description="同类告警冷却时间（秒）",
+    )
+    alert_email_recipients: str = Field(
+        default="",
+        description="告警邮件收件人（逗号分隔）",
+    )
+    alert_smtp_host: str = Field(default="", description="SMTP 服务器地址")
+    alert_smtp_port: int = Field(default=587, description="SMTP 端口")
+    alert_smtp_user: str = Field(default="", description="SMTP 用户名")
+    alert_smtp_password: str = Field(default="", description="SMTP 密码")
+    alert_smtp_from: str = Field(default="", description="告警发件人地址")
+    alert_dingtalk_webhook: str = Field(
+        default="",
+        description="钉钉机器人 Webhook URL",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

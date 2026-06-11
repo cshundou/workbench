@@ -5,12 +5,16 @@
 """
 
 import json
+import smtplib
 from datetime import date, datetime, timedelta, timezone
+from email.mime.text import MIMEText
 from typing import Any, Optional
 
+import httpx
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.core.redis import get_redis, ping_redis
@@ -29,6 +33,9 @@ USER_ACTIVITY_DAILY_PREFIX = "monitor:user:daily:"
 USER_ACTIVITY_TOP_USERS_KEY = "monitor:user:top_users"
 USER_ACTIVITY_MODULE_USAGE_KEY = "monitor:user:module_usage"
 USER_ACTIVITY_TTL_SECONDS = 60 * 60 * 24 * 35
+ALERT_COOLDOWN_KEY_PREFIX = "monitor:alert:cooldown:"
+ALERT_HISTORY_KEY = "monitor:alert:history"
+ALERT_HISTORY_MAX_SIZE = 100
 
 
 class MonitorService:
@@ -81,6 +88,13 @@ class MonitorService:
                 pipe.expire(USER_ACTIVITY_MODULE_USAGE_KEY, USER_ACTIVITY_TTL_SECONDS)
 
             await pipe.execute()
+            if settings.alert_enabled:
+                await self._maybe_trigger_api_alerts(
+                    method=method,
+                    path=path,
+                    status_code=status_code,
+                    elapsed_ms=elapsed_ms,
+                )
         except Exception as exc:
             logger.error("记录 API 统计失败: %s", exc)
 
@@ -276,6 +290,8 @@ class MonitorService:
             total_time_ms = float(summary_raw.get("total_time_ms", 0) or 0)
             error_count = int(summary_raw.get("error_count", 0) or 0)
             avg_response_ms = round(total_time_ms / total_count, 2) if total_count else 0.0
+            success_count = max(total_count - error_count, 0)
+            success_rate = round(success_count / total_count, 4) if total_count else 1.0
 
             endpoint_keys = await redis.keys(f"{API_ENDPOINT_PREFIX}*")
             endpoints: list[dict[str, Any]] = []
@@ -315,6 +331,8 @@ class MonitorService:
                 "summary": {
                     "total_count": total_count,
                     "error_count": error_count,
+                    "success_count": success_count,
+                    "success_rate": success_rate,
                     "avg_response_ms": avg_response_ms,
                 },
                 "endpoints": endpoints[:20],
@@ -326,11 +344,158 @@ class MonitorService:
                 "summary": {
                     "total_count": 0,
                     "error_count": 0,
+                    "success_count": 0,
+                    "success_rate": 1.0,
                     "avg_response_ms": 0.0,
                 },
                 "endpoints": [],
                 "daily_series": [],
             }
+
+    async def get_alert_config(self) -> dict[str, Any]:
+        """返回当前告警阈值与通知渠道配置。"""
+        return {
+            "enabled": settings.alert_enabled,
+            "slow_api_threshold_ms": settings.alert_slow_api_threshold_ms,
+            "error_rate_threshold": settings.alert_error_rate_threshold,
+            "cooldown_seconds": settings.alert_cooldown_seconds,
+            "email_configured": bool(
+                settings.alert_email_recipients and settings.alert_smtp_host
+            ),
+            "dingtalk_configured": bool(settings.alert_dingtalk_webhook),
+        }
+
+    async def get_alert_history(self, limit: int = 20) -> list[dict[str, Any]]:
+        """查询最近告警记录。"""
+        try:
+            redis = await get_redis()
+            raw_items = await redis.lrange(ALERT_HISTORY_KEY, 0, limit - 1)
+            items: list[dict[str, Any]] = []
+            for raw in raw_items:
+                try:
+                    items.append(json.loads(raw))
+                except json.JSONDecodeError:
+                    continue
+            return items
+        except Exception as exc:
+            logger.error("查询告警历史失败: %s", exc)
+            return []
+
+    async def _record_alert_event(self, alert_type: str, message: str) -> None:
+        """记录告警事件并发送通知。"""
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": alert_type,
+            "message": message,
+        }
+        try:
+            redis = await get_redis()
+            await redis.lpush(ALERT_HISTORY_KEY, json.dumps(entry, ensure_ascii=False))
+            await redis.ltrim(ALERT_HISTORY_KEY, 0, ALERT_HISTORY_MAX_SIZE - 1)
+        except Exception as exc:
+            logger.error("写入告警历史失败: %s", exc)
+
+        await self._send_alert_notifications(alert_type, message)
+
+    async def _send_alert_notifications(self, alert_type: str, message: str) -> None:
+        """通过邮件与钉钉发送告警。"""
+        subject = f"[AI Workbench] 监控告警: {alert_type}"
+        body = f"{message}\n时间: {datetime.now(timezone.utc).isoformat()}"
+
+        recipients = [
+            item.strip()
+            for item in settings.alert_email_recipients.split(",")
+            if item.strip()
+        ]
+        if recipients and settings.alert_smtp_host:
+            try:
+                mail = MIMEText(body, "plain", "utf-8")
+                mail["Subject"] = subject
+                mail["From"] = settings.alert_smtp_from or settings.alert_smtp_user
+                mail["To"] = ", ".join(recipients)
+                with smtplib.SMTP(
+                    settings.alert_smtp_host,
+                    settings.alert_smtp_port,
+                    timeout=15,
+                ) as smtp:
+                    if settings.alert_smtp_user:
+                        smtp.starttls()
+                        smtp.login(settings.alert_smtp_user, settings.alert_smtp_password)
+                    smtp.sendmail(mail["From"], recipients, mail.as_string())
+            except Exception as exc:
+                logger.error("发送告警邮件失败: %s", exc)
+
+        if settings.alert_dingtalk_webhook:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(
+                        settings.alert_dingtalk_webhook,
+                        json={
+                            "msgtype": "text",
+                            "text": {"content": f"{subject}\n{body}"},
+                        },
+                    )
+            except Exception as exc:
+                logger.error("发送钉钉告警失败: %s", exc)
+
+    async def _is_alert_in_cooldown(self, alert_key: str) -> bool:
+        """检查告警是否处于冷却期。"""
+        try:
+            redis = await get_redis()
+            return bool(await redis.exists(f"{ALERT_COOLDOWN_KEY_PREFIX}{alert_key}"))
+        except Exception:
+            return False
+
+    async def _set_alert_cooldown(self, alert_key: str) -> None:
+        """设置告警冷却。"""
+        try:
+            redis = await get_redis()
+            await redis.setex(
+                f"{ALERT_COOLDOWN_KEY_PREFIX}{alert_key}",
+                settings.alert_cooldown_seconds,
+                "1",
+            )
+        except Exception as exc:
+            logger.error("设置告警冷却失败: %s", exc)
+
+    async def _maybe_trigger_api_alerts(
+        self,
+        method: str,
+        path: str,
+        status_code: int,
+        elapsed_ms: float,
+    ) -> None:
+        """根据阈值触发慢接口与错误率告警。"""
+        endpoint = f"{method}:{path}"
+
+        if elapsed_ms >= settings.alert_slow_api_threshold_ms:
+            alert_key = f"slow:{endpoint}"
+            if not await self._is_alert_in_cooldown(alert_key):
+                message = (
+                    f"慢接口告警 {endpoint} 耗时 {elapsed_ms:.2f}ms，"
+                    f"阈值 {settings.alert_slow_api_threshold_ms}ms"
+                )
+                await self._record_alert_event("slow_api", message)
+                await self._set_alert_cooldown(alert_key)
+
+        if status_code >= 400:
+            stats = await self.get_api_stats(days=1)
+            summary = stats.get("summary", {})
+            total_count = int(summary.get("total_count", 0) or 0)
+            error_count = int(summary.get("error_count", 0) or 0)
+            if total_count <= 0:
+                return
+            error_rate = error_count / total_count
+            if error_rate >= settings.alert_error_rate_threshold:
+                alert_key = "error_rate"
+                if not await self._is_alert_in_cooldown(alert_key):
+                    message = (
+                        f"错误率告警 当前 {error_rate:.2%}，"
+                        f"阈值 {settings.alert_error_rate_threshold:.2%} "
+                        f"（错误 {error_count}/{total_count}）"
+                    )
+                    await self._record_alert_event("error_rate", message)
+                    await self._set_alert_cooldown(alert_key)
 
     async def get_error_logs(
         self,
