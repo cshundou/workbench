@@ -14,6 +14,11 @@ class TenantCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="租户名称")
     domain: str = Field(..., min_length=1, max_length=100, description="租户域标识")
     status: int = Field(default=1, ge=0, le=1, description="状态：0=禁用，1=启用")
+    monthly_token_limit: int = Field(
+        default=0,
+        ge=0,
+        description="月度 Token 配额，0 表示不限制",
+    )
 
 
 class TenantUpdate(BaseModel):
@@ -22,6 +27,11 @@ class TenantUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     domain: Optional[str] = Field(default=None, min_length=1, max_length=100)
     status: Optional[int] = Field(default=None, ge=0, le=1)
+    monthly_token_limit: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="月度 Token 配额，0 表示不限制",
+    )
 
 
 class TenantResponse(BaseModel):
@@ -31,6 +41,7 @@ class TenantResponse(BaseModel):
     name: str
     domain: str
     status: int
+    monthly_token_limit: int
     created_at: datetime
     updated_at: datetime
 

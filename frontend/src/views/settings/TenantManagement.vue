@@ -22,7 +22,7 @@ const editingId = ref<number | null>(null);
 const formRef = ref<FormInstance>();
 const submitLoading = ref(false);
 
-const form = reactive({ name: '', domain: '', status: 1 });
+const form = reactive({ name: '', domain: '', status: 1, monthly_token_limit: 0 });
 const rules: FormRules = {
   name: [{ required: true, message: '请输入租户名称', trigger: 'blur' }],
   domain: [{ required: true, message: '请输入域标识', trigger: 'blur' }],
@@ -45,6 +45,7 @@ function openCreate(): void {
   form.name = '';
   form.domain = '';
   form.status = 1;
+  form.monthly_token_limit = 0;
   dialogVisible.value = true;
 }
 
@@ -54,6 +55,7 @@ function openEdit(row: TenantInfo): void {
   form.name = row.name;
   form.domain = row.domain;
   form.status = row.status;
+  form.monthly_token_limit = row.monthly_token_limit ?? 0;
   dialogVisible.value = true;
 }
 
@@ -107,6 +109,11 @@ onMounted(() => {
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="月度Token配额" width="140">
+        <template #default="{ row }">
+          {{ row.monthly_token_limit === 0 ? '不限制' : row.monthly_token_limit.toLocaleString() }}
+        </template>
+      </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="180" />
       <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
@@ -126,6 +133,10 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="form.status" :active-value="1" :inactive-value="0" />
+        </el-form-item>
+        <el-form-item label="Token配额">
+          <el-input-number v-model="form.monthly_token_limit" :min="0" :step="100000" style="width: 100%" />
+          <div class="form-hint">0 表示不限制月度 Token 消耗</div>
         </el-form-item>
       </el-form>
       <template #footer>

@@ -6,6 +6,7 @@ export interface TenantInfo {
   name: string;
   domain: string;
   status: number;
+  monthly_token_limit: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -14,12 +15,14 @@ export interface CreateTenantParams {
   name: string;
   domain: string;
   status?: number;
+  monthly_token_limit?: number;
 }
 
 export interface UpdateTenantParams {
   name?: string;
   domain?: string;
   status?: number;
+  monthly_token_limit?: number;
 }
 
 export function getTenants(params?: PageParams): Promise<PageResult<TenantInfo>> {

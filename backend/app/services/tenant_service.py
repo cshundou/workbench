@@ -27,6 +27,7 @@ class TenantService:
             name=tenant.name,
             domain=tenant.domain,
             status=tenant.status,
+            monthly_token_limit=tenant.monthly_token_limit,
             created_at=tenant.created_at,
             updated_at=tenant.updated_at,
         )
@@ -67,7 +68,12 @@ class TenantService:
         ip_address: Optional[str] = None,
     ) -> TenantResponse:
         """创建租户。"""
-        tenant = Tenant(name=data.name, domain=data.domain, status=data.status)
+        tenant = Tenant(
+            name=data.name,
+            domain=data.domain,
+            status=data.status,
+            monthly_token_limit=data.monthly_token_limit,
+        )
         db.add(tenant)
         try:
             await db.flush()
@@ -102,7 +108,12 @@ class TenantService:
             raise NotFoundError(message="租户不存在")
 
         update_data = data.model_dump(exclude_unset=True)
-        before = {"name": tenant.name, "domain": tenant.domain, "status": tenant.status}
+        before = {
+            "name": tenant.name,
+            "domain": tenant.domain,
+            "status": tenant.status,
+            "monthly_token_limit": tenant.monthly_token_limit,
+        }
         for field, value in update_data.items():
             setattr(tenant, field, value)
 
@@ -125,6 +136,7 @@ class TenantService:
                     "name": tenant.name,
                     "domain": tenant.domain,
                     "status": tenant.status,
+                    "monthly_token_limit": tenant.monthly_token_limit,
                 },
             },
             ip_address=ip_address,
