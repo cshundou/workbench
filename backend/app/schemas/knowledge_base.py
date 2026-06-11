@@ -118,7 +118,7 @@ class SearchRequest(BaseModel):
     use_rag: bool = Field(default=True, description="是否启用知识库增强检索")
     filters: Optional[dict[str, Any]] = Field(
         default=None,
-        description="过滤条件：department、file_type、document_id、tags",
+        description="过滤条件：department、file_type、time_start、time_end、document_id、tags",
     )
 
 

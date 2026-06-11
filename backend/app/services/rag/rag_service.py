@@ -608,6 +608,49 @@ class RAGService:
 
         return chroma_filter or None
 
+    @staticmethod
+    def _apply_time_range_filter(
+        docs: list[Document],
+        filters: Optional[dict[str, Any]],
+    ) -> list[Document]:
+        """按文档创建时间范围后过滤检索结果。"""
+        if not filters:
+            return docs
+
+        time_start = filters.get("time_start")
+        time_end = filters.get("time_end")
+        if not time_start and not time_end:
+            return docs
+
+        def parse_ts(value: str) -> Optional[datetime]:
+            if not value:
+                return None
+            normalized = value.replace("Z", "+00:00")
+            try:
+                return datetime.fromisoformat(normalized)
+            except ValueError:
+                return None
+
+        start_dt = parse_ts(str(time_start)) if time_start else None
+        end_dt = parse_ts(str(time_end)) if time_end else None
+        if start_dt is None and end_dt is None:
+            return docs
+
+        filtered: list[Document] = []
+        for doc in docs:
+            created_raw = doc.metadata.get("created_at")
+            if not created_raw:
+                continue
+            created_dt = parse_ts(str(created_raw))
+            if created_dt is None:
+                continue
+            if start_dt and created_dt < start_dt:
+                continue
+            if end_dt and created_dt > end_dt:
+                continue
+            filtered.append(doc)
+        return filtered
+
     async def _retrieve_reranked_docs(
         self,
         db: AsyncSession,
@@ -625,6 +668,7 @@ class RAGService:
 
         started = time.perf_counter()
         retrieved = hybrid_retriever.retrieve(query, filters=chroma_filters, top_k=top_k * 2)
+        retrieved = self._apply_time_range_filter(retrieved, filters)
         doc_dicts = [
             {"page_content": doc.page_content, "metadata": doc.metadata}
             for doc in retrieved

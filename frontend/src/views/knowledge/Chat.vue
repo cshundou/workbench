@@ -36,7 +36,35 @@ const activeCitationId = ref<number | null>(null);
 const currentSources = ref<CitationSource[]>([]);
 
 const useRag = ref(true);
+const showFilters = ref(false);
+const filterDepartment = ref('');
+const filterFileType = ref('');
+const filterDateRange = ref<[string, string] | null>(null);
 const abortController = ref<AbortController | null>(null);
+
+const fileTypeOptions = ['.pdf', '.docx', '.doc', '.md', '.txt', '.html', '.xlsx', '.pptx', '.csv'];
+
+function buildSearchFilters(): Record<string, unknown> | undefined {
+  const filters: Record<string, unknown> = {};
+  if (filterDepartment.value.trim()) {
+    filters.department = filterDepartment.value.trim();
+  }
+  if (filterFileType.value) {
+    filters.file_type = filterFileType.value;
+  }
+  if (filterDateRange.value) {
+    const [start, end] = filterDateRange.value;
+    filters.time_start = `${start}T00:00:00`;
+    filters.time_end = `${end}T23:59:59`;
+  }
+  return Object.keys(filters).length > 0 ? filters : undefined;
+}
+
+function clearFilters(): void {
+  filterDepartment.value = '';
+  filterFileType.value = '';
+  filterDateRange.value = null;
+}
 
 /** 加载知识库信息 */
 async function loadKbInfo(): Promise<void> {
@@ -156,7 +184,12 @@ async function handleSend(): Promise<void> {
   try {
     await chatKnowledgeStream(
       kbId.value,
-      { query, use_rag: useRag.value, session_id: sessionId.value },
+      {
+        query,
+        use_rag: useRag.value,
+        session_id: sessionId.value,
+        filters: buildSearchFilters(),
+      },
       handleStreamMessage,
       abortController.value.signal,
     );
@@ -259,6 +292,46 @@ onUnmounted(() => {
       </div>
 
       <div class="chat-main">
+        <div v-if="useRag" class="filter-panel">
+          <div class="filter-header flex-between">
+            <span>检索过滤</span>
+            <el-button text size="small" @click="showFilters = !showFilters">
+              {{ showFilters ? '收起' : '展开' }}
+            </el-button>
+          </div>
+          <div v-show="showFilters" class="filter-body">
+            <el-input
+              v-model="filterDepartment"
+              placeholder="部门（角色名）"
+              clearable
+              size="small"
+            />
+            <el-select
+              v-model="filterFileType"
+              placeholder="文档类型"
+              clearable
+              size="small"
+            >
+              <el-option
+                v-for="type in fileTypeOptions"
+                :key="type"
+                :label="type"
+                :value="type"
+              />
+            </el-select>
+            <el-date-picker
+              v-model="filterDateRange"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              size="small"
+              value-format="YYYY-MM-DD"
+            />
+            <el-button size="small" @click="clearFilters">重置</el-button>
+          </div>
+        </div>
+
         <div class="message-list">
           <el-empty
             v-if="messages.length === 0"
@@ -413,6 +486,26 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.filter-panel {
+  padding: 12px 16px 0;
+  border-bottom: 1px solid $border-color;
+}
+
+.filter-header {
+  font-size: 13px;
+  font-weight: 500;
+  color: $text-primary;
+  margin-bottom: 8px;
+}
+
+.filter-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 12px;
 }
 
 .message-list {
