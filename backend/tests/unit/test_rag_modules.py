@@ -60,8 +60,7 @@ class TestReranker:
     """重排序器。"""
 
     def test_rerank_without_cohere_key(self) -> None:
-        retriever = MagicMock()
-        reranker = Reranker(base_retriever=retriever, cohere_api_key=None)
+        reranker = Reranker(cohere_api_key=None)
         docs = [{"page_content": "hello", "metadata": {"id": 1}}]
         results = reranker.rerank("query", docs)
         assert len(results) == 1
