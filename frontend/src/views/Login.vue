@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { FormInstance, FormRules } from 'element-plus';
 import { User, Lock } from '@element-plus/icons-vue';
+import { useI18n } from 'vue-i18n';
 import { useUserStore } from '@/stores/user';
 import AppLogo from '@/components/layout/AppLogo.vue';
 
 const route = useRoute();
 const router = useRouter();
 const userStore = useUserStore();
+const { t } = useI18n();
 
 const loginFormRef = ref<FormInstance>();
 const loading = ref(false);
@@ -18,16 +20,16 @@ const loginForm = reactive({
   password: '',
 });
 
-const loginRules: FormRules = {
+const loginRules = computed<FormRules>(() => ({
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 2, max: 50, message: '用户名长度为 2-50 个字符', trigger: 'blur' },
+    { required: true, message: t('login.validation.usernameRequired'), trigger: 'blur' },
+    { min: 2, max: 50, message: t('login.validation.usernameLength'), trigger: 'blur' },
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, max: 50, message: '密码长度不能少于 6 位', trigger: 'blur' },
+    { required: true, message: t('login.validation.passwordRequired'), trigger: 'blur' },
+    { min: 6, max: 50, message: t('login.validation.passwordLength'), trigger: 'blur' },
   ],
-};
+}));
 
 async function handleLogin(): Promise<void> {
   if (!loginFormRef.value) return;
@@ -64,13 +66,13 @@ async function handleLogin(): Promise<void> {
           <div class="hero-logo-wrap">
             <AppLogo :size="48" :show-text="false" />
           </div>
-          <h1 class="hero-title">企业智能协作工作台</h1>
-          <p class="hero-subtitle">知识问答 · 任务自动化 · 多智能体协同</p>
+          <h1 class="hero-title">{{ t('login.heroTitle') }}</h1>
+          <p class="hero-subtitle">{{ t('login.heroSubtitle') }}</p>
         </div>
 
         <div class="login-form-card">
-          <h2 class="form-title">登录</h2>
-          <p class="form-desc">使用您的账号登录系统</p>
+          <h2 class="form-title">{{ t('login.formTitle') }}</h2>
+          <p class="form-desc">{{ t('login.formDescription') }}</p>
 
           <el-form
             ref="loginFormRef"
@@ -83,7 +85,7 @@ async function handleLogin(): Promise<void> {
             <el-form-item prop="username">
               <el-input
                 v-model="loginForm.username"
-                placeholder="请输入用户名"
+                :placeholder="t('login.usernamePlaceholder')"
                 :prefix-icon="User"
                 autocomplete="username"
               />
@@ -93,7 +95,7 @@ async function handleLogin(): Promise<void> {
               <el-input
                 v-model="loginForm.password"
                 type="password"
-                placeholder="请输入密码"
+                :placeholder="t('login.passwordPlaceholder')"
                 :prefix-icon="Lock"
                 show-password
                 autocomplete="current-password"
@@ -108,12 +110,12 @@ async function handleLogin(): Promise<void> {
                 :loading="loading"
                 @click="handleLogin"
               >
-                登 录
+                {{ t('login.submit') }}
               </el-button>
             </el-form-item>
           </el-form>
 
-          <p class="login-tip">默认账号：admin / admin123</p>
+          <p class="login-tip">{{ t('login.defaultAccountTip') }}</p>
         </div>
       </div>
     </main>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
 import {
@@ -22,43 +23,46 @@ import ThemeSwitch from '@/components/layout/ThemeSwitch.vue';
 
 interface NavItem {
   path: string;
-  title: string;
+  titleKey: string;
   icon?: Component;
   permission: string | null;
 }
+
+type SupportedLocale = 'zh-CN' | 'en-US';
 
 const route = useRoute();
 const router = useRouter();
 const userStore = useUserStore();
 const appConfig = useAppConfigStore();
+const { t, locale } = useI18n();
 
 const mobileMenuVisible = ref(false);
 
 /** 顶部主导航项 */
 const topMenuItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
-    { path: '/dashboard', title: '控制台', icon: Odometer, permission: null },
+    { path: '/dashboard', titleKey: 'nav.dashboard', icon: Odometer, permission: null },
     {
       path: '/knowledge',
-      title: '知识库',
+      titleKey: 'nav.knowledge',
       icon: Collection,
       permission: ROUTE_PERMISSIONS.knowledge,
     },
     {
       path: '/agents',
-      title: '智能体',
+      titleKey: 'nav.agents',
       icon: Cpu,
       permission: ROUTE_PERMISSIONS.agents,
     },
     {
       path: '/workflows',
-      title: '工作流',
+      titleKey: 'nav.workflows',
       icon: Share,
       permission: ROUTE_PERMISSIONS.workflows,
     },
     {
       path: '/monitor',
-      title: '监控面板',
+      titleKey: 'nav.monitor',
       icon: DataAnalysis,
       permission: ROUTE_PERMISSIONS.monitor,
     },
@@ -67,9 +71,7 @@ const topMenuItems = computed<NavItem[]>(() => {
   if (!userStore.isLoggedIn && appConfig.authMode === 'optional') {
     return items;
   }
-  return items.filter(
-    (item) => !item.permission || userStore.hasPermission(item.permission),
-  );
+  return items.filter((item) => !item.permission || userStore.hasPermission(item.permission));
 });
 
 /** 设置子菜单项 */
@@ -77,30 +79,41 @@ const settingsMenuItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
     {
       path: '/settings/api-keys',
-      title: 'API 密钥管理',
+      titleKey: 'nav.apiKeys',
       icon: Key,
       permission: null,
     },
     {
       path: '/settings/users',
-      title: '用户管理',
+      titleKey: 'nav.users',
       icon: User,
       permission: ROUTE_PERMISSIONS.userManagement,
     },
     {
       path: '/settings/roles',
-      title: '角色管理',
+      titleKey: 'nav.roles',
       icon: Key,
       permission: ROUTE_PERMISSIONS.roleManagement,
     },
   ];
 
-  return items.filter(
-    (item) => !item.permission || userStore.hasPermission(item.permission),
-  );
+  return items.filter((item) => !item.permission || userStore.hasPermission(item.permission));
 });
 
-const displayName = computed(() => userStore.userInfo?.username || '用户');
+const languageOptions = computed(() => [
+  { value: 'zh-CN' as SupportedLocale, label: t('header.languageZhCN') },
+  { value: 'en-US' as SupportedLocale, label: t('header.languageEnUS') },
+]);
+
+const currentLanguage = computed<SupportedLocale>({
+  get: () => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'),
+  set: (value) => {
+    locale.value = value;
+    localStorage.setItem('locale', value);
+  },
+});
+
+const displayName = computed(() => userStore.userInfo?.username || t('header.defaultUser'));
 
 const isSettingsActive = computed(() => route.path.startsWith('/settings'));
 
@@ -119,9 +132,9 @@ function handleNavClick(path: string): void {
 
 async function handleLogout(): Promise<void> {
   try {
-    await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('header.logoutConfirmMessage'), t('header.logoutConfirmTitle'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
     });
     userStore.logout();
@@ -149,13 +162,13 @@ async function handleLogout(): Promise<void> {
           :class="{ 'is-active': isNavActive(item.path) }"
           @click="handleNavClick(item.path)"
         >
-          {{ item.title }}
+          {{ t(item.titleKey) }}
         </button>
 
         <el-dropdown v-if="settingsMenuItems.length > 0" trigger="click">
           <button class="nav-item" :class="{ 'is-active': isSettingsActive }">
             <el-icon class="nav-icon"><Setting /></el-icon>
-            系统设置
+            {{ t('nav.settings') }}
           </button>
           <template #dropdown>
             <el-dropdown-menu>
@@ -165,7 +178,7 @@ async function handleLogout(): Promise<void> {
                 @click="handleNavClick(item.path)"
               >
                 <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
-                {{ item.title }}
+                {{ t(item.titleKey) }}
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -174,6 +187,14 @@ async function handleLogout(): Promise<void> {
 
       <!-- 右侧用户区 -->
       <div class="header-right flex-center">
+        <el-select v-model="currentLanguage" size="small" class="language-switch">
+          <el-option
+            v-for="option in languageOptions"
+            :key="option.value"
+            :label="option.label"
+            :value="option.value"
+          />
+        </el-select>
         <ThemeSwitch class="theme-switch" />
         <el-button
           v-if="!userStore.isLoggedIn"
@@ -181,7 +202,7 @@ async function handleLogout(): Promise<void> {
           round
           @click="router.push({ name: 'Login', query: { redirect: route.fullPath } })"
         >
-          登录
+          {{ t('header.login') }}
         </el-button>
         <el-dropdown v-else trigger="click">
           <span class="user-dropdown flex-center">
@@ -192,7 +213,7 @@ async function handleLogout(): Promise<void> {
           </span>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item @click="handleLogout">退出登录</el-dropdown-item>
+              <el-dropdown-item @click="handleLogout">{{ t('header.logout') }}</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -209,7 +230,7 @@ async function handleLogout(): Promise<void> {
       v-model="mobileMenuVisible"
       direction="rtl"
       size="280px"
-      title="导航菜单"
+      :title="t('nav.drawerTitle')"
       :with-header="true"
     >
       <div class="mobile-nav">
@@ -221,11 +242,11 @@ async function handleLogout(): Promise<void> {
           @click="handleNavClick(item.path)"
         >
           <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
-          {{ item.title }}
+          {{ t(item.titleKey) }}
         </button>
 
         <div v-if="settingsMenuItems.length > 0" class="mobile-nav-group">
-          <p class="mobile-nav-label">系统设置</p>
+          <p class="mobile-nav-label">{{ t('nav.settingsGroup') }}</p>
           <button
             v-for="item in settingsMenuItems"
             :key="item.path"
@@ -234,7 +255,7 @@ async function handleLogout(): Promise<void> {
             @click="handleNavClick(item.path)"
           >
             <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
-            {{ item.title }}
+            {{ t(item.titleKey) }}
           </button>
         </div>
       </div>
@@ -311,6 +332,14 @@ async function handleLogout(): Promise<void> {
 .header-right {
   gap: 8px;
   flex-shrink: 0;
+}
+
+.language-switch {
+  width: 120px;
+
+  @media (max-width: 768px) {
+    width: 104px;
+  }
 }
 
 .user-dropdown {
