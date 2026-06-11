@@ -22,6 +22,11 @@ export const PERMISSION_OPTIONS = [
   { label: '租户管理', value: 'tenant:write' },
   { label: '租户删除', value: 'tenant:delete' },
   { label: '任务查看', value: 'task:read' },
+  { label: '知识库检索工具', value: 'tool:knowledge:use' },
+  { label: 'Tavily搜索工具', value: 'tool:search:use' },
+  { label: 'Python代码执行工具', value: 'tool:code:use' },
+  { label: 'SQL查询工具', value: 'tool:sql:use' },
+  { label: '计算器工具', value: 'tool:calculator:use' },
 ] as const;
 
 /** 路由权限映射 */

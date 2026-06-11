@@ -3,9 +3,11 @@ Agent 工具基类与统一返回结构。
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+from app.core.permissions import check_tool_permission, get_tool_permission_error
 
 
 class ToolResult(BaseModel):
@@ -43,3 +45,14 @@ class BaseTool(ABC):
             "properties": self.parameters.get("properties", {}),
             "required": self.parameters.get("required", []),
         }
+
+    def check_permission(self, user_permissions: List[str]) -> Optional[str]:
+        """
+        校验当前用户是否可使用该工具。
+
+        Returns:
+            无权限时返回错误信息，有权限时返回 None。
+        """
+        if check_tool_permission(self.name, user_permissions):
+            return None
+        return get_tool_permission_error(self.name)

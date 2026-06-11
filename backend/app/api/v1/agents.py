@@ -15,6 +15,7 @@ from app.core.deps import (
     get_current_tenant_id,
     get_db_session,
     get_user_key_context,
+    get_user_permissions,
     require_permission,
 )
 from app.core.permissions import AGENT_DELETE, AGENT_READ, AGENT_WRITE
@@ -66,8 +67,9 @@ async def create_agent(
 async def list_available_tools(
     current_user: Annotated[CurrentUser, Depends(require_permission(AGENT_READ))],
 ) -> dict[str, Any]:
-    """返回系统内置 Agent 工具定义。"""
-    tools = agent_service.list_available_tools()
+    """返回当前用户有权限使用的 Agent 工具定义。"""
+    user_permissions = get_user_permissions(current_user)
+    tools = agent_service.list_available_tools(user_permissions)
     return success_response(data=tools)
 
 

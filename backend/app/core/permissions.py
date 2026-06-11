@@ -48,6 +48,40 @@ TENANT_DELETE = "tenant:delete"
 # 异步任务权限
 TASK_READ = "task:read"
 
+# 工具使用权限
+TOOL_KNOWLEDGE_USE = "tool:knowledge:use"
+TOOL_SEARCH_USE = "tool:search:use"
+TOOL_CODE_USE = "tool:code:use"
+TOOL_SQL_USE = "tool:sql:use"
+TOOL_CALCULATOR_USE = "tool:calculator:use"
+
+# 全部工具权限
+ALL_TOOL_PERMISSIONS: list[str] = [
+    TOOL_KNOWLEDGE_USE,
+    TOOL_SEARCH_USE,
+    TOOL_CODE_USE,
+    TOOL_SQL_USE,
+    TOOL_CALCULATOR_USE,
+]
+
+# 内置工具名称 -> 权限码映射
+TOOL_PERMISSION_MAP: dict[str, str] = {
+    "knowledge_base_search": TOOL_KNOWLEDGE_USE,
+    "tavily_search": TOOL_SEARCH_USE,
+    "python_repl": TOOL_CODE_USE,
+    "sql_query": TOOL_SQL_USE,
+    "calculator": TOOL_CALCULATOR_USE,
+}
+
+# 工具权限 -> 友好名称
+TOOL_PERMISSION_LABELS: dict[str, str] = {
+    TOOL_KNOWLEDGE_USE: "知识库检索工具",
+    TOOL_SEARCH_USE: "Tavily搜索工具",
+    TOOL_CODE_USE: "Python代码执行工具",
+    TOOL_SQL_USE: "SQL查询工具",
+    TOOL_CALCULATOR_USE: "计算器工具",
+}
+
 # 默认管理员拥有的全部权限标识
 DEFAULT_ADMIN_PERMISSIONS: list[str] = [PERMISSION_ALL]
 
@@ -71,6 +105,7 @@ DEFAULT_TENANT_ADMIN_PERMISSIONS: list[str] = [
     MONITOR_READ,
     AUDIT_READ,
     TASK_READ,
+    *ALL_TOOL_PERMISSIONS,
 ]
 
 # 普通用户权限（可使用知识库、智能体、工作流，无管理权限）
@@ -82,6 +117,8 @@ DEFAULT_USER_PERMISSIONS: list[str] = [
     WF_READ,
     WF_WRITE,
     TASK_READ,
+    TOOL_KNOWLEDGE_USE,
+    TOOL_CALCULATOR_USE,
 ]
 
 # 只读用户权限
@@ -123,7 +160,28 @@ ALL_PERMISSION_CODES: list[str] = [
     TENANT_WRITE,
     TENANT_DELETE,
     TASK_READ,
+    *ALL_TOOL_PERMISSIONS,
 ]
+
+
+def get_tool_permission(tool_name: str) -> str | None:
+    """获取工具对应的权限码。"""
+    return TOOL_PERMISSION_MAP.get(tool_name)
+
+
+def get_tool_permission_error(tool_name: str) -> str:
+    """生成工具无权限时的友好错误提示。"""
+    permission = TOOL_PERMISSION_MAP.get(tool_name)
+    label = TOOL_PERMISSION_LABELS.get(permission or "", tool_name)
+    return f"您没有使用{label}的权限，请联系管理员"
+
+
+def check_tool_permission(tool_name: str, user_permissions: list[str]) -> bool:
+    """检查用户是否拥有指定工具的使用权限。"""
+    required = TOOL_PERMISSION_MAP.get(tool_name)
+    if required is None:
+        return True
+    return has_permission(user_permissions, required)
 
 
 def parse_permissions(permissions_data: Any) -> list[str]:

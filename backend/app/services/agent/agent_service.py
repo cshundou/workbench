@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
-from app.core.permissions import KB_READ, has_permission
+from app.core.permissions import check_tool_permission
 from app.models.chat_history import ChatHistory
 from app.models.user import User
 from app.services.agent.tools import (
@@ -62,20 +62,18 @@ class AgentService:
         self.tool_registry[tool_cls.name] = tool_cls
         logger.info("已注册 Agent 工具: %s", tool_cls.name)
 
-    def list_available_tools(self) -> list[dict[str, str]]:
-        """返回内置工具元数据列表。"""
-        return AVAILABLE_TOOL_DEFINITIONS
-
-    def _check_tool_permission(
+    def list_available_tools(
         self,
-        tool_name: str,
-        user_permissions: list[str],
-    ) -> bool:
-        """工具权限拦截。"""
-        if tool_name == TOOL_KNOWLEDGE_BASE:
-            return has_permission(user_permissions, KB_READ)
-        # 其他工具默认需要 agent:write 或全局权限
-        return True
+        user_permissions: Optional[list[str]] = None,
+    ) -> list[dict[str, str]]:
+        """返回内置工具元数据列表，可按用户权限过滤。"""
+        if user_permissions is None:
+            return AVAILABLE_TOOL_DEFINITIONS
+        return [
+            item
+            for item in AVAILABLE_TOOL_DEFINITIONS
+            if check_tool_permission(item["name"], user_permissions)
+        ]
 
     def _build_tool_instances(
         self,
@@ -92,7 +90,7 @@ class AgentService:
             if name not in self.tool_registry:
                 logger.warning("未知工具名称，已跳过: %s", name)
                 continue
-            if not self._check_tool_permission(name, user_permissions):
+            if not check_tool_permission(name, user_permissions):
                 logger.warning("用户无权限使用工具: %s user_id=%s", name, user.id)
                 continue
 
@@ -175,7 +173,11 @@ class AgentService:
 
         return ToolResult(success=False, content=None, error=last_error)
 
-    def _to_langchain_tools(self, base_tools: list[BaseTool]) -> list[StructuredTool]:
+    def _to_langchain_tools(
+        self,
+        base_tools: list[BaseTool],
+        user_permissions: list[str],
+    ) -> list[StructuredTool]:
         """将 BaseTool 包装为 LangChain StructuredTool。"""
         lc_tools: list[StructuredTool] = []
 
@@ -185,8 +187,15 @@ class AgentService:
 
             async def _run(
                 _tool: BaseTool = base_tool,
+                _user_permissions: list[str] = user_permissions,
                 **kwargs: Any,
             ) -> str:
+                permission_error = _tool.check_permission(_user_permissions)
+                if permission_error:
+                    return json.dumps(
+                        {"success": False, "error": permission_error},
+                        ensure_ascii=False,
+                    )
                 clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
                 result = await self._execute_with_retry(_tool, clean_kwargs)
                 if result.success:
@@ -283,7 +292,7 @@ class AgentService:
             user_permissions,
             user_ctx,
         )
-        lc_tools = self._to_langchain_tools(base_tools)
+        lc_tools = self._to_langchain_tools(base_tools, user_permissions)
         executor = self._build_agent_executor(agent_config, lc_tools, user_ctx)
 
         history_messages: list[Any] = []
@@ -362,7 +371,7 @@ class AgentService:
             user_permissions,
             user_ctx,
         )
-        lc_tools = self._to_langchain_tools(base_tools)
+        lc_tools = self._to_langchain_tools(base_tools, user_permissions)
         executor = self._build_agent_executor(agent_config, lc_tools, user_ctx)
 
         history_messages: list[Any] = []
