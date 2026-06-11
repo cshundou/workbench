@@ -7,21 +7,18 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# 密码哈希上下文
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    校验明文密码与哈希密码是否匹配。
+    校验明文密码与 bcrypt 哈希是否匹配。
 
     Args:
         plain_password: 明文密码。
@@ -31,7 +28,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         密码是否匹配。
     """
     try:
-        return pwd_context.verify(plain_password, hashed_password)
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"),
+            hashed_password.encode("utf-8"),
+        )
     except Exception as exc:
         logger.warning("密码校验异常: %s", exc)
         return False
@@ -47,7 +47,10 @@ def get_password_hash(password: str) -> str:
     Returns:
         哈希后的密码字符串。
     """
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(
+        password.encode("utf-8"),
+        bcrypt.gensalt(),
+    ).decode("utf-8")
 
 
 def create_access_token(

@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     """应用全局配置，字段名与 .env 环境变量对应。"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # 支持从 backend/ 或项目根目录加载 .env
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
