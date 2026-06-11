@@ -14,6 +14,7 @@ from app.models.mixins import TimestampMixin
 if TYPE_CHECKING:
     from app.models.agent import Agent
     from app.models.chat_history import ChatHistory
+    from app.models.document import Document
     from app.models.knowledge_base import KnowledgeBase
     from app.models.role import Role
     from app.models.tenant import Tenant
@@ -57,7 +58,9 @@ class User(Base, TimestampMixin):
     owned_knowledge_bases: Mapped[list["KnowledgeBase"]] = relationship(
         back_populates="owner"
     )
-    uploaded_documents: Mapped[list] = relationship(back_populates="uploader")
+    uploaded_documents: Mapped[list["Document"]] = relationship(
+        back_populates="uploader"
+    )
     owned_agents: Mapped[list["Agent"]] = relationship(back_populates="owner")
     owned_workflows: Mapped[list["Workflow"]] = relationship(back_populates="owner")
     workflow_executions: Mapped[list["WorkflowExecution"]] = relationship(
