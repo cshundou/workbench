@@ -40,6 +40,8 @@ from app.core.deps import get_user_permissions
 from app.core.guardrails import guardrails_service
 from app.services.token_quota_service import token_quota_service
 from app.services.token_usage_service import token_usage_service
+from app.models.custom_tool import CustomTool
+from app.services.agent.tools.custom_tool import CustomRestTool
 from app.services.llm_fallback_service import llm_fallback_service
 from app.services.user_key_context import UserKeyContext, format_llm_error_message
 
@@ -57,6 +59,34 @@ class AgentService:
             TOOL_SQL_QUERY: SqlQueryTool,
             TOOL_CALCULATOR: CalculatorTool,
         }
+
+    async def _resolve_custom_tool(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        tool_name: str,
+    ) -> Optional[CustomRestTool]:
+        """按工具名解析自定义工具实例。"""
+        try:
+            parts = tool_name.split("_", 2)
+            if len(parts) < 3:
+                return None
+            tool_id = int(parts[1])
+        except ValueError:
+            return None
+
+        from sqlalchemy import select
+
+        stmt = select(CustomTool).where(
+            CustomTool.id == tool_id,
+            CustomTool.tenant_id == tenant_id,
+            CustomTool.is_active.is_(True),
+        )
+        record = (await db.execute(stmt)).scalar_one_or_none()
+        if record is None:
+            logger.warning("自定义工具不存在: %s", tool_name)
+            return None
+        return CustomRestTool(record)
 
     def register_tool(self, tool_cls: type[BaseTool]) -> None:
         """注册自定义工具类。"""
@@ -76,7 +106,7 @@ class AgentService:
             if check_tool_permission(item["name"], user_permissions)
         ]
 
-    def _build_tool_instances(
+    async def _build_tool_instances(
         self,
         tool_names: list[str],
         db: AsyncSession,
@@ -88,6 +118,11 @@ class AgentService:
         """按配置实例化工具并过滤无权限工具。"""
         instances: list[BaseTool] = []
         for name in tool_names:
+            if name.startswith("custom_"):
+                custom_tool = await self._resolve_custom_tool(db, tenant_id, name)
+                if custom_tool is not None:
+                    instances.append(custom_tool)
+                continue
             if name not in self.tool_registry:
                 logger.warning("未知工具名称，已跳过: %s", name)
                 continue
@@ -313,7 +348,7 @@ class AgentService:
         await guardrails_service.validate_user_input(user_query)
         await token_quota_service.check_tenant_quota(db, tenant_id)
         user_permissions = get_user_permissions(user)
-        base_tools = self._build_tool_instances(
+        base_tools = await self._build_tool_instances(
             agent_config.get("tools", []),
             db,
             tenant_id,
@@ -396,7 +431,7 @@ class AgentService:
         yield {"type": "thinking", "content": "正在分析问题..."}
 
         user_permissions = get_user_permissions(user)
-        base_tools = self._build_tool_instances(
+        base_tools = await self._build_tool_instances(
             agent_config.get("tools", []),
             db,
             tenant_id,

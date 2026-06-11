@@ -15,6 +15,7 @@ from app.api.v1.knowledge_bases import router as knowledge_bases_router
 from app.api.v1.monitor import router as monitor_router
 from app.api.v1.roles import router as roles_router
 from app.api.v1.tasks import router as tasks_router
+from app.api.v1.tools import router as tools_router
 from app.api.v1.tenants import router as tenants_router
 from app.api.v1.users import router as users_router
 from app.api.v1.user_api_keys import router as user_api_keys_router
@@ -42,6 +43,7 @@ api_router.include_router(user_api_keys_router)
 api_router.include_router(audit_logs_router)
 api_router.include_router(tenants_router)
 api_router.include_router(tasks_router)
+api_router.include_router(tools_router)
 
 
 @api_router.get("/health", summary="健康检查", tags=["系统"])

@@ -162,6 +162,16 @@ const routes: RouteRecordRaw[] = [
             meta: { title: 'API 密钥管理', accessLevel: 'auth' },
           },
           {
+            path: 'tools',
+            name: 'ToolsManagement',
+            component: () => import('@/views/settings/ToolsManagement.vue'),
+            meta: {
+              title: '工具管理',
+              accessLevel: 'permission',
+              permission: 'agent:write',
+            },
+          },
+          {
             path: 'tenants',
             name: 'TenantManagement',
             component: () => import('@/views/settings/TenantManagement.vue'),
