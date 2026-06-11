@@ -167,3 +167,32 @@ export function getAlertConfig(): Promise<AlertConfig> {
 export function getAlertHistory(limit = 20): Promise<{ items: AlertHistoryItem[]; total: number }> {
   return request.get('/monitor/alerts/history', { params: { limit } });
 }
+
+const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+
+/** 导出 Token 消耗报表 */
+export async function exportTokenUsage(
+  format: 'csv' | 'excel',
+  params?: TokenUsageQuery,
+): Promise<void> {
+  const token = localStorage.getItem('token');
+  const query = new URLSearchParams();
+  if (params?.start_date) query.set('start_date', params.start_date);
+  if (params?.end_date) query.set('end_date', params.end_date);
+  if (params?.group_by) query.set('group_by', params.group_by);
+
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  const response = await fetch(`${baseURL}/monitor/token-usage/export/${format}${suffix}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    throw new Error('导出失败');
+  }
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = format === 'csv' ? 'token_usage.csv' : 'token_usage.xlsx';
+  link.click();
+  window.URL.revokeObjectURL(url);
+}

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
@@ -133,4 +134,56 @@ async def get_alert_history(
     """查询最近监控告警记录。"""
     items = await monitor_service.get_alert_history(limit=limit)
     return success_response(data={"items": items, "total": len(items)})
+
+
+@router.get("/token-usage/export/csv", summary="导出 Token 消耗报表 CSV")
+async def export_token_usage_csv(
+    _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    start_date: Optional[str] = Query(default=None, description="开始时间"),
+    end_date: Optional[str] = Query(default=None, description="结束时间"),
+    group_by: str = Query(default="day", description="分组: day / user / model"),
+) -> Response:
+    """导出 Token 消耗统计报表为 CSV。"""
+    if group_by not in {"day", "user", "model"}:
+        group_by = "day"
+    csv_content = await monitor_service.export_token_usage_csv(
+        db=db,
+        tenant_id=tenant_id,
+        start_date=_parse_datetime(start_date),
+        end_date=_parse_datetime(end_date),
+        group_by=group_by,
+    )
+    return Response(
+        content=csv_content.encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="token_usage.csv"'},
+    )
+
+
+@router.get("/token-usage/export/excel", summary="导出 Token 消耗报表 Excel")
+async def export_token_usage_excel(
+    _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    start_date: Optional[str] = Query(default=None, description="开始时间"),
+    end_date: Optional[str] = Query(default=None, description="结束时间"),
+    group_by: str = Query(default="day", description="分组: day / user / model"),
+) -> Response:
+    """导出 Token 消耗统计报表为 Excel。"""
+    if group_by not in {"day", "user", "model"}:
+        group_by = "day"
+    excel_content = await monitor_service.export_token_usage_excel(
+        db=db,
+        tenant_id=tenant_id,
+        start_date=_parse_datetime(start_date),
+        end_date=_parse_datetime(end_date),
+        group_by=group_by,
+    )
+    return Response(
+        content=excel_content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="token_usage.xlsx"'},
+    )
 

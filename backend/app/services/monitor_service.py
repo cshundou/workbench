@@ -4,6 +4,8 @@
 提供 Token 消耗统计、API 调用统计、错误日志查询与健康检查。
 """
 
+import csv
+import io
 import json
 import smtplib
 from datetime import date, datetime, timedelta, timezone
@@ -11,6 +13,7 @@ from email.mime.text import MIMEText
 from typing import Any, Optional
 
 import httpx
+from openpyxl import Workbook
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -582,6 +585,121 @@ class MonitorService:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "components": components,
         }
+
+    async def export_token_usage_csv(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        group_by: str = "day",
+    ) -> str:
+        """导出 Token 消耗统计为 CSV。"""
+        stats = await self.get_token_usage_stats(
+            db=db,
+            tenant_id=tenant_id,
+            start_date=start_date,
+            end_date=end_date,
+            group_by=group_by,
+        )
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["metric", "value"])
+        for key, value in stats["summary"].items():
+            writer.writerow([key, value])
+        writer.writerow([])
+        if group_by == "user":
+            writer.writerow(["user_id", "username", "total_tokens", "record_count"])
+            for row in stats["breakdown"]:
+                writer.writerow(
+                    [
+                        row.get("user_id"),
+                        row.get("username"),
+                        row.get("total_tokens"),
+                        row.get("record_count"),
+                    ]
+                )
+        elif group_by == "model":
+            writer.writerow(["model_name", "total_tokens", "record_count"])
+            for row in stats["breakdown"]:
+                writer.writerow(
+                    [
+                        row.get("model_name"),
+                        row.get("total_tokens"),
+                        row.get("record_count"),
+                    ]
+                )
+        else:
+            writer.writerow(["date", "total_tokens", "record_count"])
+            for row in stats["breakdown"]:
+                writer.writerow(
+                    [
+                        row.get("date"),
+                        row.get("total_tokens"),
+                        row.get("record_count"),
+                    ]
+                )
+        return output.getvalue()
+
+    async def export_token_usage_excel(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        group_by: str = "day",
+    ) -> bytes:
+        """导出 Token 消耗统计为 Excel。"""
+        stats = await self.get_token_usage_stats(
+            db=db,
+            tenant_id=tenant_id,
+            start_date=start_date,
+            end_date=end_date,
+            group_by=group_by,
+        )
+        workbook = Workbook()
+        summary_sheet = workbook.active
+        summary_sheet.title = "summary"
+        summary_sheet.append(["metric", "value"])
+        for key, value in stats["summary"].items():
+            summary_sheet.append([key, value])
+
+        detail_sheet = workbook.create_sheet("breakdown")
+        if group_by == "user":
+            detail_sheet.append(["user_id", "username", "total_tokens", "record_count"])
+            for row in stats["breakdown"]:
+                detail_sheet.append(
+                    [
+                        row.get("user_id"),
+                        row.get("username"),
+                        row.get("total_tokens"),
+                        row.get("record_count"),
+                    ]
+                )
+        elif group_by == "model":
+            detail_sheet.append(["model_name", "total_tokens", "record_count"])
+            for row in stats["breakdown"]:
+                detail_sheet.append(
+                    [
+                        row.get("model_name"),
+                        row.get("total_tokens"),
+                        row.get("record_count"),
+                    ]
+                )
+        else:
+            detail_sheet.append(["date", "total_tokens", "record_count"])
+            for row in stats["breakdown"]:
+                detail_sheet.append(
+                    [
+                        row.get("date"),
+                        row.get("total_tokens"),
+                        row.get("record_count"),
+                    ]
+                )
+
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        return buffer.getvalue()
 
     async def get_user_activity(self, db: AsyncSession) -> dict[str, Any]:
         """查询 DAU/WAU/MAU、活跃用户 Top10 与模块访问占比。"""

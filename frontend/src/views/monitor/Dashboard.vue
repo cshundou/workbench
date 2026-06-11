@@ -8,6 +8,7 @@ import {
   getErrorLogs,
   getMonitorHealth,
   getTokenUsage,
+  exportTokenUsage,
   getAlertConfig,
   getAlertHistory,
   getUserActivity,
@@ -33,6 +34,7 @@ const health = ref<SystemHealth | null>(null);
 const userActivity = ref<UserActivityStats | null>(null);
 const alertConfig = ref<AlertConfig | null>(null);
 const alertHistory = ref<AlertHistoryItem[]>([]);
+const exportLoading = ref(false);
 const tokenChartRef = ref<HTMLDivElement | null>(null);
 const modelChartRef = ref<HTMLDivElement | null>(null);
 const apiChartRef = ref<HTMLDivElement | null>(null);
@@ -283,6 +285,19 @@ function healthTagType(status: string): 'success' | 'warning' | 'danger' | 'info
   return 'danger';
 }
 
+async function handleExportToken(format: 'csv' | 'excel'): Promise<void> {
+  exportLoading.value = true;
+  try {
+    await exportTokenUsage(format, { group_by: tokenGroupBy.value });
+    ElMessage.success('导出成功');
+  } catch (error) {
+    console.error('[Token Export]', error);
+    ElMessage.error('导出失败');
+  } finally {
+    exportLoading.value = false;
+  }
+}
+
 watch(tokenGroupBy, () => {
   void fetchDashboardData();
 });
@@ -339,11 +354,19 @@ onUnmounted(() => {
           <template #header>
             <div class="card-header flex-between">
               <span>Token 消耗趋势</span>
-              <el-radio-group v-model="tokenGroupBy" size="small">
-                <el-radio-button value="day">按时间</el-radio-button>
-                <el-radio-button value="user">按用户</el-radio-button>
-                <el-radio-button value="model">按模型</el-radio-button>
-              </el-radio-group>
+              <div class="card-actions">
+                <el-radio-group v-model="tokenGroupBy" size="small">
+                  <el-radio-button value="day">按时间</el-radio-button>
+                  <el-radio-button value="user">按用户</el-radio-button>
+                  <el-radio-button value="model">按模型</el-radio-button>
+                </el-radio-group>
+                <el-button size="small" :loading="exportLoading" @click="handleExportToken('csv')">
+                  导出 CSV
+                </el-button>
+                <el-button size="small" :loading="exportLoading" @click="handleExportToken('excel')">
+                  导出 Excel
+                </el-button>
+              </div>
             </div>
           </template>
           <div ref="tokenChartRef" class="chart-container" />
@@ -456,6 +479,13 @@ onUnmounted(() => {
 
 .card-header {
   width: 100%;
+}
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .alert-card {
