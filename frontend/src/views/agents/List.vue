@@ -16,6 +16,7 @@ import type { AgentInfo } from '@/api/agent';
 import { useAgentStore } from '@/stores/agent';
 import { useUserStore } from '@/stores/user';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
 
 const router = useRouter();
 const agentStore = useAgentStore();
@@ -122,22 +123,24 @@ onMounted(() => {
 <template>
   <div class="agent-list-page">
     <ApiKeyHintBanner scene="agent" />
-    <div class="page-header flex-between">
-      <div class="header-left">
-        <h2 class="page-title">智能体中心</h2>
-        <p class="page-desc">创建、配置和管理可调用工具的单 Agent 智能体</p>
-      </div>
-      <el-button v-if="canWrite" type="primary" :icon="Plus" @click="openCreateDialog">
-        新建智能体
-      </el-button>
-    </div>
+
+    <SectionHeader
+      title="智能体中心"
+      description="创建、配置和管理可调用工具的单 Agent 智能体"
+    >
+      <template #actions>
+        <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
+          新建智能体
+        </el-button>
+      </template>
+    </SectionHeader>
 
     <div class="search-bar">
       <el-input
         v-model="queryParams.keyword"
         placeholder="搜索智能体名称"
         clearable
-        style="width: 280px"
+        class="search-input"
         @keyup.enter="handleSearch"
       >
         <template #append>
@@ -198,24 +201,12 @@ onMounted(() => {
   padding: 0;
 }
 
-.page-header {
-  margin-bottom: 20px;
-}
-
-.page-title {
-  margin: 0 0 4px;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.page-desc {
-  margin: 0;
-  font-size: 14px;
-  color: $text-secondary;
-}
-
 .search-bar {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+}
+
+.search-input {
+  width: 280px;
 }
 
 .agent-grid {

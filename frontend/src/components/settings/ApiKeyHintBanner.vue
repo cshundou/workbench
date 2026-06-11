@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { Warning } from '@element-plus/icons-vue';
 import { getApiKeyStatus, type UserApiKeyStatus } from '@/api/apiKeys';
 
 const props = defineProps<{
@@ -69,29 +70,34 @@ defineExpose({ refresh: fetchStatus });
 </script>
 
 <template>
-  <el-alert
-    v-if="showHint"
-    v-loading="loading"
-    type="warning"
-    show-icon
-    :closable="false"
-    class="api-key-hint"
-    title="尚未配置必要的 API 密钥"
-  >
-    <template #default>
-      <p class="hint-text">{{ hintMessage }}</p>
-      <el-button type="primary" link @click="goToSettings">前往 API 密钥管理</el-button>
-    </template>
-  </el-alert>
+  <div v-if="showHint" class="api-key-hint">
+    <el-icon class="hint-icon"><Warning /></el-icon>
+    <span class="hint-text">{{ hintMessage }}</span>
+    <el-button type="primary" size="small" round @click="goToSettings">前往配置</el-button>
+  </div>
 </template>
 
 <style lang="scss" scoped>
 .api-key-hint {
-  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  margin-bottom: 20px;
+  background: rgba($warning-color, 0.08);
+  border-radius: $border-radius-pill;
+}
+
+.hint-icon {
+  color: $warning-color;
+  font-size: 18px;
+  flex-shrink: 0;
 }
 
 .hint-text {
-  margin: 0 0 4px;
+  flex: 1;
+  font-size: 14px;
+  color: $text-regular;
   line-height: 1.5;
 }
 </style>

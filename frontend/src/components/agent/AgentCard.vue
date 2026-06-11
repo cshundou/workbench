@@ -18,7 +18,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <el-card shadow="never" class="agent-card">
+  <div class="agent-card">
     <div class="card-header flex-between">
       <h3 class="agent-name">{{ agent.name }}</h3>
       <el-tag v-if="agent.is_public" size="small" type="success">公开</el-tag>
@@ -53,7 +53,7 @@ const emit = defineEmits<{
         删除
       </el-button>
     </div>
-  </el-card>
+  </div>
 </template>
 
 <style lang="scss" scoped>
@@ -61,10 +61,16 @@ const emit = defineEmits<{
   height: 100%;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.2s ease;
+  padding: 24px;
+  background: $bg-white;
+  border: none;
+  border-radius: $border-radius-lg;
+  box-shadow: $shadow-card;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 
   &:hover {
-    border-color: $primary-color;
+    box-shadow: $shadow-card-hover;
+    transform: translateY(-2px);
   }
 }
 
@@ -103,7 +109,6 @@ const emit = defineEmits<{
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  border-top: 1px solid $border-color;
   padding-top: 12px;
 }
 </style>

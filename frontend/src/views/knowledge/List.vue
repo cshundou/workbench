@@ -13,6 +13,7 @@ import type { KnowledgeBaseInfo } from '@/api/rag';
 import { useRagStore } from '@/stores/rag';
 import { useUserStore } from '@/stores/user';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
 
 const router = useRouter();
 const ragStore = useRagStore();
@@ -159,24 +160,31 @@ onMounted(() => {
 <template>
   <div class="knowledge-list">
     <ApiKeyHintBanner scene="rag" />
-    <div class="page-header flex-between">
-      <div class="search-bar">
-        <el-input
-          v-model="queryParams.keyword"
-          placeholder="搜索知识库名称"
-          clearable
-          style="width: 280px"
-          @keyup.enter="handleSearch"
-        >
-          <template #prefix>
-            <el-icon><Search /></el-icon>
-          </template>
-        </el-input>
-        <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
-      </div>
-      <el-button v-if="canWrite" type="primary" :icon="Plus" @click="openCreateDialog">
-        新建知识库
-      </el-button>
+
+    <SectionHeader
+      title="知识库"
+      description="企业私有知识沉淀，支持增强 RAG 检索与引用溯源"
+    >
+      <template #actions>
+        <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
+          新建知识库
+        </el-button>
+      </template>
+    </SectionHeader>
+
+    <div class="search-bar">
+      <el-input
+        v-model="queryParams.keyword"
+        placeholder="搜索知识库名称"
+        clearable
+        class="search-input"
+        @keyup.enter="handleSearch"
+      >
+        <template #prefix>
+          <el-icon><Search /></el-icon>
+        </template>
+      </el-input>
+      <el-button type="primary" :icon="Search" round @click="handleSearch">搜索</el-button>
     </div>
 
     <div v-loading="ragStore.isLoading" class="kb-grid">
@@ -264,27 +272,30 @@ onMounted(() => {
   min-height: 400px;
 }
 
-.page-header {
-  margin-bottom: 20px;
-}
-
 .search-bar {
   display: flex;
   gap: 12px;
+  margin-bottom: 24px;
+}
+
+.search-input {
+  width: 280px;
 }
 
 .kb-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
+  gap: 20px;
   min-height: 200px;
 }
 
 .kb-card {
-  transition: border-color 0.2s ease;
+  border-radius: $border-radius-lg;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 
   &:hover {
-    border-color: $primary-color;
+    box-shadow: $shadow-card-hover;
+    transform: translateY(-2px);
   }
 }
 
@@ -337,7 +348,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-  border-top: 1px solid $border-color;
   padding-top: 12px;
 }
 

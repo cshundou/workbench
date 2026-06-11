@@ -35,6 +35,8 @@ class UserApiKeyService:
     def _to_response(self, record: UserApiKey) -> UserApiKeyResponse:
         """将数据库记录转为掩码响应。"""
         plain = decrypt_api_key(record.api_key)
+        # 未经过验证流程的密钥视为无效，避免误导用户
+        is_valid = bool(record.is_valid and record.last_validated_at)
         return UserApiKeyResponse(
             id=record.id,
             provider=record.provider,
@@ -42,7 +44,7 @@ class UserApiKeyService:
             base_url=record.base_url,
             model_name=record.model_name,
             is_default=record.is_default,
-            is_valid=record.is_valid,
+            is_valid=is_valid,
             last_validated_at=record.last_validated_at,
             created_at=record.created_at,
             updated_at=record.updated_at,
@@ -119,7 +121,22 @@ class UserApiKeyService:
         record.base_url = data.base_url
         record.model_name = data.model_name
         record.is_default = data.is_default
-        record.is_valid = True
+
+        # 保存时验证密钥有效性，避免写入无效 test key 后仍标记为可用
+        is_valid, validate_message = await validate_provider_key(
+            provider,
+            data.api_key.strip(),
+            data.base_url,
+        )
+        record.is_valid = is_valid
+        record.last_validated_at = datetime.now(timezone.utc)
+        if not is_valid:
+            logger.warning(
+                "用户保存的 API 密钥验证失败 user_id=%s provider=%s: %s",
+                user_id,
+                provider,
+                validate_message,
+            )
 
         # 若设为默认，取消同类型其他提供商的 default 标记
         if data.is_default:
@@ -250,12 +267,13 @@ class UserApiKeyService:
         default_llm: str | None = None
         for provider in LLM_PROVIDERS:
             config = user_ctx.get_provider(provider)
-            if config and config.is_default:
+            if config and config.is_default and config.is_usable:
                 default_llm = provider
                 break
         if default_llm is None:
             for provider in LLM_PROVIDERS:
-                if provider in configured:
+                config = user_ctx.get_provider(provider)
+                if config and config.is_usable:
                     default_llm = provider
                     break
 

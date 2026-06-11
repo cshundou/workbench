@@ -8,6 +8,7 @@ import type { AgentFormData } from '@/components/agent/AgentConfigForm.vue';
 import { updateAgent } from '@/api/agent';
 import { useAgentStore } from '@/stores/agent';
 import { useUserStore } from '@/stores/user';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -59,13 +60,15 @@ onMounted(() => {
 
 <template>
   <div class="agent-config-page">
-    <div class="page-header flex-between">
-      <div class="header-left flex-center">
+    <SectionHeader
+      :title="agentStore.currentAgent?.name || '智能体配置'"
+      description="配置系统提示词、可用工具与模型参数"
+    >
+      <template #actions>
         <el-button text :icon="ArrowLeft" @click="goBack">返回列表</el-button>
-        <h2 class="page-title">{{ agentStore.currentAgent?.name || '智能体配置' }}</h2>
-      </div>
-      <el-button type="primary" @click="goChat">进入对话</el-button>
-    </div>
+        <el-button type="primary" round @click="goChat">进入对话</el-button>
+      </template>
+    </SectionHeader>
 
     <el-card v-loading="agentStore.isLoading" shadow="never">
       <AgentConfigForm
@@ -112,20 +115,6 @@ onMounted(() => {
 <style lang="scss" scoped>
 .agent-config-page {
   max-width: 900px;
-}
-
-.page-header {
-  margin-bottom: 16px;
-}
-
-.header-left {
-  gap: 8px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
 }
 
 .prompt-preview {

@@ -5,6 +5,7 @@
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Optional
 
 import httpx
@@ -54,6 +55,59 @@ PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
 }
 
 
+def infer_llm_provider_from_model(model_name: Optional[str]) -> Optional[str]:
+    """
+    根据模型名称推断大模型提供商。
+
+    Args:
+        model_name: 模型名称，如 gpt-4o、qwen-max。
+
+    Returns:
+        提供商标识，无法推断时返回 None。
+    """
+    if not model_name:
+        return None
+
+    name = model_name.lower()
+    if name.startswith(("gpt-", "o1", "o3", "o4")) or "text-embedding" in name:
+        return "openai"
+    if name.startswith("qwen"):
+        return "tongyi"
+    if name.startswith("doubao"):
+        return "doubao"
+    if name.startswith(("abab", "minimax", "embo")):
+        return "minimax"
+    return None
+
+
+def format_llm_error_message(exc: Exception) -> str:
+    """
+    将 LLM 调用异常转为用户可读提示。
+
+    Args:
+        exc: 原始异常。
+
+    Returns:
+        友好的中文错误信息。
+    """
+    message = str(exc).lower()
+    if (
+        "401" in message
+        or "invalid_api_key" in message
+        or "incorrect api key" in message
+        or "authentication" in message
+    ):
+        return (
+            "大模型 API 密钥无效或已过期。请前往「设置 > API 密钥管理」"
+            "重新填写真实密钥，并点击「验证连接」确认通过后再试。"
+        )
+    if "429" in message or "rate limit" in message:
+        return "API 调用频率超限，请稍后重试或更换模型提供商。"
+    if "connection" in message or "timeout" in message:
+        return "无法连接大模型服务，请检查 API 地址与网络后重试。"
+    return f"智能体执行失败：{exc}"
+
+
 @dataclass
 class ProviderKeyConfig:
     """单个提供商的密钥配置。"""
@@ -64,6 +118,12 @@ class ProviderKeyConfig:
     model_name: Optional[str] = None
     is_default: bool = False
     is_valid: bool = True
+    last_validated_at: Optional[datetime] = None
+
+    @property
+    def is_usable(self) -> bool:
+        """密钥已通过验证且标记为有效。"""
+        return bool(self.api_key and self.is_valid and self.last_validated_at)
 
 
 @dataclass
@@ -106,23 +166,59 @@ class UserKeyContext:
         Raises:
             ApiKeyMissingError: 未配置任何大模型密钥。
         """
-        if preferred and preferred in self.keys:
-            return self.require_provider(preferred)
+        provider_order = self._build_llm_provider_order(preferred)
 
-        # 优先使用标记为 default 的 LLM 提供商
-        for provider, config in self.keys.items():
-            if provider in LLM_PROVIDERS and config.is_default:
+        # 优先返回已验证有效的密钥
+        for provider in provider_order:
+            config = self.keys.get(provider)
+            if config and config.is_usable:
                 return config
 
-        # 按优先级降级
+        # 首选提供商无效时，尝试其他已验证的 LLM 密钥
         for provider in LLM_PROVIDERS:
-            if provider in self.keys:
-                return self.keys[provider]
+            if provider in provider_order:
+                continue
+            config = self.keys.get(provider)
+            if config and config.is_usable:
+                logger.info(
+                    "首选 LLM 提供商不可用，降级到 provider=%s user_id=%s",
+                    provider,
+                    self.user_id,
+                )
+                return config
+
+        # 降级：存在但未验证/验证失败的密钥
+        for provider in provider_order:
+            config = self.keys.get(provider)
+            if config and config.api_key:
+                logger.warning(
+                    "使用未验证或无效的 LLM 密钥 provider=%s user_id=%s",
+                    provider,
+                    self.user_id,
+                )
+                return config
 
         raise ApiKeyMissingError(
             provider="llm",
             message="请先在「设置 > API 密钥管理」中配置至少一个大模型 API 密钥（OpenAI/通义/豆包/MiniMax）",
         )
+
+    def _build_llm_provider_order(self, preferred: Optional[str] = None) -> list[str]:
+        """构建 LLM 提供商优先级列表。"""
+        order: list[str] = []
+
+        if preferred and preferred in LLM_PROVIDERS and preferred not in order:
+            order.append(preferred)
+
+        for provider, config in self.keys.items():
+            if provider in LLM_PROVIDERS and config.is_default and provider not in order:
+                order.append(provider)
+
+        for provider in LLM_PROVIDERS:
+            if provider in self.keys and provider not in order:
+                order.append(provider)
+
+        return order
 
     def get_embedding_provider(self) -> ProviderKeyConfig:
         """
@@ -146,8 +242,11 @@ class UserKeyContext:
 
     @property
     def has_llm_key(self) -> bool:
-        """是否配置了大模型密钥。"""
-        return any(p in self.keys for p in LLM_PROVIDERS)
+        """是否配置了可用的大模型密钥。"""
+        return any(
+            (config := self.keys.get(p)) is not None and config.is_usable
+            for p in LLM_PROVIDERS
+        )
 
     @property
     def has_cohere_key(self) -> bool:
@@ -198,7 +297,14 @@ class UserKeyResolver:
                     model_name=record.model_name,
                     is_default=record.is_default,
                     is_valid=record.is_valid,
+                    last_validated_at=record.last_validated_at,
                 )
+                if record.is_valid and record.last_validated_at is None:
+                    logger.info(
+                        "忽略未经验证的 LLM 密钥 provider=%s user_id=%s",
+                        record.provider,
+                        user_id,
+                    )
             except ValidationError as exc:
                 logger.warning(
                     "用户密钥解密失败 user_id=%s provider=%s: %s",
@@ -230,9 +336,17 @@ def create_chat_llm(
     Returns:
         ChatOpenAI 实例。
     """
-    config = user_ctx.get_llm_provider(preferred_provider)
+    config = user_ctx.get_llm_provider(
+        preferred=preferred_provider or infer_llm_provider_from_model(model_name),
+    )
     defaults = PROVIDER_DEFAULTS.get(config.provider, {})
-    resolved_model = model_name or config.model_name or defaults.get("model_name", "gpt-4o")
+    inferred_provider = infer_llm_provider_from_model(model_name)
+
+    # 智能体模型与最终提供商不匹配时，使用该提供商的默认模型
+    if model_name and inferred_provider and inferred_provider != config.provider:
+        resolved_model = config.model_name or defaults.get("model_name", "gpt-4o")
+    else:
+        resolved_model = model_name or config.model_name or defaults.get("model_name", "gpt-4o")
     base_url = config.base_url or defaults.get("base_url")
 
     kwargs: dict[str, Any] = {

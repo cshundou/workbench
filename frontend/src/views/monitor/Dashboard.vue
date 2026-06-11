@@ -13,6 +13,8 @@ import {
   type SystemHealth,
   type TokenUsageStats,
 } from '@/api/monitor';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
+import BentoCard from '@/components/layout/BentoCard.vue';
 
 const loading = ref(false);
 const tokenGroupBy = ref<'day' | 'user' | 'model'>('day');
@@ -282,15 +284,19 @@ onUnmounted(() => {
 
 <template>
   <div v-loading="loading" class="monitor-dashboard">
+    <SectionHeader
+      title="监控面板"
+      description="Token 消耗、API 调用量与系统健康状态实时监控"
+    />
+
     <el-row :gutter="20" class="summary-row">
       <el-col v-for="card in summaryCards" :key="card.title" :xs="24" :sm="12" :lg="6">
-        <el-card shadow="never" class="summary-card">
-          <p class="summary-title">{{ card.title }}</p>
-          <p class="summary-value" :style="{ color: card.color }">
-            {{ card.value }}
-            <span class="summary-unit">{{ card.unit }}</span>
-          </p>
-        </el-card>
+        <BentoCard
+          :title="card.title"
+          :value="String(card.value)"
+          :unit="card.unit"
+          class="summary-card"
+        />
       </el-col>
     </el-row>
 
@@ -386,26 +392,7 @@ onUnmounted(() => {
 }
 
 .summary-card {
-  margin-bottom: 0;
-}
-
-.summary-title {
-  margin: 0 0 8px;
-  font-size: 14px;
-  color: $text-secondary;
-}
-
-.summary-value {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 600;
-}
-
-.summary-unit {
-  margin-left: 4px;
-  font-size: 14px;
-  font-weight: 400;
-  color: $text-secondary;
+  margin-bottom: 20px;
 }
 
 .card-header {
@@ -434,7 +421,6 @@ onUnmounted(() => {
 .health-overall {
   font-weight: 500;
   padding-bottom: 8px;
-  border-bottom: 1px solid $border-color;
 }
 
 .health-item {

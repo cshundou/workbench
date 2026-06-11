@@ -259,8 +259,9 @@ onUnmounted(() => {
   display: flex;
   gap: 0;
   min-height: 0;
-  border: 1px solid $border-color;
-  border-radius: $border-radius;
+  border: none;
+  border-radius: $border-radius-lg;
+  box-shadow: $shadow-card;
   overflow: hidden;
   background: #fff;
 }
@@ -288,7 +289,7 @@ onUnmounted(() => {
     .message-bubble {
       background: $primary-color;
       color: #fff;
-      border-radius: $border-radius;
+      border-radius: $border-radius-lg $border-radius-lg $border-radius-sm $border-radius-lg;
       max-width: 70%;
     }
   }
@@ -298,10 +299,10 @@ onUnmounted(() => {
 
     .message-bubble {
       background: $bg-white;
-      border: 1px solid $border-color;
       color: $text-primary;
-      border-radius: $border-radius;
+      border-radius: $border-radius-lg $border-radius-lg $border-radius-lg $border-radius-sm;
       max-width: 85%;
+      box-shadow: $shadow-soft;
     }
   }
 }
@@ -318,7 +319,6 @@ onUnmounted(() => {
 
 .chat-input-area {
   padding: 16px;
-  border-top: 1px solid $border-color;
   flex-shrink: 0;
 }
 
@@ -331,5 +331,6 @@ onUnmounted(() => {
 .chat-sidebar {
   width: 320px;
   flex-shrink: 0;
+  background: $bg-color;
 }
 </style>

@@ -8,11 +8,11 @@ import uuid
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field, create_model
+from langchain_core.pydantic_v1 import BaseModel, Field, create_model
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,7 +35,7 @@ from app.services.agent.tools.sql_query import SqlQueryTool
 from app.services.agent.tools.tavily_search import TavilySearchTool
 from app.core.deps import get_user_permissions
 from app.services.token_usage_service import token_usage_service
-from app.services.user_key_context import UserKeyContext, create_chat_llm
+from app.services.user_key_context import UserKeyContext, create_chat_llm, format_llm_error_message
 
 logger = get_logger(__name__)
 
@@ -174,6 +174,7 @@ class AgentService:
         lc_tools: list[StructuredTool] = []
 
         for base_tool in base_tools:
+            # LangChain 0.1.x 要求 args_schema 为 pydantic v1 模型（见 langchain_core.pydantic_v1）
             args_schema = self._build_args_schema(base_tool)
 
             async def _run(
@@ -189,10 +190,10 @@ class AgentService:
                 return f"工具执行失败: {result.error}"
 
             lc_tools.append(
-                StructuredTool.from_function(
-                    coroutine=_run,
+                StructuredTool(
                     name=base_tool.name,
                     description=base_tool.description,
+                    coroutine=_run,
                     args_schema=args_schema,
                 )
             )
@@ -233,9 +234,10 @@ class AgentService:
             max_tokens=agent_config["max_tokens"],
         )
 
+        # 使用 SystemMessage 避免 system_prompt 中的 JSON/花括号被当作模板变量
         prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", agent_config["system_prompt"]),
+                SystemMessage(content=agent_config["system_prompt"]),
                 MessagesPlaceholder(variable_name="chat_history"),
                 ("human", "{input}"),
                 MessagesPlaceholder(variable_name="agent_scratchpad"),
@@ -458,7 +460,7 @@ class AgentService:
             }
         except Exception as exc:
             logger.error("Agent 流式执行失败: %s", exc)
-            yield {"type": "error", "message": str(exc)}
+            yield {"type": "error", "message": format_llm_error_message(exc)}
 
     async def _save_chat_messages(
         self,

@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus';
 import { ArrowLeft, Loading, Position, Setting, VideoPause } from '@element-plus/icons-vue';
 import StreamingText from '@/components/chat/StreamingText.vue';
 import ToolCallPanel from '@/components/agent/ToolCallPanel.vue';
+import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
 import { chatAgentStream } from '@/api/agent';
 import type { AgentChatStreamMessage, ToolCallStep } from '@/api/agent';
 import { useAgentStore } from '@/stores/agent';
@@ -80,7 +81,12 @@ function handleStreamMessage(msg: AgentChatStreamMessage): void {
   }
 
   if (msg.type === 'error') {
-    ElMessage.error(msg.message || '对话出错');
+    const errorText = msg.message || '对话出错，请稍后重试';
+    const lastAssistant = [...messages.value].reverse().find((m) => m.role === 'assistant');
+    if (lastAssistant) {
+      lastAssistant.content = errorText;
+    }
+    ElMessage.error(errorText);
     isStreaming.value = false;
     thinkingText.value = '';
     return;
@@ -190,6 +196,8 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <ApiKeyHintBanner scene="agent" class="chat-api-key-hint" />
+
     <div class="chat-layout">
       <div class="chat-main">
         <div class="message-list">
@@ -265,7 +273,12 @@ onUnmounted(() => {
 }
 
 .chat-header {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.chat-api-key-hint {
+  margin-bottom: 12px;
   flex-shrink: 0;
 }
 
@@ -290,8 +303,9 @@ onUnmounted(() => {
   display: flex;
   gap: 0;
   min-height: 0;
-  border: 1px solid $border-color;
-  border-radius: $border-radius;
+  border: none;
+  border-radius: $border-radius-lg;
+  box-shadow: $shadow-card;
   overflow: hidden;
   background: #fff;
 }
@@ -319,7 +333,7 @@ onUnmounted(() => {
     .message-bubble {
       background: $primary-color;
       color: #fff;
-      border-radius: $border-radius;
+      border-radius: $border-radius-lg $border-radius-lg $border-radius-sm $border-radius-lg;
       max-width: 70%;
     }
   }
@@ -329,10 +343,10 @@ onUnmounted(() => {
 
     .message-bubble {
       background: $bg-white;
-      border: 1px solid $border-color;
       color: $text-primary;
-      border-radius: $border-radius;
+      border-radius: $border-radius-lg $border-radius-lg $border-radius-lg $border-radius-sm;
       max-width: 85%;
+      box-shadow: $shadow-soft;
     }
   }
 }
@@ -352,9 +366,8 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: rgba($primary-color, 0.06);
-  border: 1px solid rgba($primary-color, 0.2);
-  border-radius: $border-radius;
+  background: rgba($primary-color, 0.08);
+  border-radius: $border-radius-pill;
   color: $text-regular;
   font-size: 14px;
   margin-top: 8px;
@@ -362,7 +375,6 @@ onUnmounted(() => {
 
 .chat-input-area {
   padding: 16px;
-  border-top: 1px solid $border-color;
   flex-shrink: 0;
 }
 
@@ -375,14 +387,13 @@ onUnmounted(() => {
 .chat-sidebar {
   width: 360px;
   flex-shrink: 0;
-  border-left: 1px solid $border-color;
   display: flex;
   flex-direction: column;
+  background: $bg-color;
 }
 
 .sidebar-header {
   padding: 12px 16px;
-  border-bottom: 1px solid $border-color;
 
   h3 {
     margin: 0;

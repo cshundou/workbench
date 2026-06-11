@@ -6,6 +6,7 @@ import { Plus, Search } from '@element-plus/icons-vue';
 import { createRole, deleteRole, getRoles, updateRole } from '@/api/role';
 import { useUserStore } from '@/stores/user';
 import { PERMISSION_OPTIONS } from '@/constants/permissions';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
 import type { RoleInfo } from '@/types/api';
 
 const userStore = useUserStore();
@@ -162,15 +163,18 @@ onMounted(() => {
 
 <template>
   <div class="role-management">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header flex-between">
-          <span class="card-title">角色管理</span>
-          <el-button v-if="canWrite" type="primary" :icon="Plus" @click="openCreateDialog">
-            新建角色
-          </el-button>
-        </div>
+    <SectionHeader
+      title="角色管理"
+      description="配置角色权限，控制用户访问范围"
+    >
+      <template #actions>
+        <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
+          新建角色
+        </el-button>
       </template>
+    </SectionHeader>
+
+    <el-card shadow="never">
 
       <div class="search-bar">
         <el-input

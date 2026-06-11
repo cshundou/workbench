@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus';
 import { ArrowLeft, VideoPlay, Check, Close } from '@element-plus/icons-vue';
 import WorkflowCanvas from '@/components/workflow/WorkflowCanvas.vue';
 import ExecutionLogPanel from '@/components/workflow/ExecutionLogPanel.vue';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
 import { useGraphStore } from '@/stores/graph';
 import type { NodeExecutionLog } from '@/api/workflow';
 
@@ -108,15 +109,17 @@ onUnmounted(() => {
 
 <template>
   <div class="workflow-execute-page">
-    <div class="page-header">
-      <el-button :icon="ArrowLeft" text @click="goBack">返回列表</el-button>
-      <div class="header-info">
-        <h2>{{ graphStore.currentWorkflow?.name || '工作流执行' }}</h2>
+    <SectionHeader
+      :title="graphStore.currentWorkflow?.name || '工作流执行'"
+      description="LangGraph 多智能体协同执行与状态追踪"
+    >
+      <template #actions>
+        <el-button :icon="ArrowLeft" text @click="goBack">返回列表</el-button>
         <el-tag v-if="executionStatus !== 'idle'" :type="statusTagType as any" size="small">
           {{ executionStatus }}
         </el-tag>
-      </div>
-    </div>
+      </template>
+    </SectionHeader>
 
     <el-row :gutter="16" class="main-content">
       <el-col :span="16">
@@ -234,29 +237,12 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .workflow-execute-page {
-  padding: 4px;
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-
-  .header-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-
-    h2 {
-      margin: 0;
-      font-size: 18px;
-    }
-  }
+  padding: 0;
 }
 
 .canvas-card {
   margin-bottom: 16px;
+  border-radius: $border-radius-lg;
 
   :deep(.el-card__header) {
     display: flex;
@@ -295,6 +281,7 @@ onUnmounted(() => {
 .result-card,
 .log-card {
   margin-bottom: 16px;
+  border-radius: $border-radius-lg;
 }
 
 .log-card {

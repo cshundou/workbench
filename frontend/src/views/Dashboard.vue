@@ -1,7 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { Collection, Cpu, Share, DataAnalysis, Key } from '@element-plus/icons-vue';
+import {
+  Collection,
+  Cpu,
+  Share,
+  DataAnalysis,
+  Key,
+  Document,
+  Search,
+  Connection,
+} from '@element-plus/icons-vue';
+import PageHero from '@/components/layout/PageHero.vue';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
+import FeatureBanner from '@/components/layout/FeatureBanner.vue';
+import type { FeatureSlide } from '@/components/layout/FeatureBanner.vue';
+import BentoCard from '@/components/layout/BentoCard.vue';
 import { useUserStore } from '@/stores/user';
 import { getApiKeyStatus, type UserApiKeyStatus } from '@/api/apiKeys';
 
@@ -30,9 +44,69 @@ function goToApiKeys(): void {
   router.push('/settings/api-keys');
 }
 
+function goToKnowledge(): void {
+  router.push('/knowledge');
+}
+
 onMounted(fetchApiKeyStatus);
 
-/** 功能模块概览卡片 */
+/** Feature Banner 轮播数据 */
+const featureSlides: FeatureSlide[] = [
+  {
+    title: '增强 RAG 系统',
+    features: [
+      { icon: Document, title: '智能分块', subtitle: '混合分块 + 语义分块' },
+      { icon: Search, title: '双路检索', subtitle: '向量检索 + BM25' },
+      { icon: Connection, title: '引用溯源', subtitle: '自动标注来源片段' },
+    ],
+  },
+  {
+    title: '单 Agent 智能体',
+    features: [
+      { icon: Cpu, title: '工具调用', subtitle: '知识库 / 搜索 / 代码执行' },
+      { icon: Search, title: '任务规划', subtitle: '自主判断工具选择' },
+      { icon: Document, title: '流式对话', subtitle: '思考过程实时可视化' },
+    ],
+  },
+  {
+    title: 'LangGraph 工作流',
+    features: [
+      { icon: Share, title: '多智能体编排', subtitle: '串行 / 并行 / 分支' },
+      { icon: Connection, title: '人工介入', subtitle: '关键节点确认机制' },
+      { icon: DataAnalysis, title: '状态追踪', subtitle: 'Redis 持久化不丢失' },
+    ],
+  },
+];
+
+/** 平台能力入口卡片 */
+const moduleCards = [
+  {
+    title: '知识库',
+    description: '企业私有知识沉淀与增强 RAG 问答',
+    icon: Collection,
+    path: '/knowledge',
+  },
+  {
+    title: '智能体',
+    description: '单 Agent 任务自动化与工具调用',
+    icon: Cpu,
+    path: '/agents',
+  },
+  {
+    title: '工作流',
+    description: 'LangGraph 多智能体协同编排',
+    icon: Share,
+    path: '/workflows',
+  },
+  {
+    title: '监控面板',
+    description: 'Token 消耗与接口调用统计',
+    icon: DataAnalysis,
+    path: '/monitor',
+  },
+];
+
+/** 使用统计卡片 */
 const statCards = [
   {
     title: '知识库',
@@ -67,88 +141,67 @@ const statCards = [
 
 <template>
   <div class="dashboard-page">
-    <el-alert
-      v-if="needsApiKeySetup"
-      type="info"
-      show-icon
-      :closable="false"
-      class="api-key-guide"
-      title="开始使用前，请先配置 API 密钥"
-    >
-      <template #default>
-        <p class="guide-text">
-          系统不再使用全局 API 密钥。请在「API 密钥管理」中配置您的大模型密钥，以启用知识库、智能体与工作流功能。
-        </p>
-        <el-button type="primary" :icon="Key" @click="goToApiKeys">前往配置</el-button>
-      </template>
-    </el-alert>
+    <PageHero
+      :title="welcomeText"
+      subtitle="企业智能协作工作台 · 知识问答 · 任务自动化 · 多智能体协同"
+      :actions="[
+        { label: '配置 API 密钥', type: 'primary', onClick: goToApiKeys },
+        { label: '快速开始', type: 'default', onClick: goToKnowledge },
+      ]"
+    />
 
-    <el-card class="welcome-card" shadow="never">
-      <div class="welcome-content">
-        <h2 class="welcome-title">{{ welcomeText }}</h2>
-        <p class="welcome-desc">
-          企业智能协作工作台已就绪，后续将在此接入知识库问答、智能体对话与工作流编排能力。
-        </p>
-      </div>
-    </el-card>
+    <!-- API Key 引导提示 -->
+    <div v-if="needsApiKeySetup" class="api-key-tip">
+      <el-icon class="tip-icon"><Key /></el-icon>
+      <span class="tip-text">
+        开始使用前，请先在「API 密钥管理」中配置您的大模型密钥
+      </span>
+      <el-button type="primary" size="small" round @click="goToApiKeys">前往配置</el-button>
+    </div>
 
-    <el-row :gutter="20" class="stat-row">
-      <el-col v-for="card in statCards" :key="card.title" :xs="24" :sm="12" :lg="6">
-        <el-card class="stat-card" shadow="never">
-          <div class="stat-card-body flex-between">
-            <div class="stat-info">
-              <p class="stat-title">{{ card.title }}</p>
-              <p class="stat-value">
-                {{ card.value }}
-                <span class="stat-unit">{{ card.unit }}</span>
-              </p>
-              <p class="stat-desc">{{ card.description }}</p>
-            </div>
-            <div class="stat-icon">
-              <el-icon :size="24"><component :is="card.icon" /></el-icon>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <FeatureBanner :slides="featureSlides" />
 
-    <el-row :gutter="20" class="content-row">
-      <el-col :xs="24" :lg="16">
-        <el-card shadow="never">
-          <template #header>
-            <span class="card-header-title">平台能力概览</span>
-          </template>
-          <el-timeline>
-            <el-timeline-item timestamp="增强 RAG" placement="top" type="primary">
-              7 层全链路优化：文档接入、智能分块、双路检索、重排序、引用溯源
-            </el-timeline-item>
-            <el-timeline-item timestamp="单 Agent" placement="top" type="success">
-              工具调用、任务规划、流式对话，支持多模型切换与降级兜底
-            </el-timeline-item>
-            <el-timeline-item timestamp="LangGraph" placement="top" type="warning">
-              多智能体串行 / 并行 / 分支工作流编排，支持人工介入与状态追踪
-            </el-timeline-item>
-            <el-timeline-item timestamp="工程化" placement="top" type="info">
-              SSE 流式输出、Pinia 状态管理、权限路由、容器化部署
-            </el-timeline-item>
-          </el-timeline>
-        </el-card>
-      </el-col>
+    <!-- 平台能力入口 -->
+    <section class="section-block">
+      <SectionHeader
+        title="平台能力"
+        description="MiniMax 最新首推能力，覆盖知识库 / 智能体 / 工作流 / 监控"
+      />
+      <el-row :gutter="20">
+        <el-col
+          v-for="card in moduleCards"
+          :key="card.title"
+          :xs="24"
+          :sm="12"
+          :lg="6"
+        >
+          <BentoCard
+            :title="card.title"
+            :description="card.description"
+            :icon="card.icon"
+            clickable
+            class="module-card"
+            @click="router.push(card.path)"
+          />
+        </el-col>
+      </el-row>
+    </section>
 
-      <el-col :xs="24" :lg="8">
-        <el-card shadow="never">
-          <template #header>
-            <span class="card-header-title">快速开始</span>
-          </template>
-          <el-steps direction="vertical" :active="1">
-            <el-step title="项目脚手架" description="前后端基础框架已搭建" />
-            <el-step title="用户体系" description="登录认证与 RBAC 权限" />
-            <el-step title="知识库" description="文档上传与增强 RAG 检索" />
-            <el-step title="智能体 & 工作流" description="Agent 对话与 LangGraph 编排" />
-          </el-steps>
-        </el-card>
-      </el-col>
-    </el-row>
+    <!-- 使用统计 -->
+    <section class="section-block">
+      <SectionHeader title="使用统计" description="平台资源与交互数据概览" />
+      <el-row :gutter="20">
+        <el-col v-for="card in statCards" :key="card.title" :xs="24" :sm="12" :lg="6">
+          <BentoCard
+            :title="card.title"
+            :value="card.value"
+            :unit="card.unit"
+            :description="card.description"
+            :icon="card.icon"
+          />
+        </el-col>
+      </el-row>
+    </section>
   </div>
 </template>
 
@@ -156,95 +209,31 @@ const statCards = [
 .dashboard-page {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-
-  .api-key-guide {
-    margin-bottom: 0;
-  }
-
-  .guide-text {
-    margin: 0 0 8px;
-    line-height: 1.5;
-  }
 }
 
-.welcome-card {
-  background: $bg-white;
-  border: 1px solid $border-color;
-
-  :deep(.el-card__body) {
-    padding: 28px 32px;
-  }
+.api-key-tip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  margin-bottom: 32px;
+  background: rgba($primary-color, 0.08);
+  border-radius: $border-radius-pill;
 }
 
-.welcome-title {
-  margin: 0 0 8px;
-  font-size: 22px;
-  font-weight: 600;
-  color: $text-primary;
-}
-
-.welcome-desc {
-  margin: 0;
-  font-size: 14px;
-  color: $text-secondary;
-  line-height: 1.6;
-}
-
-.stat-row {
-  margin-top: 0;
-}
-
-.stat-card {
-  margin-bottom: 0;
-}
-
-.stat-card-body {
-  gap: 16px;
-}
-
-.stat-title {
-  margin: 0 0 4px;
-  font-size: 14px;
-  color: $text-secondary;
-}
-
-.stat-value {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 600;
-  color: $text-primary;
-}
-
-.stat-unit {
-  font-size: 14px;
-  font-weight: 400;
-  color: $text-secondary;
-}
-
-.stat-desc {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: $text-secondary;
-}
-
-.stat-icon {
-  width: 48px;
-  height: 48px;
-  border: 1px solid $border-color;
-  border-radius: $border-radius;
-  flex-shrink: 0;
+.tip-icon {
   color: $primary-color;
-  background: rgba($primary-color, 0.06);
+  font-size: 18px;
+  flex-shrink: 0;
 }
 
-.content-row {
-  margin-top: 0;
+.tip-text {
+  flex: 1;
+  font-size: 14px;
+  color: $text-regular;
 }
 
-.card-header-title {
-  font-size: 16px;
-  font-weight: 500;
-  color: $text-primary;
+.module-card {
+  margin-bottom: 20px;
 }
 </style>

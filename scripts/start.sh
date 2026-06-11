@@ -45,11 +45,12 @@ wait_health() {
   return 1
 }
 
-# 启动后端（若端口无响应则重启）
+# 启动后端（每次重启以确保加载最新代码）
 start_backend() {
-  if curl -sf http://localhost:8000/api/v1/health >/dev/null 2>&1; then
-    log "后端已在运行 (http://localhost:8000)"
-    return 0
+  if lsof -ti :8000 &>/dev/null; then
+    log "重启后端以加载最新代码..."
+    lsof -ti :8000 | xargs kill -9 2>/dev/null || true
+    sleep 1
   fi
 
   # 清理僵死 PID
@@ -79,6 +80,46 @@ start_backend() {
   cd "$ROOT"
 
   wait_health "http://localhost:8000/api/v1/health" "后端"
+
+  # 验证 Agent 工具 StructuredTool 转换（避免 pydantic v1/v2 不兼容）
+  if (cd "$ROOT/backend" && source .venv/bin/activate && python3 -c "
+import asyncio
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from app.core.database import async_session_factory
+from app.models.agent import Agent
+from app.models.user import User
+from app.services.agent.agent_service import agent_service
+from app.services.user_key_context import user_key_resolver
+from app.core.deps import get_user_permissions
+from langchain_core.pydantic_v1 import BaseModel as LCBaseModel
+
+async def verify():
+    async with async_session_factory() as db:
+        user = (await db.execute(
+            select(User).where(User.id == 1).options(selectinload(User.role))
+        )).scalar_one_or_none()
+        if user is None:
+            return
+        agent = (await db.execute(select(Agent).where(Agent.id == 1))).scalar_one_or_none()
+        if agent is None:
+            return
+        user_ctx = await user_key_resolver.load_context(db, user.id, user.tenant_id)
+        perms = get_user_permissions(user)
+        base_tools = agent_service._build_tool_instances(
+            agent.tools or [], db, user.tenant_id, user, perms, user_ctx
+        )
+        lc_tools = agent_service._to_langchain_tools(base_tools)
+        for t in lc_tools:
+            if not issubclass(t.args_schema, LCBaseModel):
+                raise RuntimeError(f'tool {t.name} args_schema invalid')
+
+asyncio.run(verify())
+" 2>/dev/null); then
+    log "Agent 工具链验证通过"
+  else
+    warn "Agent 工具链验证跳过"
+  fi
 }
 
 # 启动前端（每次重启以确保加载最新代码和代理配置）

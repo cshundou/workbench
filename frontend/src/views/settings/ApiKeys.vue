@@ -10,6 +10,7 @@ import {
   type ApiKeyProvider,
   type UserApiKeyInfo,
 } from '@/api/apiKeys';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
 
 interface ProviderConfig {
   provider: ApiKeyProvider;
@@ -247,8 +248,15 @@ async function handleSave(config: ProviderConfig): Promise<void> {
     state.savedMasked = saved.api_key_masked;
     state.apiKey = '';
     state.showKey = false;
-    state.validateStatus = saved.is_valid ? 'success' : 'idle';
-    ElMessage.success(`${config.name} 密钥保存成功`);
+    state.validateStatus = saved.is_valid ? 'success' : 'error';
+    state.validateMessage = saved.is_valid
+      ? '密钥已保存并验证通过'
+      : '密钥已保存，但验证未通过，请检查密钥是否正确';
+    if (!saved.is_valid) {
+      ElMessage.warning(state.validateMessage);
+    } else {
+      ElMessage.success(`${config.name} 密钥保存成功`);
+    }
     await fetchKeys();
   } catch (error) {
     console.error('[Save API Key Error]', error);
@@ -279,15 +287,20 @@ onMounted(fetchKeys);
 
 <template>
   <div v-loading="loading" class="api-keys-page">
+    <SectionHeader
+      title="API 密钥管理"
+      description="配置您的 API 密钥以使用所有功能，所有密钥都将被加密存储"
+    />
+
     <el-card shadow="never" class="intro-card">
       <p class="intro-text">
-        配置您的 API 密钥以使用所有功能。所有密钥都将被加密存储，只有您可以访问。
+        至少配置一个大模型密钥，系统将按优先级自动降级（OpenAI → 通义 → 豆包 → MiniMax）
       </p>
     </el-card>
 
     <section class="provider-section">
       <h3 class="section-title">大模型</h3>
-      <p class="section-desc">至少配置一个大模型密钥，系统将按优先级自动降级（OpenAI → 通义 → 豆包 → MiniMax）</p>
+      <p class="section-desc">支持 OpenAI、通义千问、豆包、MiniMax 等主流大模型</p>
       <el-row :gutter="20">
         <el-col
           v-for="config in llmProviders"

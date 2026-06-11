@@ -6,6 +6,7 @@ import { Plus, Search } from '@element-plus/icons-vue';
 import { createUser, deleteUser, getUsers, updateUser } from '@/api/user';
 import { getRoles } from '@/api/role';
 import { useUserStore } from '@/stores/user';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
 import type { RoleInfo, UserListItem } from '@/types/api';
 
 const userStore = useUserStore();
@@ -183,15 +184,18 @@ onMounted(() => {
 
 <template>
   <div class="user-management">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header flex-between">
-          <span class="card-title">用户管理</span>
-          <el-button v-if="canWrite" type="primary" :icon="Plus" @click="openCreateDialog">
-            新建用户
-          </el-button>
-        </div>
+    <SectionHeader
+      title="用户管理"
+      description="管理系统用户账号、角色分配与状态"
+    >
+      <template #actions>
+        <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
+          新建用户
+        </el-button>
       </template>
+    </SectionHeader>
+
+    <el-card shadow="never">
 
       <div class="search-bar">
         <el-input

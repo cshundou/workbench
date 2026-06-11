@@ -9,6 +9,7 @@ import { deleteDocument, downloadDocument, getDocumentProgress } from '@/api/rag
 import type { DocumentInfo } from '@/api/rag';
 import { useRagStore } from '@/stores/rag';
 import { useUserStore } from '@/stores/user';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -134,17 +135,15 @@ onUnmounted(() => {
 
 <template>
   <div class="knowledge-detail">
-    <div class="detail-header flex-between">
-      <div class="header-left flex-center">
+    <SectionHeader
+      :title="ragStore.currentKb?.name || '知识库详情'"
+      :description="ragStore.currentKb?.description || '管理文档上传与解析进度'"
+    >
+      <template #actions>
         <el-button text :icon="ArrowLeft" @click="goBack">返回列表</el-button>
-        <h2 class="kb-title">{{ ragStore.currentKb?.name || '知识库详情' }}</h2>
-      </div>
-      <el-button type="primary" :icon="ChatDotRound" @click="goChat">进入问答</el-button>
-    </div>
-
-    <p v-if="ragStore.currentKb?.description" class="kb-description">
-      {{ ragStore.currentKb.description }}
-    </p>
+        <el-button type="primary" :icon="ChatDotRound" round @click="goChat">进入问答</el-button>
+      </template>
+    </SectionHeader>
 
     <el-card shadow="never" class="upload-card">
       <template #header>
@@ -175,27 +174,6 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 .knowledge-detail {
   min-height: 400px;
-}
-
-.detail-header {
-  margin-bottom: 12px;
-}
-
-.header-left {
-  gap: 8px;
-}
-
-.kb-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: $text-primary;
-}
-
-.kb-description {
-  margin: 0 0 20px;
-  font-size: 14px;
-  color: $text-secondary;
 }
 
 .upload-card {

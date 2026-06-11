@@ -13,4 +13,8 @@ if [ -f "$ROOT/.env" ]; then
 fi
 
 source .venv/bin/activate
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+if [ "${APP_ENV:-development}" = "development" ]; then
+  exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+else
+  exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+fi

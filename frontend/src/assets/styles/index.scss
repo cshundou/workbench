@@ -1,6 +1,6 @@
 @use 'sass:color';
 
-// Element Plus 主题变量（MiniMax 风格）
+// Element Plus 主题变量（MiniMax Token Plan 风格）
 :root {
   --el-color-primary: #{$primary-color};
   --el-color-primary-light-3: #{color.adjust($primary-color, $lightness: 12%)};
@@ -13,23 +13,23 @@
   --el-color-warning: #{$warning-color};
   --el-color-danger: #{$danger-color};
   --el-color-info: #{$info-color};
-  --el-border-radius-base: #{$border-radius};
-  --el-border-radius-small: #{$border-radius};
-  --el-border-radius-round: #{$border-radius};
-  --el-border-color: #{$border-color};
-  --el-border-color-light: #{$border-color};
-  --el-border-color-lighter: #{$border-color};
+  --el-border-radius-base: #{$border-radius-md};
+  --el-border-radius-small: #{$border-radius-sm};
+  --el-border-radius-round: #{$border-radius-pill};
+  --el-border-color: transparent;
+  --el-border-color-light: transparent;
+  --el-border-color-lighter: transparent;
   --el-text-color-primary: #{$text-primary};
   --el-text-color-regular: #{$text-regular};
   --el-text-color-secondary: #{$text-secondary};
   --el-text-color-placeholder: #{$text-placeholder};
   --el-bg-color: #{$bg-white};
-  --el-bg-color-page: #{$bg-color};
+  --el-bg-color-page: #{$bg-white};
   --el-fill-color-blank: #{$bg-white};
-  --el-box-shadow: none;
-  --el-box-shadow-light: none;
-  --el-box-shadow-lighter: none;
-  --el-box-shadow-dark: none;
+  --el-box-shadow: #{$shadow-card};
+  --el-box-shadow-light: #{$shadow-soft};
+  --el-box-shadow-lighter: #{$shadow-soft};
+  --el-box-shadow-dark: #{$shadow-card-hover};
 }
 
 *,
@@ -70,53 +70,170 @@ a {
   }
 }
 
-// 全局组件扁平化
+// 页面容器
+.page-container {
+  width: 100%;
+  max-width: $content-max-width;
+  margin: 0 auto;
+  padding: 0 $content-padding;
+
+  &--fluid {
+    max-width: none;
+    padding: 0 16px;
+  }
+}
+
+.section-block {
+  margin-bottom: $section-spacing;
+}
+
+// 全局组件样式 — 无边框、以阴影与背景区分层级
 .el-card {
-  border-radius: $border-radius;
-  border: 1px solid $border-color;
-  box-shadow: none !important;
+  border-radius: $border-radius-lg;
+  border: none;
+  box-shadow: $shadow-card !important;
+  transition: box-shadow 0.2s ease;
 
   &.is-hover-shadow:hover,
   &.is-always-shadow,
   &.is-hover-shadow:focus {
-    box-shadow: none !important;
+    box-shadow: $shadow-card-hover !important;
   }
 }
 
 .el-button {
-  border-radius: $border-radius;
+  border-radius: $border-radius-pill;
   box-shadow: none !important;
   transition: all 0.2s ease;
+  font-weight: 500;
 
+  // 确保按钮内文字继承颜色（Element Plus 内部 span 可能不继承）
+  &,
+  & > span {
+    color: inherit;
+  }
+
+  // 主按钮：实色填充 + 白字（避免 CSS 变量未生效导致透明底）
   &--primary {
     --el-button-bg-color: #{$primary-color};
     --el-button-border-color: #{$primary-color};
+    --el-button-text-color: #ffffff;
+    --el-button-hover-text-color: #ffffff;
     --el-button-hover-bg-color: #{color.adjust($primary-color, $lightness: -6%)};
     --el-button-hover-border-color: #{color.adjust($primary-color, $lightness: -6%)};
+    --el-button-active-bg-color: #{color.adjust($primary-color, $lightness: -10%)};
+    --el-button-active-border-color: #{color.adjust($primary-color, $lightness: -10%)};
+    --el-button-active-text-color: #ffffff;
+    background-color: $primary-color !important;
+    border-color: $primary-color !important;
+    color: #ffffff !important;
+
+    &:hover,
+    &:focus {
+      background-color: #{color.adjust($primary-color, $lightness: -6%)} !important;
+      border-color: #{color.adjust($primary-color, $lightness: -6%)} !important;
+      color: #ffffff !important;
+    }
+
+    &.is-disabled {
+      background-color: #{color.adjust($primary-color, $lightness: 18%)} !important;
+      border-color: transparent !important;
+      color: #ffffff !important;
+      opacity: 0.75;
+    }
+  }
+
+  // 默认按钮：浅灰实底 + 深色字
+  &--default {
+    --el-button-bg-color: #{$bg-color};
+    --el-button-border-color: transparent;
+    --el-button-text-color: #{$text-primary};
+    --el-button-hover-text-color: #{$text-primary};
+    --el-button-hover-bg-color: #{color.adjust($bg-color, $lightness: -5%)};
+    --el-button-hover-border-color: transparent;
+    background-color: $bg-color !important;
+    border-color: transparent !important;
+    color: $text-primary !important;
+
+    &:hover,
+    &:focus {
+      background-color: #{color.adjust($bg-color, $lightness: -5%)} !important;
+      color: $text-primary !important;
+    }
+  }
+
+  // 文字按钮
+  &.is-text,
+  &.is-link {
+    --el-button-text-color: #{$text-regular};
+    --el-button-hover-text-color: #{$primary-color};
+    background-color: transparent !important;
+    color: $text-regular !important;
+
+    &:hover {
+      color: $primary-color !important;
+      background-color: #{rgba($primary-color, 0.06)} !important;
+    }
+  }
+
+  // 朴素按钮
+  &--plain {
+    background-color: $bg-white !important;
+    color: $text-primary !important;
+    border-color: transparent !important;
+
+    &:hover {
+      background-color: $bg-color !important;
+      color: $text-primary !important;
+    }
+
+    &.el-button--primary {
+      background-color: #{rgba($primary-color, 0.1)} !important;
+      border-color: $primary-color !important;
+      color: $primary-color !important;
+
+      &:hover {
+        background-color: #{rgba($primary-color, 0.16)} !important;
+        color: $primary-color !important;
+      }
+    }
+  }
+
+  &.pill-btn--accent {
+    background-color: $text-primary !important;
+    border-color: $text-primary !important;
+    color: #ffffff !important;
+
+    &:hover {
+      background-color: #{color.adjust($text-primary, $lightness: 12%)} !important;
+      color: #ffffff !important;
+    }
   }
 }
 
 .el-input__wrapper,
 .el-textarea__inner,
 .el-select__wrapper {
-  border-radius: $border-radius;
-  box-shadow: 0 0 0 1px $border-color inset !important;
-  transition: box-shadow 0.2s ease;
+  border-radius: $border-radius-pill;
+  background-color: $bg-color;
+  box-shadow: none !important;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
 
   &:hover {
-    box-shadow: 0 0 0 1px color.adjust($border-color, $lightness: -8%) inset !important;
+    background-color: color.adjust($bg-color, $lightness: -2%);
   }
 
   &.is-focus,
   &:focus {
-    box-shadow: 0 0 0 1px $primary-color inset !important;
+    background-color: $bg-white;
+    box-shadow: 0 0 0 2px rgba($primary-color, 0.18) !important;
   }
 }
 
 .el-table {
-  --el-table-border-color: #{$border-color};
-  --el-table-header-bg-color: #{$bg-white};
-  --el-table-row-hover-bg-color: #{color.adjust($bg-color, $lightness: 1%)};
+  --el-table-border-color: transparent;
+  --el-table-header-bg-color: #{$bg-color};
+  --el-table-row-hover-bg-color: #{rgba($primary-color, 0.04)};
   --el-table-striped-bg-color: #{$bg-white};
 
   th.el-table__cell {
@@ -126,9 +243,9 @@ a {
 }
 
 .el-dialog {
-  border-radius: $border-radius;
-  box-shadow: none;
-  border: 1px solid $border-color;
+  border-radius: $border-radius-lg;
+  box-shadow: $shadow-card-hover;
+  border: none;
 }
 
 .el-menu {
@@ -140,11 +257,17 @@ a {
 }
 
 .el-tag {
-  border-radius: $border-radius;
+  border-radius: $border-radius-pill;
+  border: none;
 }
 
 .el-alert {
-  border-radius: $border-radius;
+  border-radius: $border-radius-md;
+  border: none;
+}
+
+.el-breadcrumb {
+  font-size: 13px;
 }
 
 // 通用工具类
@@ -162,14 +285,24 @@ a {
 
 .page-title {
   margin: 0 0 4px;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 28px;
+  font-weight: 700;
   color: $text-primary;
+  letter-spacing: -0.02em;
 }
 
 .page-desc {
   margin: 0;
   font-size: 14px;
   color: $text-secondary;
-  line-height: 1.5;
+  line-height: 1.6;
+}
+
+.gradient-banner {
+  background: $gradient-primary;
+  border-radius: $border-radius-lg;
+}
+
+.pill-btn {
+  border-radius: $border-radius-pill !important;
 }

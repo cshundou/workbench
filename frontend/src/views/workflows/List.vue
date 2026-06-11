@@ -8,6 +8,7 @@ import type { WorkflowInfo } from '@/api/workflow';
 import { useGraphStore } from '@/stores/graph';
 import { useUserStore } from '@/stores/user';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
+import SectionHeader from '@/components/layout/SectionHeader.vue';
 
 const router = useRouter();
 const graphStore = useGraphStore();
@@ -109,15 +110,17 @@ onMounted(() => {
 <template>
   <div class="workflow-list-page">
     <ApiKeyHintBanner scene="workflow" />
-    <div class="page-header">
-      <div>
-        <h2 class="page-title">工作流模板</h2>
-        <p class="page-desc">LangGraph 多智能体协同工作流，支持任务拆解、并行执行与人工介入</p>
-      </div>
-      <el-button v-if="canWrite" type="primary" :icon="Plus" @click="openCreateDialog">
-        新建工作流
-      </el-button>
-    </div>
+
+    <SectionHeader
+      title="工作流模板"
+      description="LangGraph 多智能体协同工作流，支持任务拆解、并行执行与人工介入"
+    >
+      <template #actions>
+        <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
+          新建工作流
+        </el-button>
+      </template>
+    </SectionHeader>
 
     <el-row v-loading="graphStore.isLoading" :gutter="16">
       <el-col
@@ -196,31 +199,14 @@ onMounted(() => {
   padding: 4px;
 }
 
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-.page-title {
-  margin: 0 0 4px;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.page-desc {
-  margin: 0;
-  font-size: 13px;
-  color: $text-secondary;
-}
-
 .wf-card {
   margin-bottom: 16px;
-  transition: border-color 0.2s ease;
+  border-radius: $border-radius-lg;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 
   &:hover {
-    border-color: $primary-color;
+    box-shadow: $shadow-card-hover;
+    transform: translateY(-2px);
   }
 }
 
