@@ -17,8 +17,12 @@ logger = get_logger(__name__)
 class IntelligentChunker:
     """智能文档分块器。"""
 
-    def __init__(self, embedding_model: str = "text-embedding-ada-002") -> None:
-        self.embeddings = OpenAIEmbeddings(model=embedding_model)
+    def __init__(
+        self,
+        embedding_model: str = "text-embedding-ada-002",
+        embeddings: OpenAIEmbeddings | None = None,
+    ) -> None:
+        self.embeddings = embeddings or OpenAIEmbeddings(model=embedding_model)
         self.semantic_chunker = SemanticChunker(
             self.embeddings,
             breakpoint_threshold_type="percentile",

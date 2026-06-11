@@ -284,10 +284,10 @@ onUnmounted(() => {
   height: 10px;
   border-radius: 50%;
 
-  &.waiting { background: #909399; }
-  &.running { background: #409eff; }
-  &.completed { background: #67c23a; }
-  &.failed { background: #f56c6c; }
+  &.waiting { background: #86909c; }
+  &.running { background: #ff5a1f; }
+  &.completed { background: #00b42a; }
+  &.failed { background: #f53f3f; }
 }
 
 .control-card,
@@ -305,7 +305,7 @@ onUnmounted(() => {
 }
 
 .intervention-title {
-  color: #e6a23c;
+  color: $warning-color;
   font-weight: 600;
 }
 

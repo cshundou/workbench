@@ -12,6 +12,7 @@ from app.models.knowledge_base import KnowledgeBase
 from app.models.user import User
 from app.services.agent.tools.base import BaseTool, ToolResult
 from app.services.rag.rag_service import rag_service
+from app.services.user_key_context import UserKeyContext
 
 logger = get_logger(__name__)
 
@@ -41,10 +42,12 @@ class KnowledgeBaseTool(BaseTool):
         db: AsyncSession,
         tenant_id: int,
         user: User,
+        user_ctx: UserKeyContext,
     ) -> None:
         self.db = db
         self.tenant_id = tenant_id
         self.user = user
+        self.user_ctx = user_ctx
 
     async def _list_accessible_kb_ids(self, kb_id: Optional[int] = None) -> list[int]:
         """获取当前用户可访问的知识库 ID 列表。"""
@@ -83,6 +86,7 @@ class KnowledgeBaseTool(BaseTool):
                         self.db,
                         current_kb_id,
                         query,
+                        self.user_ctx,
                         top_k=5,
                     )
                     for item in results:

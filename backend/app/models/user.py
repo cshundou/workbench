@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from app.models.tenant import Tenant
     from app.models.token_usage import TokenUsage
     from app.models.workflow import Workflow
-    from app.models.workflow_execution import WorkflowExecution
+    from app.models.user_api_key import UserApiKey
 
 
 class User(Base, TimestampMixin):
@@ -68,3 +68,4 @@ class User(Base, TimestampMixin):
     )
     chat_histories: Mapped[list["ChatHistory"]] = relationship(back_populates="user")
     token_usages: Mapped[list["TokenUsage"]] = relationship(back_populates="user")
+    api_keys: Mapped[list["UserApiKey"]] = relationship(back_populates="user")

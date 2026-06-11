@@ -22,11 +22,11 @@ import type { PageParams } from '@/types/api';
 
 /** 节点状态颜色映射 */
 export const NODE_STATUS_COLORS: Record<string, string> = {
-  waiting: '#909399',
-  running: '#409eff',
-  completed: '#67c23a',
-  failed: '#f56c6c',
-  waiting_for_human: '#e6a23c',
+  waiting: '#86909C',
+  running: '#FF5A1F',
+  completed: '#00B42A',
+  failed: '#F53F3F',
+  waiting_for_human: '#FF7D00',
 };
 
 export const useGraphStore = defineStore('graph', () => {

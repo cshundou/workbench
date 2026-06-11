@@ -78,8 +78,8 @@ const edges = computed(() =>
   width: 100%;
   height: 100%;
   min-height: 400px;
-  background: #fafafa;
-  border-radius: 8px;
+  background: $bg-white;
+  border-radius: $border-radius;
   border: 1px solid $border-color;
 }
 </style>

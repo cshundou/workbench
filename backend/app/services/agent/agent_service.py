@@ -35,6 +35,7 @@ from app.services.agent.tools.sql_query import SqlQueryTool
 from app.services.agent.tools.tavily_search import TavilySearchTool
 from app.core.deps import get_user_permissions
 from app.services.token_usage_service import token_usage_service
+from app.services.user_key_context import UserKeyContext, create_chat_llm
 
 logger = get_logger(__name__)
 
@@ -77,6 +78,7 @@ class AgentService:
         tenant_id: int,
         user: User,
         user_permissions: list[str],
+        user_ctx: UserKeyContext,
     ) -> list[BaseTool]:
         """按配置实例化工具并过滤无权限工具。"""
         instances: list[BaseTool] = []
@@ -90,9 +92,11 @@ class AgentService:
 
             tool_cls = self.tool_registry[name]
             if tool_cls is KnowledgeBaseTool:
-                instances.append(KnowledgeBaseTool(db, tenant_id, user))
+                instances.append(KnowledgeBaseTool(db, tenant_id, user, user_ctx))
             elif tool_cls is SqlQueryTool:
-                instances.append(SqlQueryTool(db))
+                instances.append(SqlQueryTool(db, user_ctx))
+            elif tool_cls is TavilySearchTool:
+                instances.append(TavilySearchTool(user_ctx))
             else:
                 instances.append(tool_cls())
         return instances
@@ -218,13 +222,15 @@ class AgentService:
         self,
         agent_config: Dict[str, Any],
         lc_tools: list[StructuredTool],
+        user_ctx: UserKeyContext,
     ) -> AgentExecutor:
         """创建 LangChain OpenAI Tools Agent 执行器。"""
-        llm = ChatOpenAI(
-            model=agent_config["model_name"],
+        user_ctx.get_llm_provider()
+        llm = create_chat_llm(
+            user_ctx,
+            model_name=agent_config.get("model_name"),
             temperature=agent_config["temperature"],
             max_tokens=agent_config["max_tokens"],
-            api_key=settings.openai_api_key or None,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -253,6 +259,7 @@ class AgentService:
         db: AsyncSession,
         tenant_id: int,
         user: User,
+        user_ctx: UserKeyContext,
         chat_history: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         """非流式运行智能体。"""
@@ -263,9 +270,10 @@ class AgentService:
             tenant_id,
             user,
             user_permissions,
+            user_ctx,
         )
         lc_tools = self._to_langchain_tools(base_tools)
-        executor = self._build_agent_executor(agent_config, lc_tools)
+        executor = self._build_agent_executor(agent_config, lc_tools, user_ctx)
 
         history_messages: list[Any] = []
         for item in chat_history or []:
@@ -296,7 +304,7 @@ class AgentService:
             db=db,
             tenant_id=tenant_id,
             user_id=user.id,
-            model_name=agent_config.get("model_name", settings.default_llm_model),
+            model_name=agent_config.get("model_name", "gpt-4o"),
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
         )
@@ -320,6 +328,7 @@ class AgentService:
         db: AsyncSession,
         tenant_id: int,
         user: User,
+        user_ctx: UserKeyContext,
         session_id: str,
         chat_history: Optional[List[Dict[str, str]]] = None,
     ) -> AsyncIterator[dict[str, Any]]:
@@ -338,9 +347,10 @@ class AgentService:
             tenant_id,
             user,
             user_permissions,
+            user_ctx,
         )
         lc_tools = self._to_langchain_tools(base_tools)
-        executor = self._build_agent_executor(agent_config, lc_tools)
+        executor = self._build_agent_executor(agent_config, lc_tools, user_ctx)
 
         history_messages: list[Any] = []
         for item in chat_history or []:
@@ -402,9 +412,7 @@ class AgentService:
                             db=db,
                             tenant_id=tenant_id,
                             user_id=user.id,
-                            model_name=agent_config.get(
-                                "model_name", settings.default_llm_model
-                            ),
+                            model_name=agent_config.get("model_name", "gpt-4o"),
                             response=output,
                         )
                 elif event_type == "on_chat_model_stream":

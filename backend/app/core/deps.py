@@ -14,6 +14,7 @@ from app.core.exceptions import AuthenticationError, AuthorizationError
 from app.core.logging import get_logger
 from app.core.permissions import has_any_permission, has_permission, parse_permissions
 from app.models.user import User
+from app.services.user_key_context import UserKeyContext, user_key_resolver
 from app.services.user_service import user_service
 
 logger = get_logger(__name__)
@@ -183,10 +184,30 @@ def require_any_permission(*permissions: str) -> Callable:
     return _check_permissions
 
 
+async def get_user_key_context(
+    current_user: Annotated[User, Depends(get_current_user)],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserKeyContext:
+    """
+    加载当前用户的 API 密钥上下文。
+
+    Args:
+        current_user: 当前登录用户。
+        tenant_id: 当前租户 ID。
+        db: 数据库会话。
+
+    Returns:
+        解密后的用户密钥上下文。
+    """
+    return await user_key_resolver.load_context(db, current_user.id, tenant_id)
+
+
 # 类型别名，便于路由函数注入
 DbSession = AsyncSession
 CurrentUserId = str
 CurrentUser = User
+UserKeyCtx = UserKeyContext
 
 # 可复用的依赖
 get_db_session = get_db

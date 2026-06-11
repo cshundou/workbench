@@ -6,9 +6,10 @@ from typing import Any, Dict
 
 from tavily import TavilyClient
 
-from app.core.config import settings
+from app.core.exceptions import ApiKeyMissingError
 from app.core.logging import get_logger
 from app.services.agent.tools.base import BaseTool, ToolResult
+from app.services.user_key_context import UserKeyContext
 
 logger = get_logger(__name__)
 
@@ -33,19 +34,22 @@ class TavilySearchTool(BaseTool):
         "required": ["query"],
     }
 
+    def __init__(self, user_ctx: UserKeyContext) -> None:
+        self.user_ctx = user_ctx
+
     async def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行 Tavily 搜索。"""
         try:
-            if not settings.tavily_api_key:
-                return ToolResult(
-                    success=False,
-                    content=None,
-                    error="未配置 TAVILY_API_KEY，无法使用联网搜索",
+            tavily_config = self.user_ctx.get_provider("tavily")
+            if tavily_config is None or not tavily_config.api_key:
+                raise ApiKeyMissingError(
+                    provider="tavily",
+                    message="请先在「设置 > API 密钥管理」中配置 Tavily API 密钥",
                 )
 
             query = parameters["query"]
             max_results = int(parameters.get("max_results", 5))
-            client = TavilyClient(api_key=settings.tavily_api_key)
+            client = TavilyClient(api_key=tavily_config.api_key)
 
             response = client.search(
                 query=query,
@@ -71,6 +75,8 @@ class TavilySearchTool(BaseTool):
                     "results": results,
                 },
             )
+        except ApiKeyMissingError as exc:
+            return ToolResult(success=False, content=None, error=exc.message)
         except Exception as exc:
             logger.error("TavilySearchTool 执行失败: %s", exc)
             return ToolResult(

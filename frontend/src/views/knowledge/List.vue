@@ -12,6 +12,7 @@ import {
 import type { KnowledgeBaseInfo } from '@/api/rag';
 import { useRagStore } from '@/stores/rag';
 import { useUserStore } from '@/stores/user';
+import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
 
 const router = useRouter();
 const ragStore = useRagStore();
@@ -157,6 +158,7 @@ onMounted(() => {
 
 <template>
   <div class="knowledge-list">
+    <ApiKeyHintBanner scene="rag" />
     <div class="page-header flex-between">
       <div class="search-bar">
         <el-input
@@ -183,11 +185,11 @@ onMounted(() => {
       <el-card
         v-for="kb in ragStore.knowledgeBases"
         :key="kb.id"
-        shadow="hover"
+        shadow="never"
         class="kb-card"
       >
         <div class="kb-card-header">
-          <el-icon :size="24" color="#409eff"><FolderOpened /></el-icon>
+          <el-icon :size="24" class="kb-icon"><FolderOpened /></el-icon>
           <div class="kb-info">
             <h3 class="kb-name" @click="goDetail(kb)">{{ kb.name }}</h3>
             <p class="kb-desc">{{ kb.description || '暂无描述' }}</p>
@@ -279,11 +281,16 @@ onMounted(() => {
 }
 
 .kb-card {
-  transition: transform 0.2s ease;
+  transition: border-color 0.2s ease;
 
   &:hover {
-    transform: translateY(-2px);
+    border-color: $primary-color;
   }
+}
+
+.kb-icon {
+  color: $primary-color;
+  flex-shrink: 0;
 }
 
 .kb-card-header {

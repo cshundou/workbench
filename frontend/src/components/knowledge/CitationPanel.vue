@@ -79,7 +79,7 @@ function handleSelect(source: CitationSource): void {
 .citation-item {
   padding: 12px;
   margin-bottom: 8px;
-  border-radius: 8px;
+  border-radius: $border-radius;
   border: 1px solid $border-color;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -87,7 +87,7 @@ function handleSelect(source: CitationSource): void {
   &:hover,
   &.active {
     border-color: $primary-color;
-    background: rgba(64, 158, 255, 0.06);
+    background: rgba($primary-color, 0.06);
   }
 }
 

@@ -141,6 +141,12 @@ const routes: RouteRecordRaw[] = [
               permission: ROUTE_PERMISSIONS.roleManagement,
             },
           },
+          {
+            path: 'api-keys',
+            name: 'ApiKeys',
+            component: () => import('@/views/settings/ApiKeys.vue'),
+            meta: { title: 'API 密钥管理' },
+          },
         ],
       },
     ],

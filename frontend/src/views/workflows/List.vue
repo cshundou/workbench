@@ -7,6 +7,7 @@ import { Plus, VideoPlay, Edit, Delete, Share } from '@element-plus/icons-vue';
 import type { WorkflowInfo } from '@/api/workflow';
 import { useGraphStore } from '@/stores/graph';
 import { useUserStore } from '@/stores/user';
+import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
 
 const router = useRouter();
 const graphStore = useGraphStore();
@@ -107,6 +108,7 @@ onMounted(() => {
 
 <template>
   <div class="workflow-list-page">
+    <ApiKeyHintBanner scene="workflow" />
     <div class="page-header">
       <div>
         <h2 class="page-title">工作流模板</h2>
@@ -126,9 +128,9 @@ onMounted(() => {
         :md="8"
         :lg="6"
       >
-        <el-card shadow="hover" class="wf-card">
+        <el-card shadow="never" class="wf-card">
           <div class="wf-card-header">
-            <el-icon :size="28" color="#409eff"><Share /></el-icon>
+            <el-icon :size="28" class="wf-icon"><Share /></el-icon>
             <el-tag v-if="wf.is_public" size="small" type="success">公开</el-tag>
           </div>
           <h3 class="wf-name">{{ wf.name }}</h3>
@@ -215,11 +217,15 @@ onMounted(() => {
 
 .wf-card {
   margin-bottom: 16px;
-  transition: transform 0.2s;
+  transition: border-color 0.2s ease;
 
   &:hover {
-    transform: translateY(-2px);
+    border-color: $primary-color;
   }
+}
+
+.wf-icon {
+  color: $primary-color;
 }
 
 .wf-card-header {

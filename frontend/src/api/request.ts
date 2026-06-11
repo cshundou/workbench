@@ -59,6 +59,11 @@ request.interceptors.response.use(
         });
       }
       ElMessage.error('登录已过期，请重新登录');
+    } else if (status === 428) {
+      ElMessage.warning(errorMessage || '请先配置 API 密钥');
+      if (router.currentRoute.value.path !== '/settings/api-keys') {
+        router.push('/settings/api-keys');
+      }
     } else {
       ElMessage.error(errorMessage);
     }

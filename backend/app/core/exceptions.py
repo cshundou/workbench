@@ -80,3 +80,21 @@ class ValidationError(AppException):
         error: Optional[str] = None,
     ) -> None:
         super().__init__(message=message, code=code, data=None, error=error)
+
+
+class ApiKeyMissingError(AppException):
+    """用户未配置必要的 API 密钥。"""
+
+    def __init__(
+        self,
+        provider: str = "unknown",
+        message: str = "请先配置 API 密钥",
+        code: int = 428,
+        error: Optional[str] = None,
+    ) -> None:
+        super().__init__(
+            message=message,
+            code=code,
+            data={"provider": provider, "redirect": "/settings/api-keys"},
+            error=error or message,
+        )

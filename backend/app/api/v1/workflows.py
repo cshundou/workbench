@@ -9,10 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
     CurrentUser,
+    UserKeyCtx,
     get_current_tenant_id,
     get_db_session,
+    get_user_key_context,
     require_permission,
 )
+from app.core.exceptions import ApiKeyMissingError
 from app.core.permissions import WF_DELETE, WF_READ, WF_WRITE
 from app.core.response import success_response
 from app.schemas.workflow import (
@@ -137,8 +140,14 @@ async def execute_workflow(
     current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    user_ctx: Annotated[UserKeyCtx, Depends(get_user_key_context)],
 ) -> dict[str, Any]:
     """手动执行工作流并传入任务参数。"""
+    if not user_ctx.has_llm_key:
+        raise ApiKeyMissingError(
+            provider="llm",
+            message="请先在「设置 > API 密钥管理」中配置至少一个大模型 API 密钥后再执行工作流",
+        )
     result = await workflow_service.execute_workflow(
         db, workflow_id, tenant_id, current_user, data
     )

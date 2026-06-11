@@ -260,7 +260,7 @@ onUnmounted(() => {
   gap: 0;
   min-height: 0;
   border: 1px solid $border-color;
-  border-radius: 8px;
+  border-radius: $border-radius;
   overflow: hidden;
   background: #fff;
 }
@@ -288,7 +288,7 @@ onUnmounted(() => {
     .message-bubble {
       background: $primary-color;
       color: #fff;
-      border-radius: 12px 12px 4px 12px;
+      border-radius: $border-radius;
       max-width: 70%;
     }
   }
@@ -297,8 +297,10 @@ onUnmounted(() => {
     justify-content: flex-start;
 
     .message-bubble {
-      background: #f5f7fa;
-      border-radius: 12px 12px 12px 4px;
+      background: $bg-white;
+      border: 1px solid $border-color;
+      color: $text-primary;
+      border-radius: $border-radius;
       max-width: 85%;
     }
   }

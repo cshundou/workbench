@@ -5,13 +5,12 @@
 import re
 from typing import Any, Dict
 
-from langchain_openai import ChatOpenAI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.agent.tools.base import BaseTool, ToolResult
+from app.services.user_key_context import UserKeyContext, create_chat_llm
 
 logger = get_logger(__name__)
 
@@ -38,8 +37,9 @@ class SqlQueryTool(BaseTool):
         "required": ["question"],
     }
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, user_ctx: UserKeyContext) -> None:
         self.db = db
+        self.user_ctx = user_ctx
 
     @staticmethod
     def _validate_sql(sql: str) -> str | None:
@@ -55,11 +55,7 @@ class SqlQueryTool(BaseTool):
 
     async def _generate_sql(self, question: str) -> str:
         """使用 LLM 生成 SQL。"""
-        llm = ChatOpenAI(
-            model=settings.default_llm_model,
-            temperature=0,
-            api_key=settings.openai_api_key or None,
-        )
+        llm = create_chat_llm(self.user_ctx, temperature=0)
         prompt = f"""
 你是 PostgreSQL SQL 专家。根据用户问题生成一条 SELECT 查询语句。
 要求：

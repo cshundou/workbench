@@ -361,7 +361,12 @@ class KnowledgeBaseService:
         await db.flush()
 
         rag_service.set_parse_progress(document.id, 0, "等待解析", status="pending")
-        rag_service.schedule_parse_document(document.id, tags=tag_list)
+        rag_service.schedule_parse_document(
+            document.id,
+            user.id,
+            tenant_id,
+            tags=tag_list,
+        )
 
         logger.info(
             "文档上传成功 document_id=%s kb_id=%s name=%s",
@@ -430,7 +435,10 @@ class KnowledgeBaseService:
         if document is None:
             raise NotFoundError(message="文档不存在")
 
-        await rag_service.delete_document_vectors(db, document)
+        from app.services.user_key_context import user_key_resolver
+
+        user_ctx = await user_key_resolver.load_context(db, user.id, tenant_id)
+        await rag_service.delete_document_vectors(db, document, user_ctx)
 
         if os.path.isfile(document.file_path):
             try:

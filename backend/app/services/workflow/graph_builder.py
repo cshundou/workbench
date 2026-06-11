@@ -16,6 +16,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph import END, StateGraph
 
 from app.core.config import settings
+from app.services.user_key_context import UserKeyContext, create_chat_llm
 from app.services.workflow.redis_saver import RedisSaver
 
 logger = logging.getLogger(__name__)
@@ -98,11 +99,16 @@ StatusCallback = Callable[[str, str, dict[str, Any]], None]
 class WorkflowBuilder:
     """LangGraph 多智能体工作流构建器。"""
 
-    def __init__(self, redis_url: str | None = None) -> None:
+    def __init__(
+        self,
+        redis_url: str | None = None,
+        user_ctx: UserKeyContext | None = None,
+    ) -> None:
         url = redis_url or settings.redis_url
         self.redis = redis.Redis.from_url(url, decode_responses=False)
         self.checkpointer = RedisSaver(self.redis)
         self._status_callback: Optional[StatusCallback] = None
+        self.user_ctx = user_ctx
 
     def set_status_callback(self, callback: StatusCallback) -> None:
         """设置节点状态回调，用于 WebSocket 推送。"""
@@ -197,16 +203,14 @@ class WorkflowBuilder:
         return workflow.compile(checkpointer=self.checkpointer)
 
     def _create_llm(self):
-        """创建 LLM 实例，无 API Key 时返回 None。"""
-        if not settings.openai_api_key:
+        """创建 LLM 实例，无用户密钥时返回 None。"""
+        if self.user_ctx is None or not self.user_ctx.has_llm_key:
             return None
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
-            model=settings.default_llm_model,
-            temperature=0,
-            api_key=settings.openai_api_key,
-        )
+        try:
+            return create_chat_llm(self.user_ctx, temperature=0)
+        except Exception as exc:
+            logger.warning("创建 LLM 失败，将使用规则降级: %s", exc)
+            return None
 
     def scheduler_node(self, state: AgentState) -> AgentState:
         """调度中心节点：任务拆解与分配。"""
@@ -296,7 +300,7 @@ class WorkflowBuilder:
             if knowledge_task:
                 query = knowledge_task.get("task", state["task"])
                 kb_id = state.get("kb_id")
-                if kb_id and settings.openai_api_key:
+                if kb_id and self.user_ctx and self.user_ctx.has_llm_key:
                     result = self._query_knowledge_base(kb_id, query)
                 else:
                     result = f"[知识库模拟结果] 关于「{query}」的内部资料检索完成。"
@@ -322,11 +326,15 @@ class WorkflowBuilder:
 
         async def _search() -> str:
             async with async_session_factory() as db:
-                chunks = await rag_service.retrieve(db, kb_id, query, top_k=3)
+                if self.user_ctx is None:
+                    return "未配置 API 密钥，无法检索知识库。"
+                chunks = await rag_service.retrieve(
+                    db, kb_id, query, self.user_ctx, top_k=3
+                )
                 if not chunks:
                     return "未检索到相关知识库内容。"
                 return "\n".join(
-                    c.get("page_content", str(c)) for c in chunks[:3]
+                    c.get("content", str(c)) for c in chunks[:3]
                 )
 
         try:
@@ -370,16 +378,17 @@ class WorkflowBuilder:
 
     def _web_search(self, query: str) -> str:
         """调用 Tavily 搜索，失败时返回模拟结果。"""
-        import os
-
-        api_key = os.environ.get("TAVILY_API_KEY", "")
-        if not api_key:
+        if self.user_ctx is None or not self.user_ctx.has_tavily_key:
             return f"[联网搜索模拟结果] 关于「{query}」的外部信息检索完成。"
 
         try:
             from tavily import TavilyClient
 
-            client = TavilyClient(api_key=api_key)
+            tavily_config = self.user_ctx.get_provider("tavily")
+            if tavily_config is None:
+                return f"[联网搜索模拟结果] 关于「{query}」的外部信息检索完成。"
+
+            client = TavilyClient(api_key=tavily_config.api_key)
             response = client.search(query=query, max_results=3)
             results = response.get("results", [])
             if not results:

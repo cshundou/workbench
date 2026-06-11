@@ -15,6 +15,7 @@ import {
 import type { AgentInfo } from '@/api/agent';
 import { useAgentStore } from '@/stores/agent';
 import { useUserStore } from '@/stores/user';
+import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
 
 const router = useRouter();
 const agentStore = useAgentStore();
@@ -120,6 +121,7 @@ onMounted(() => {
 
 <template>
   <div class="agent-list-page">
+    <ApiKeyHintBanner scene="agent" />
     <div class="page-header flex-between">
       <div class="header-left">
         <h2 class="page-title">智能体中心</h2>

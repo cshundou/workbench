@@ -58,9 +58,15 @@ const topMenuItems = computed(() => {
   );
 });
 
-/** 设置子菜单项 */
+/** 设置子菜单项（API 密钥管理对所有登录用户可见） */
 const settingsMenuItems = computed(() => {
   const items = [
+    {
+      path: '/settings/api-keys',
+      title: 'API 密钥管理',
+      icon: Key,
+      permission: null,
+    },
     {
       path: '/settings/users',
       title: '用户管理',
@@ -81,7 +87,9 @@ const settingsMenuItems = computed(() => {
 });
 
 /** 是否显示设置子菜单 */
-const showSettingsMenu = computed(() => settingsMenuItems.value.length > 0);
+const showSettingsMenu = computed(
+  () => settingsMenuItems.value.length > 0 || userStore.isLoggedIn,
+);
 
 const activeMenu = computed(() => route.path);
 const pageTitle = computed(() => (route.meta.title as string) || '企业智能协作工作台');
@@ -113,9 +121,9 @@ async function handleLogout(): Promise<void> {
 <template>
   <el-container class="layout-container">
     <!-- 侧边栏 -->
-    <el-aside :width="isCollapsed ? '64px' : '220px'" class="layout-aside">
+    <el-aside :width="isCollapsed ? '64px' : '240px'" class="layout-aside">
       <div class="logo-area flex-center">
-        <span v-if="!isCollapsed" class="logo-text">AI 工作台</span>
+        <span v-if="!isCollapsed" class="logo-text">企业智能协作工作台</span>
         <span v-else class="logo-text-mini">AI</span>
       </div>
 
@@ -124,9 +132,6 @@ async function handleLogout(): Promise<void> {
         :collapse="isCollapsed"
         :collapse-transition="false"
         class="sidebar-menu"
-        background-color="#001529"
-        text-color="#ffffffa6"
-        active-text-color="#ffffff"
         @select="handleMenuSelect"
       >
         <el-menu-item
@@ -201,39 +206,66 @@ async function handleLogout(): Promise<void> {
 .layout-container {
   width: 100%;
   height: 100vh;
+  background: $bg-white;
 }
 
 .layout-aside {
-  background-color: #001529;
+  background-color: $bg-color;
+  border-right: 1px solid $border-color;
   transition: width 0.2s ease;
   overflow: hidden;
 }
 
 .logo-area {
-  height: 60px;
-  color: #fff;
-  font-size: 18px;
+  height: $header-height;
+  color: $text-primary;
+  font-size: 15px;
   font-weight: 600;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid $border-color;
+  padding: 0 16px;
+}
+
+.logo-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .logo-text-mini {
   font-size: 16px;
+  color: $primary-color;
+  font-weight: 700;
 }
 
 .sidebar-menu {
+  --el-menu-bg-color: #{$bg-color};
+  --el-menu-text-color: #{$text-regular};
+  --el-menu-active-color: #{$primary-color};
+  --el-menu-hover-bg-color: #{rgba($primary-color, 0.06)};
+  --el-menu-hover-text-color: #{$text-primary};
   border-right: none;
+  padding: 8px 0;
+
+  :deep(.el-menu-item.is-active) {
+    background-color: rgba($primary-color, 0.08);
+    font-weight: 600;
+  }
+
+  :deep(.el-sub-menu__title:hover),
+  :deep(.el-menu-item:hover) {
+    background-color: rgba($primary-color, 0.06);
+  }
 }
 
 .layout-main {
-  background-color: $bg-color;
+  background-color: $bg-white;
 }
 
 .layout-header {
-  height: 60px;
-  background-color: #fff;
+  height: $header-height;
+  background-color: $bg-white;
   border-bottom: 1px solid $border-color;
-  padding: 0 20px;
+  padding: 0 $content-padding;
 }
 
 .collapse-btn {
@@ -243,7 +275,7 @@ async function handleLogout(): Promise<void> {
 
 .page-title {
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
   color: $text-primary;
 }
 
@@ -255,6 +287,7 @@ async function handleLogout(): Promise<void> {
 .user-avatar {
   background-color: $primary-color;
   color: #fff;
+  border-radius: $border-radius;
 }
 
 .user-name {
@@ -263,8 +296,9 @@ async function handleLogout(): Promise<void> {
 }
 
 .layout-content {
-  padding: 20px;
+  padding: 24px $content-padding;
   overflow-y: auto;
+  background: $bg-white;
 }
 
 .fade-enter-active,

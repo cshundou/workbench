@@ -32,6 +32,7 @@ from app.services.workflow.graph_builder import (
     STANDARD_GRAPH_DEFINITION,
     WorkflowBuilder,
 )
+from app.services.user_key_context import user_key_resolver
 from app.services.workflow.ws_manager import workflow_ws_manager
 
 logger = logging.getLogger(__name__)
@@ -367,7 +368,12 @@ class WorkflowService:
 
         task = asyncio.create_task(
             self._run_workflow(
-                execution.id, workflow_id, tenant_id, input_params, thread_id
+                execution.id,
+                workflow_id,
+                tenant_id,
+                user.id,
+                input_params,
+                thread_id,
             )
         )
         _running_tasks[execution.id] = task
@@ -423,6 +429,7 @@ class WorkflowService:
         execution_id: int,
         workflow_id: int,
         tenant_id: int,
+        user_id: int,
         input_params: dict[str, Any],
         thread_id: str,
     ) -> None:
@@ -440,6 +447,7 @@ class WorkflowService:
             )
 
         try:
+            user_ctx = None
             async with async_session_factory() as db:
                 stmt = select(WorkflowExecution).where(
                     WorkflowExecution.id == execution_id
@@ -447,6 +455,9 @@ class WorkflowService:
                 result = await db.execute(stmt)
                 execution = result.scalar_one()
                 execution.status = "running"
+                user_ctx = await user_key_resolver.load_context(
+                    db, user_id, tenant_id
+                )
                 await db.commit()
 
             await workflow_ws_manager.broadcast_execution_status(
@@ -454,7 +465,7 @@ class WorkflowService:
             )
 
             require_human = bool(input_params.get("require_human_approval"))
-            builder = WorkflowBuilder(settings.redis_url)
+            builder = WorkflowBuilder(settings.redis_url, user_ctx=user_ctx)
             builder.set_status_callback(status_callback)
             graph = builder.build_standard_workflow(require_human=require_human)
 
@@ -519,10 +530,13 @@ class WorkflowService:
                 result = await db.execute(stmt)
                 execution = result.scalar_one()
                 execution.status = "running"
+                user_ctx = await user_key_resolver.load_context(
+                    db, execution.created_by, tenant_id
+                )
                 await db.commit()
 
             require_human = bool(input_params.get("require_human_approval"))
-            builder = WorkflowBuilder(settings.redis_url)
+            builder = WorkflowBuilder(settings.redis_url, user_ctx=user_ctx)
             builder.set_status_callback(status_callback)
             graph = builder.build_standard_workflow(require_human=require_human)
 

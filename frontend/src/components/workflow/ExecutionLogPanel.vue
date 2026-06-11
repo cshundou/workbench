@@ -70,7 +70,7 @@ function formatTime(iso?: string | null): string {
   display: flex;
   flex-direction: column;
   background: #fff;
-  border-radius: 8px;
+  border-radius: $border-radius;
   border: 1px solid $border-color;
 }
 
@@ -101,15 +101,15 @@ function formatTime(iso?: string | null): string {
 .log-item {
   padding: 10px 12px;
   margin-bottom: 8px;
-  border-radius: 6px;
+  border-radius: $border-radius;
   border: 1px solid $border-color;
   cursor: pointer;
   transition: background 0.15s;
 
   &:hover,
   &.active {
-    background: #f5f7fa;
-    border-color: #409eff;
+    background: rgba($primary-color, 0.06);
+    border-color: $primary-color;
   }
 }
 

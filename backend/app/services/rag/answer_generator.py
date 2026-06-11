@@ -3,13 +3,13 @@
 """
 
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, Optional
 
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.services.user_key_context import UserKeyContext, create_chat_llm
 
 logger = get_logger(__name__)
 
@@ -29,9 +29,15 @@ ANSWER_PROMPT = """
 class AnswerGenerator:
     """带引用溯源的问答生成器。"""
 
-    def __init__(self, model_name: str | None = None) -> None:
-        model = model_name or settings.default_llm_model
-        self.llm = ChatOpenAI(model_name=model, temperature=0)
+    def __init__(
+        self,
+        user_ctx: UserKeyContext,
+        model_name: Optional[str] = None,
+        llm: Optional[ChatOpenAI] = None,
+    ) -> None:
+        self.user_ctx = user_ctx
+        self.llm = llm or create_chat_llm(user_ctx, model_name=model_name, temperature=0)
+        self._model_name = model_name or getattr(self.llm, "model_name", "unknown")
         self.prompt_template = PromptTemplate(
             input_variables=["context", "question"],
             template=ANSWER_PROMPT,
@@ -40,7 +46,7 @@ class AnswerGenerator:
     @property
     def model_name(self) -> str:
         """当前使用的模型名称。"""
-        return str(getattr(self.llm, "model_name", settings.default_llm_model))
+        return str(getattr(self.llm, "model_name", self._model_name))
 
     def generate_answer(
         self,

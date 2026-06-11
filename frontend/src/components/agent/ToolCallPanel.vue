@@ -73,9 +73,10 @@ function formatJson(value: unknown): string {
   gap: 8px;
   padding: 12px;
   margin-bottom: 12px;
-  background: #ecf5ff;
-  border-radius: 8px;
-  color: $primary-color;
+  background: rgba($primary-color, 0.06);
+  border: 1px solid rgba($primary-color, 0.2);
+  border-radius: $border-radius;
+  color: $text-regular;
   font-size: 14px;
 }
 

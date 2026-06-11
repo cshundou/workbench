@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
     CurrentUser,
+    UserKeyCtx,
     get_current_tenant_id,
     get_db_session,
+    get_user_key_context,
     require_permission,
 )
 from app.core.permissions import KB_DELETE, KB_READ, KB_WRITE
@@ -207,6 +209,7 @@ async def search_knowledge_base(
     current_user: Annotated[CurrentUser, Depends(require_permission(KB_READ))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    user_ctx: Annotated[UserKeyCtx, Depends(get_user_key_context)],
 ) -> dict[str, Any]:
     """对知识库执行混合检索。"""
     await knowledge_base_service.get_knowledge_base(db, kb_id, tenant_id, current_user)
@@ -214,6 +217,7 @@ async def search_knowledge_base(
         db,
         kb_id,
         data.query,
+        user_ctx,
         top_k=data.top_k,
         filters=data.filters,
     )
@@ -233,6 +237,7 @@ async def chat_knowledge_base(
     current_user: Annotated[CurrentUser, Depends(require_permission(KB_READ))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    user_ctx: Annotated[UserKeyCtx, Depends(get_user_key_context)],
 ) -> StreamingResponse:
     """基于知识库的流式问答，使用 SSE 推送 token 与引用来源。"""
     await knowledge_base_service.get_knowledge_base(db, kb_id, tenant_id, current_user)
@@ -243,6 +248,7 @@ async def chat_knowledge_base(
                 db,
                 kb_id,
                 data.query,
+                user_ctx,
                 top_k=data.top_k,
                 filters=data.filters,
                 tenant_id=tenant_id,

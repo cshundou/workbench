@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
     CurrentUser,
+    UserKeyCtx,
     get_current_tenant_id,
     get_db_session,
+    get_user_key_context,
     require_permission,
 )
 from app.core.permissions import AGENT_DELETE, AGENT_READ, AGENT_WRITE
@@ -120,6 +122,7 @@ async def chat_agent(
     current_user: Annotated[CurrentUser, Depends(require_permission(AGENT_READ))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    user_ctx: Annotated[UserKeyCtx, Depends(get_user_key_context)],
 ) -> StreamingResponse:
     """与智能体流式对话，SSE 推送思考状态与工具调用事件。"""
     await agent_crud_service.get_agent(db, agent_id, tenant_id, current_user)
@@ -141,6 +144,7 @@ async def chat_agent(
                 db=db,
                 tenant_id=tenant_id,
                 user=current_user,
+                user_ctx=user_ctx,
                 session_id=session_id,
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"

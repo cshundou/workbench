@@ -18,7 +18,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <el-card shadow="hover" class="agent-card">
+  <el-card shadow="never" class="agent-card">
     <div class="card-header flex-between">
       <h3 class="agent-name">{{ agent.name }}</h3>
       <el-tag v-if="agent.is_public" size="small" type="success">公开</el-tag>
@@ -61,6 +61,11 @@ const emit = defineEmits<{
   height: 100%;
   display: flex;
   flex-direction: column;
+  transition: border-color 0.2s ease;
+
+  &:hover {
+    border-color: $primary-color;
+  }
 }
 
 .card-header {

@@ -10,6 +10,7 @@ from app.models.role import Role
 from app.models.tenant import Tenant
 from app.models.token_usage import TokenUsage
 from app.models.user import User
+from app.models.user_api_key import UserApiKey
 from app.models.workflow import Workflow
 from app.models.workflow_execution import WorkflowExecution
 
@@ -26,4 +27,5 @@ __all__ = [
     "WorkflowExecution",
     "ChatHistory",
     "TokenUsage",
+    "UserApiKey",
 ]

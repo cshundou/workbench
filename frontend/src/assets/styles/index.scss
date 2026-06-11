@@ -1,6 +1,37 @@
 @use 'sass:color';
 
-// 全局基础样式
+// Element Plus 主题变量（MiniMax 风格）
+:root {
+  --el-color-primary: #{$primary-color};
+  --el-color-primary-light-3: #{color.adjust($primary-color, $lightness: 12%)};
+  --el-color-primary-light-5: #{color.adjust($primary-color, $lightness: 20%)};
+  --el-color-primary-light-7: #{color.adjust($primary-color, $lightness: 28%)};
+  --el-color-primary-light-8: #{color.adjust($primary-color, $lightness: 32%)};
+  --el-color-primary-light-9: #{color.adjust($primary-color, $lightness: 36%)};
+  --el-color-primary-dark-2: #{color.adjust($primary-color, $lightness: -8%)};
+  --el-color-success: #{$success-color};
+  --el-color-warning: #{$warning-color};
+  --el-color-danger: #{$danger-color};
+  --el-color-info: #{$info-color};
+  --el-border-radius-base: #{$border-radius};
+  --el-border-radius-small: #{$border-radius};
+  --el-border-radius-round: #{$border-radius};
+  --el-border-color: #{$border-color};
+  --el-border-color-light: #{$border-color};
+  --el-border-color-lighter: #{$border-color};
+  --el-text-color-primary: #{$text-primary};
+  --el-text-color-regular: #{$text-regular};
+  --el-text-color-secondary: #{$text-secondary};
+  --el-text-color-placeholder: #{$text-placeholder};
+  --el-bg-color: #{$bg-white};
+  --el-bg-color-page: #{$bg-color};
+  --el-fill-color-blank: #{$bg-white};
+  --el-box-shadow: none;
+  --el-box-shadow-light: none;
+  --el-box-shadow-lighter: none;
+  --el-box-shadow-dark: none;
+}
+
 *,
 *::before,
 *::after {
@@ -14,16 +45,18 @@ body {
   margin: 0;
   padding: 0;
   font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
     'Helvetica Neue',
-    Helvetica,
     'PingFang SC',
-    'Hiragino Sans GB',
     'Microsoft YaHei',
-    Arial,
     sans-serif;
   font-size: 14px;
   color: $text-primary;
-  background-color: $bg-color;
+  background-color: $bg-white;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -33,11 +66,110 @@ a {
   text-decoration: none;
 
   &:hover {
-    color: color.adjust($primary-color, $lightness: 10%);
+    color: color.adjust($primary-color, $lightness: -8%);
   }
 }
 
-// Element Plus 全局微调
+// 全局组件扁平化
 .el-card {
-  border-radius: 8px;
+  border-radius: $border-radius;
+  border: 1px solid $border-color;
+  box-shadow: none !important;
+
+  &.is-hover-shadow:hover,
+  &.is-always-shadow,
+  &.is-hover-shadow:focus {
+    box-shadow: none !important;
+  }
+}
+
+.el-button {
+  border-radius: $border-radius;
+  box-shadow: none !important;
+  transition: all 0.2s ease;
+
+  &--primary {
+    --el-button-bg-color: #{$primary-color};
+    --el-button-border-color: #{$primary-color};
+    --el-button-hover-bg-color: #{color.adjust($primary-color, $lightness: -6%)};
+    --el-button-hover-border-color: #{color.adjust($primary-color, $lightness: -6%)};
+  }
+}
+
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border-radius: $border-radius;
+  box-shadow: 0 0 0 1px $border-color inset !important;
+  transition: box-shadow 0.2s ease;
+
+  &:hover {
+    box-shadow: 0 0 0 1px color.adjust($border-color, $lightness: -8%) inset !important;
+  }
+
+  &.is-focus,
+  &:focus {
+    box-shadow: 0 0 0 1px $primary-color inset !important;
+  }
+}
+
+.el-table {
+  --el-table-border-color: #{$border-color};
+  --el-table-header-bg-color: #{$bg-white};
+  --el-table-row-hover-bg-color: #{color.adjust($bg-color, $lightness: 1%)};
+  --el-table-striped-bg-color: #{$bg-white};
+
+  th.el-table__cell {
+    font-weight: 600;
+    color: $text-primary;
+  }
+}
+
+.el-dialog {
+  border-radius: $border-radius;
+  box-shadow: none;
+  border: 1px solid $border-color;
+}
+
+.el-menu {
+  border-right: none;
+}
+
+.el-pagination {
+  --el-pagination-hover-color: #{$primary-color};
+}
+
+.el-tag {
+  border-radius: $border-radius;
+}
+
+.el-alert {
+  border-radius: $border-radius;
+}
+
+// 通用工具类
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.page-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  color: $text-primary;
+}
+
+.page-desc {
+  margin: 0;
+  font-size: 14px;
+  color: $text-secondary;
+  line-height: 1.5;
 }

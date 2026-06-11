@@ -36,25 +36,25 @@ const summaryCards = computed(() => [
     title: 'Token 总消耗',
     value: tokenStats.value?.summary.total_tokens ?? 0,
     unit: 'tokens',
-    color: '#409eff',
+    color: '#FF5A1F',
   },
   {
     title: 'API 调用量',
     value: apiStats.value?.summary.total_count ?? 0,
     unit: '次',
-    color: '#67c23a',
+    color: '#1D2129',
   },
   {
     title: '平均响应时间',
     value: apiStats.value?.summary.avg_response_ms ?? 0,
     unit: 'ms',
-    color: '#e6a23c',
+    color: '#4E5969',
   },
   {
     title: '错误请求',
     value: apiStats.value?.summary.error_count ?? 0,
     unit: '次',
-    color: '#f56c6c',
+    color: '#F53F3F',
   },
 ]);
 
@@ -96,12 +96,18 @@ function buildTokenChartOption(data: TokenUsageStats): EChartsOption {
         data: items.map((item) => item.username),
         axisLabel: { rotate: 30 },
       },
-      yAxis: { type: 'value', name: 'Tokens' },
+      yAxis: {
+        type: 'value',
+        name: 'Tokens',
+        splitLine: { show: false },
+        axisLine: { lineStyle: { color: '#E5E6EB' } },
+        axisLabel: { color: '#86909C' },
+      },
       series: [
         {
           type: 'bar',
           data: items.map((item) => item.total_tokens),
-          itemStyle: { color: '#409eff' },
+          itemStyle: { color: '#FF5A1F' },
         },
       ],
     };
@@ -114,6 +120,9 @@ function buildTokenChartOption(data: TokenUsageStats): EChartsOption {
     xAxis: {
       type: 'category',
       data: items.map((item) => item.date),
+      axisLine: { lineStyle: { color: '#E5E6EB' } },
+      axisTick: { show: false },
+      axisLabel: { color: '#86909C' },
     },
     yAxis: { type: 'value', name: 'Tokens' },
     series: [
@@ -121,8 +130,8 @@ function buildTokenChartOption(data: TokenUsageStats): EChartsOption {
         type: 'line',
         smooth: true,
         data: items.map((item) => item.total_tokens),
-        areaStyle: { opacity: 0.15 },
-        itemStyle: { color: '#409eff' },
+        itemStyle: { color: '#FF5A1F' },
+        lineStyle: { width: 2 },
       },
     ],
   };
@@ -171,15 +180,15 @@ function buildApiChartOption(data: ApiStats): EChartsOption {
       data: series.map((item) => item.date),
     },
     yAxis: [
-      { type: 'value', name: '次数' },
-      { type: 'value', name: 'ms' },
+      { type: 'value', name: '次数', splitLine: { show: false }, axisLabel: { color: '#86909C' } },
+      { type: 'value', name: 'ms', splitLine: { show: false }, axisLabel: { color: '#86909C' } },
     ],
     series: [
       {
         name: '调用量',
         type: 'bar',
         data: series.map((item) => item.count),
-        itemStyle: { color: '#67c23a' },
+        itemStyle: { color: '#00B42A' },
       },
       {
         name: '平均响应(ms)',
@@ -187,7 +196,7 @@ function buildApiChartOption(data: ApiStats): EChartsOption {
         yAxisIndex: 1,
         smooth: true,
         data: series.map((item) => item.avg_response_ms),
-        itemStyle: { color: '#e6a23c' },
+        itemStyle: { color: '#FF7D00' },
       },
     ],
   };
@@ -275,7 +284,7 @@ onUnmounted(() => {
   <div v-loading="loading" class="monitor-dashboard">
     <el-row :gutter="20" class="summary-row">
       <el-col v-for="card in summaryCards" :key="card.title" :xs="24" :sm="12" :lg="6">
-        <el-card shadow="hover" class="summary-card">
+        <el-card shadow="never" class="summary-card">
           <p class="summary-title">{{ card.title }}</p>
           <p class="summary-value" :style="{ color: card.color }">
             {{ card.value }}

@@ -28,6 +28,7 @@ from app.services.rag.context_builder import ContextBuilder
 from app.services.rag.document_loader import DocumentLoader
 from app.services.rag.reranker import Reranker
 from app.services.rag.retriever import HybridRetriever
+from app.services.user_key_context import UserKeyContext, create_embeddings, user_key_resolver
 from app.services.token_usage_service import token_usage_service
 
 logger = get_logger(__name__)
@@ -46,17 +47,27 @@ class RAGService:
         self._embeddings_cache: dict[str, OpenAIEmbeddings] = {}
         Path(settings.chroma_persist_dir).mkdir(parents=True, exist_ok=True)
 
-    def _get_embeddings(self, model_name: str) -> OpenAIEmbeddings:
-        """按模型名缓存 Embeddings 实例。"""
-        if model_name not in self._embeddings_cache:
-            self._embeddings_cache[model_name] = OpenAIEmbeddings(model=model_name)
-        return self._embeddings_cache[model_name]
+    def _get_embeddings(
+        self,
+        user_ctx: UserKeyContext,
+        model_name: str,
+    ) -> OpenAIEmbeddings:
+        """按用户与模型名缓存 Embeddings 实例。"""
+        cache_key = f"{user_ctx.user_id}:{model_name}"
+        if cache_key not in self._embeddings_cache:
+            self._embeddings_cache[cache_key] = create_embeddings(user_ctx, model_name)
+        return self._embeddings_cache[cache_key]
 
     def _collection_name(self, kb_id: int) -> str:
         """生成 Chroma 集合名称。"""
         return f"kb_{kb_id}"
 
-    def get_vector_store(self, kb_id: int, embedding_model: str) -> Chroma:
+    def get_vector_store(
+        self,
+        kb_id: int,
+        embedding_model: str,
+        user_ctx: UserKeyContext,
+    ) -> Chroma:
         """
         获取或创建知识库对应的 Chroma 向量存储。
 
@@ -68,7 +79,7 @@ class RAGService:
             Chroma 向量存储实例。
         """
         if kb_id not in self._vector_stores:
-            embeddings = self._get_embeddings(embedding_model)
+            embeddings = self._get_embeddings(user_ctx, embedding_model)
             self._vector_stores[kb_id] = Chroma(
                 collection_name=self._collection_name(kb_id),
                 embedding_function=embeddings,
@@ -80,9 +91,10 @@ class RAGService:
         self,
         db: AsyncSession,
         kb: KnowledgeBase,
+        user_ctx: UserKeyContext,
     ) -> HybridRetriever:
         """获取或初始化混合检索器（含 BM25 语料）。"""
-        vector_store = self.get_vector_store(kb.id, kb.embedding_model)
+        vector_store = self.get_vector_store(kb.id, kb.embedding_model, user_ctx)
 
         if kb.id not in self._retrievers:
             retriever = HybridRetriever(vector_store)
@@ -172,6 +184,8 @@ class RAGService:
         self,
         db: AsyncSession,
         document_id: int,
+        user_id: int,
+        tenant_id: int,
         tags: Optional[list[str]] = None,
     ) -> None:
         """
@@ -180,8 +194,13 @@ class RAGService:
         Args:
             db: 数据库会话。
             document_id: 文档 ID。
+            user_id: 上传者用户 ID（用于加载 API 密钥）。
+            tenant_id: 租户 ID。
             tags: 文档标签列表。
         """
+        user_ctx = await user_key_resolver.load_context(db, user_id, tenant_id)
+        user_ctx.get_embedding_provider()
+
         self.set_parse_progress(document_id, 5, "开始解析文档")
 
         stmt = (
@@ -206,14 +225,18 @@ class RAGService:
             content = self.document_loader.load_document(document.file_path, document.file_type)
 
             base_metadata: dict[str, Any] = {"tags": tags or []}
-            chunker = IntelligentChunker(embedding_model=kb.embedding_model)
+            embeddings = self._get_embeddings(user_ctx, kb.embedding_model)
+            chunker = IntelligentChunker(
+                embedding_model=kb.embedding_model,
+                embeddings=embeddings,
+            )
             self.set_parse_progress(document_id, 35, "智能分块中")
             raw_chunks = chunker.split_document(content, base_metadata)
 
             # 删除该文档旧分块（增量更新：仅重建当前文档）
-            await self._delete_document_vectors(db, document)
+            await self._delete_document_vectors(db, document, user_ctx)
 
-            vector_store = self.get_vector_store(kb.id, kb.embedding_model)
+            vector_store = self.get_vector_store(kb.id, kb.embedding_model, user_ctx)
             parent_db_ids: dict[int, int] = {}
             saved_count = 0
             total = len(raw_chunks)
@@ -295,6 +318,7 @@ class RAGService:
         self,
         db: AsyncSession,
         document: DocumentModel,
+        user_ctx: UserKeyContext,
     ) -> None:
         """删除文档在向量库与数据库中的分块（增量更新基础）。"""
         stmt = select(DocumentChunk).where(DocumentChunk.document_id == document.id)
@@ -304,7 +328,7 @@ class RAGService:
         kb_stmt = select(KnowledgeBase).where(KnowledgeBase.id == document.kb_id)
         kb = (await db.execute(kb_stmt)).scalar_one_or_none()
         if chunks and kb:
-            vector_store = self.get_vector_store(kb.id, kb.embedding_model)
+            vector_store = self.get_vector_store(kb.id, kb.embedding_model, user_ctx)
             vector_ids = [chunk.vector_id for chunk in chunks]
             try:
                 vector_store.delete(ids=vector_ids)
@@ -322,9 +346,10 @@ class RAGService:
         self,
         db: AsyncSession,
         document: DocumentModel,
+        user_ctx: UserKeyContext,
     ) -> None:
         """对外暴露的文档向量删除接口。"""
-        await self._delete_document_vectors(db, document)
+        await self._delete_document_vectors(db, document, user_ctx)
 
     def _build_chroma_filters(self, filters: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
         """将 API 过滤条件转换为 Chroma 元数据过滤格式。"""
@@ -348,24 +373,16 @@ class RAGService:
         db: AsyncSession,
         kb_id: int,
         query: str,
+        user_ctx: UserKeyContext,
         top_k: int = 5,
         filters: Optional[dict[str, Any]] = None,
     ) -> list[dict[str, Any]]:
         """
         执行完整检索流水线：混合检索 -> 重排序。
-
-        Args:
-            db: 数据库会话。
-            kb_id: 知识库 ID。
-            query: 检索问题。
-            top_k: 返回数量。
-            filters: 元数据过滤条件。
-
-        Returns:
-            检索结果列表。
         """
+        user_ctx.get_embedding_provider()
         kb = await self._get_knowledge_base(db, kb_id)
-        hybrid_retriever = await self._get_hybrid_retriever(db, kb)
+        hybrid_retriever = await self._get_hybrid_retriever(db, kb, user_ctx)
         chroma_filters = self._build_chroma_filters(filters)
 
         retrieved = hybrid_retriever.retrieve(query, filters=chroma_filters, top_k=top_k * 2)
@@ -375,7 +392,11 @@ class RAGService:
             for doc in retrieved
         ]
 
-        reranker = Reranker(hybrid_retriever.vector_retriever)
+        cohere_key = user_ctx.get_provider("cohere")
+        reranker = Reranker(
+            hybrid_retriever.vector_retriever,
+            cohere_api_key=cohere_key.api_key if cohere_key else None,
+        )
         reranked = reranker.rerank(query, doc_dicts)
         final_docs = reranked[:top_k]
 
@@ -393,26 +414,16 @@ class RAGService:
         db: AsyncSession,
         kb_id: int,
         query: str,
+        user_ctx: UserKeyContext,
         top_k: int = 5,
         filters: Optional[dict[str, Any]] = None,
         tenant_id: Optional[int] = None,
         user_id: Optional[int] = None,
     ) -> dict[str, Any]:
-        """
-        完整 RAG 问答：检索 -> 上下文构建 -> 生成回答。
-
-        Args:
-            db: 数据库会话。
-            kb_id: 知识库 ID。
-            query: 用户问题。
-            top_k: 检索数量。
-            filters: 过滤条件。
-
-        Returns:
-            含 answer 与 sources 的字典。
-        """
+        """完整 RAG 问答：检索 -> 上下文构建 -> 生成回答。"""
+        user_ctx.get_llm_provider()
         kb = await self._get_knowledge_base(db, kb_id)
-        hybrid_retriever = await self._get_hybrid_retriever(db, kb)
+        hybrid_retriever = await self._get_hybrid_retriever(db, kb, user_ctx)
         chroma_filters = self._build_chroma_filters(filters)
 
         retrieved = hybrid_retriever.retrieve(query, filters=chroma_filters, top_k=top_k * 2)
@@ -420,13 +431,17 @@ class RAGService:
             {"page_content": doc.page_content, "metadata": doc.metadata}
             for doc in retrieved
         ]
-        reranker = Reranker(hybrid_retriever.vector_retriever)
+        cohere_key = user_ctx.get_provider("cohere")
+        reranker = Reranker(
+            hybrid_retriever.vector_retriever,
+            cohere_api_key=cohere_key.api_key if cohere_key else None,
+        )
         reranked = reranker.rerank(query, doc_dicts)[:top_k]
 
         context_builder = ContextBuilder(db)
         context, sources = await context_builder.build_context(reranked)
 
-        generator = AnswerGenerator()
+        generator = AnswerGenerator(user_ctx)
         result = generator.generate_answer(query, context, sources)
 
         if tenant_id is not None:
@@ -434,7 +449,7 @@ class RAGService:
                 db=db,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                model_name=result.get("model_name", settings.default_llm_model),
+                model_name=result.get("model_name", generator.model_name),
                 response=result.get("llm_response"),
             )
 
@@ -448,14 +463,16 @@ class RAGService:
         db: AsyncSession,
         kb_id: int,
         query: str,
+        user_ctx: UserKeyContext,
         top_k: int = 5,
         filters: Optional[dict[str, Any]] = None,
         tenant_id: Optional[int] = None,
         user_id: Optional[int] = None,
     ):
         """流式 RAG 问答生成器。"""
+        user_ctx.get_llm_provider()
         kb = await self._get_knowledge_base(db, kb_id)
-        hybrid_retriever = await self._get_hybrid_retriever(db, kb)
+        hybrid_retriever = await self._get_hybrid_retriever(db, kb, user_ctx)
         chroma_filters = self._build_chroma_filters(filters)
 
         retrieved = hybrid_retriever.retrieve(query, filters=chroma_filters, top_k=top_k * 2)
@@ -463,20 +480,24 @@ class RAGService:
             {"page_content": doc.page_content, "metadata": doc.metadata}
             for doc in retrieved
         ]
-        reranker = Reranker(hybrid_retriever.vector_retriever)
+        cohere_key = user_ctx.get_provider("cohere")
+        reranker = Reranker(
+            hybrid_retriever.vector_retriever,
+            cohere_api_key=cohere_key.api_key if cohere_key else None,
+        )
         reranked = reranker.rerank(query, doc_dicts)[:top_k]
 
         context_builder = ContextBuilder(db)
         context, sources = await context_builder.build_context(reranked)
 
-        generator = AnswerGenerator()
+        generator = AnswerGenerator(user_ctx)
         async for event in generator.generate_answer_stream(query, context, sources):
             if event.get("type") == "usage" and tenant_id is not None:
                 await token_usage_service.record_from_langchain_response(
                     db=db,
                     tenant_id=tenant_id,
                     user_id=user_id,
-                    model_name=event.get("model_name", settings.default_llm_model),
+                    model_name=event.get("model_name", generator.model_name),
                     response=event.get("llm_response"),
                 )
                 continue
@@ -496,25 +517,24 @@ class RAGService:
     async def run_parse_document_task(
         self,
         document_id: int,
+        user_id: int,
+        tenant_id: int,
         tags: Optional[list[str]] = None,
     ) -> None:
         """
         后台异步任务：在独立会话中解析文档。
-
-        Args:
-            document_id: 文档 ID。
-            tags: 文档标签。
         """
         from app.core.database import async_session_factory
 
-        # 等待主请求事务提交后再解析，避免文档记录尚未可见
         for attempt in range(10):
             async with async_session_factory() as db:
                 stmt = select(DocumentModel.id).where(DocumentModel.id == document_id)
                 exists = (await db.execute(stmt)).scalar_one_or_none()
                 if exists is not None:
                     try:
-                        await self.parse_document(db, document_id, tags=tags)
+                        await self.parse_document(
+                            db, document_id, user_id, tenant_id, tags=tags
+                        )
                         await db.commit()
                         return
                     except Exception as exc:
@@ -532,10 +552,14 @@ class RAGService:
     def schedule_parse_document(
         self,
         document_id: int,
+        user_id: int,
+        tenant_id: int,
         tags: Optional[list[str]] = None,
     ) -> None:
         """调度文档解析后台任务。"""
-        asyncio.create_task(self.run_parse_document_task(document_id, tags=tags))
+        asyncio.create_task(
+            self.run_parse_document_task(document_id, user_id, tenant_id, tags=tags)
+        )
         logger.info("已调度文档解析任务 document_id=%s", document_id)
 
 

@@ -61,19 +61,17 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", description="日志级别")
     log_dir: str = Field(default="logs", description="日志文件目录")
 
-    # AI / RAG 配置
-    openai_api_key: str = Field(default="", description="OpenAI API Key")
-    cohere_api_key: str = Field(default="", description="Cohere API Key")
+    # 加密配置（API 密钥 AES-256-GCM 加密存储）
+    encryption_secret_key: str = Field(
+        default="",
+        description="API 密钥加密主密钥（ENCRYPTION_SECRET_KEY）",
+    )
+
     chroma_persist_dir: str = Field(
         default="data/chroma",
         description="Chroma 向量库持久化目录",
     )
     upload_dir: str = Field(default="data/uploads", description="文档上传存储目录")
-    default_llm_model: str = Field(
-        default="gpt-3.5-turbo",
-        description="RAG 问答默认大模型",
-    )
-    tavily_api_key: str = Field(default="", description="Tavily 搜索 API Key")
 
     # Agent 执行配置
     agent_tool_timeout_seconds: int = Field(
