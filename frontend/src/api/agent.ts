@@ -1,4 +1,5 @@
 import request from './request';
+import { acquireStream } from '@/utils/streamPool';
 import type { PageParams, PageResult } from '@/types/api';
 
 /** 智能体信息 */
@@ -164,62 +165,20 @@ export async function getAgentSessions(
   );
 }
 
-/** POST 流式对话（fetch + ReadableStream） */
+/** POST 流式对话（统一 SSE 客户端，支持自动重连） */
 export async function chatAgentStream(
   agentId: number,
   data: AgentChatRequest,
   onMessage: (msg: AgentChatStreamMessage) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = localStorage.getItem('token');
-
-  const response = await fetch(`${baseURL}/agents/${agentId}/chat`, {
+  const body = JSON.stringify(data);
+  const { promise } = acquireStream<AgentChatStreamMessage>({
+    url: `${baseURL}/agents/${agentId}/chat`,
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(data),
+    body,
     signal,
+    onMessage,
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || `请求失败: ${response.status}`);
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error('无法读取流式响应');
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('data:')) {
-        continue;
-      }
-      const payload = trimmed.slice(5).trim();
-      if (!payload) {
-        continue;
-      }
-      try {
-        onMessage(JSON.parse(payload) as AgentChatStreamMessage);
-      } catch {
-        // 忽略非 JSON 行
-      }
-    }
-  }
+  await promise;
 }

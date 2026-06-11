@@ -1,6 +1,9 @@
 // frontend/src/utils/sse.ts
 import { ref, Ref, onUnmounted } from 'vue';
 
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_DELAY_MS = 3000;
+
 /** 解析单行 SSE data 负载 */
 export function parseSSELine(line: string): Record<string, unknown> | null {
   const trimmed = line.trim();
@@ -18,6 +21,114 @@ export function parseSSELine(line: string): Record<string, unknown> | null {
   }
 }
 
+/** 从 ReadableStream 解析 SSE 行并回调 */
+async function consumeSSEStream<T>(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onMessage: (msg: T) => void,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const parsed = parseSSELine(line);
+      if (parsed) {
+        onMessage(parsed as T);
+      }
+    }
+  }
+}
+
+export interface FetchSSEStreamOptions<T> {
+  url: string;
+  method?: 'GET' | 'POST';
+  headers?: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+  onMessage: (msg: T) => void;
+  onError?: (error: Error) => void;
+  maxReconnectAttempts?: number;
+}
+
+/**
+ * 统一 Fetch SSE 流式客户端，支持断线自动重连（默认最多 3 次）。
+ */
+export async function fetchSSEStream<T>(
+  options: FetchSSEStreamOptions<T>,
+): Promise<void> {
+  const {
+    url,
+    method = 'POST',
+    headers = {},
+    body,
+    signal,
+    onMessage,
+    onError,
+    maxReconnectAttempts = MAX_RECONNECT_ATTEMPTS,
+  } = options;
+
+  const token = localStorage.getItem('token');
+  const requestHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...headers,
+  };
+
+  let attempt = 0;
+
+  while (attempt <= maxReconnectAttempts) {
+    if (signal?.aborted) {
+      return;
+    }
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: requestHeaders,
+        body,
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text().catch(() => `请求失败: ${response.status}`));
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('无法读取流式响应');
+      }
+
+      await consumeSSEStream(reader, onMessage);
+      return;
+    } catch (error) {
+      if (signal?.aborted || (error as Error).name === 'AbortError') {
+        return;
+      }
+
+      attempt += 1;
+      if (attempt > maxReconnectAttempts) {
+        const finalError =
+          error instanceof Error ? error : new Error('SSE 流式连接失败');
+        onError?.(finalError);
+        throw finalError;
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, RECONNECT_DELAY_MS);
+      });
+    }
+  }
+}
+
 interface SSEOptions {
   url: string;
   headers?: Record<string, string>;
@@ -25,6 +136,7 @@ interface SSEOptions {
   onError?: (error: Event) => void;
   onOpen?: () => void;
   onClose?: () => void;
+  maxReconnectAttempts?: number;
 }
 
 export class SSEClient {
@@ -35,6 +147,10 @@ export class SSEClient {
   private onError?: (error: Event) => void;
   private onOpen?: () => void;
   private onClose?: () => void;
+  private maxReconnectAttempts: number;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private manualDisconnect = false;
   private isConnected: Ref<boolean> = ref(false);
   private data: Ref<string> = ref('');
   private error: Ref<Event | null> = ref(null);
@@ -46,21 +162,25 @@ export class SSEClient {
     this.onError = options.onError;
     this.onOpen = options.onOpen;
     this.onClose = options.onClose;
+    this.maxReconnectAttempts = options.maxReconnectAttempts ?? MAX_RECONNECT_ATTEMPTS;
   }
 
   connect(): void {
+    this.manualDisconnect = false;
+    this.openConnection();
+  }
+
+  private openConnection(): void {
     if (this.eventSource) {
-      this.disconnect();
+      this.eventSource.close();
+      this.eventSource = null;
     }
 
-    // 原生 EventSource 不支持自定义 headers，配置保留供后续 fetch-stream 方案扩展
     if (import.meta.env.DEV && Object.keys(this.headers).length > 0) {
       console.info('[SSE] Custom headers stored:', this.headers);
     }
 
-    // 构建带参数的URL
     const urlWithParams = new URL(this.url, window.location.origin);
-    // 添加认证token
     const token = localStorage.getItem('token');
     if (token) {
       urlWithParams.searchParams.append('token', token);
@@ -71,6 +191,7 @@ export class SSEClient {
     this.eventSource.onopen = () => {
       this.isConnected.value = true;
       this.error.value = null;
+      this.reconnectAttempts = 0;
       this.onOpen?.();
     };
 
@@ -91,10 +212,33 @@ export class SSEClient {
       this.isConnected.value = false;
       this.error.value = error;
       this.onError?.(error);
+
+      if (this.manualDisconnect) {
+        return;
+      }
+
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        return;
+      }
+
+      this.reconnectAttempts += 1;
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+      }
+      this.reconnectTimer = setTimeout(() => {
+        if (!this.manualDisconnect && !this.isConnected.value) {
+          this.openConnection();
+        }
+      }, RECONNECT_DELAY_MS);
     };
   }
 
   disconnect(): void {
+    this.manualDisconnect = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;

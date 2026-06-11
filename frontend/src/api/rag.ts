@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { ElMessage } from 'element-plus';
 import request from './request';
+import { acquireStream } from '@/utils/streamPool';
 import type { PageParams, PageResult } from '@/types/api';
 
 /** 知识库信息 */
@@ -309,7 +310,7 @@ export async function getRagChatSessions(
   );
 }
 
-/** POST 流式问答（支持 use_rag 模式切换） */
+/** POST 流式问答（统一 SSE 客户端，支持 use_rag 与自动重连） */
 export async function chatKnowledgeStream(
   kbId: number,
   data: {
@@ -322,58 +323,21 @@ export async function chatKnowledgeStream(
   onMessage: (msg: ChatStreamMessage) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = localStorage.getItem('token');
-  const response = await fetch(`${baseURL}/knowledge-bases/${kbId}/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      query: data.query,
-      use_rag: data.use_rag ?? true,
-      top_k: data.top_k ?? 5,
-      session_id: data.session_id,
-      filters: data.filters,
-    }),
-    signal,
+  const body = JSON.stringify({
+    query: data.query,
+    use_rag: data.use_rag ?? true,
+    top_k: data.top_k ?? 5,
+    session_id: data.session_id,
+    filters: data.filters,
   });
-
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error('无法读取流式响应');
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('data:')) {
-        continue;
-      }
-      const payload = trimmed.slice(5).trim();
-      if (!payload) {
-        continue;
-      }
-      try {
-        onMessage(JSON.parse(payload) as ChatStreamMessage);
-      } catch {
-        // ignore
-      }
-    }
-  }
+  const { promise } = acquireStream<ChatStreamMessage>({
+    url: `${baseURL}/knowledge-bases/${kbId}/chat`,
+    method: 'POST',
+    body,
+    signal,
+    onMessage,
+  });
+  await promise;
 }
 
 export interface SearchStats {
