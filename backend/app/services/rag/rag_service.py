@@ -588,8 +588,75 @@ class RAGService:
             vector_store.persist()
         except Exception as exc:
             logger.warning("删除知识库向量集合失败 kb_id=%s: %s", kb_id, exc)
+        self._vector_stores.pop(kb_id, None)
         self._invalidate_retriever(kb_id)
         logger.info("已清理知识库向量 kb_id=%s", kb_id)
+
+    async def rebuild_knowledge_base_vectors(
+        self,
+        db: AsyncSession,
+        kb_id: int,
+        tenant_id: int,
+        user_id: int,
+        user_ctx: UserKeyContext,
+    ) -> dict[str, Any]:
+        """
+        全量重建知识库向量：删除集合、清空分块记录并重新调度文档解析。
+
+        Args:
+            db: 数据库会话。
+            kb_id: 知识库 ID。
+            tenant_id: 租户 ID。
+            user_id: 操作用户 ID。
+            user_ctx: 用户密钥上下文。
+
+        Returns:
+            重建任务摘要。
+        """
+        kb_stmt = select(KnowledgeBase).where(
+            KnowledgeBase.id == kb_id,
+            KnowledgeBase.tenant_id == tenant_id,
+        )
+        kb = (await db.execute(kb_stmt)).scalar_one_or_none()
+        if kb is None:
+            raise NotFoundError(message="知识库不存在")
+
+        user_ctx.get_embedding_provider()
+        await self.delete_kb_vectors(kb_id, kb.embedding_model, user_ctx)
+
+        doc_stmt = select(DocumentModel).where(DocumentModel.kb_id == kb_id)
+        documents = list((await db.execute(doc_stmt)).scalars().all())
+        document_ids = [doc.id for doc in documents]
+
+        if document_ids:
+            await db.execute(
+                delete(DocumentChunk).where(
+                    DocumentChunk.document_id.in_(document_ids)
+                )
+            )
+
+        task_ids: list[str] = []
+        for document in documents:
+            document.status = 0
+            document.total_chunks = 0
+            task_id = await self.schedule_parse_document(
+                document.id,
+                user_id,
+                tenant_id,
+            )
+            task_ids.append(task_id)
+
+        await db.flush()
+        logger.info(
+            "已触发知识库向量全量重建 kb_id=%s documents=%s",
+            kb_id,
+            len(documents),
+        )
+        return {
+            "kb_id": kb_id,
+            "document_count": len(documents),
+            "task_ids": task_ids,
+        }
 
     def _build_chroma_filters(self, filters: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
         """将 API 过滤条件转换为 Chroma 元数据过滤格式。"""

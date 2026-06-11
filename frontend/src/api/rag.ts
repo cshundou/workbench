@@ -150,6 +150,19 @@ export function deleteKnowledgeBase(id: number): Promise<void> {
   return request.delete(`/knowledge-bases/${id}`) as Promise<void>;
 }
 
+/** 全量重建知识库向量 */
+export function rebuildKnowledgeBaseVectors(kbId: number): Promise<{
+  kb_id: number;
+  document_count: number;
+  task_ids: string[];
+}> {
+  return request.post(`/knowledge-bases/${kbId}/rebuild-vectors`) as Promise<{
+    kb_id: number;
+    document_count: number;
+    task_ids: string[];
+  }>;
+}
+
 /** 获取文档列表 */
 export function getDocuments(kbId: number): Promise<DocumentInfo[]> {
   return request.get(`/knowledge-bases/${kbId}/documents`) as Promise<DocumentInfo[]>;

@@ -145,6 +145,11 @@ class PineconeVectorStoreBackend(VectorStoreBackend):
             logger.warning("删除 Pinecone namespace 失败 namespace=%s: %s", self.namespace, exc)
 
 
+def get_chroma_collection_path(kb_id: int) -> str:
+    """返回 Chroma 知识库集合的持久化目录路径（用于备份脚本）。"""
+    return f"{settings.chroma_persist_dir}"
+
+
 def create_vector_store_backend(
     kb_id: int,
     embeddings: OpenAIEmbeddings,

@@ -7,7 +7,14 @@ import DocumentUploader from '@/components/knowledge/DocumentUploader.vue';
 import UrlImporter from '@/components/knowledge/UrlImporter.vue';
 import DocumentList from '@/components/knowledge/DocumentList.vue';
 import DocumentPreview from '@/components/knowledge/DocumentPreview.vue';
-import { deleteDocument, downloadDocument, getDocumentProgress, getOptimizationHints, getSearchStats } from '@/api/rag';
+import {
+  deleteDocument,
+  downloadDocument,
+  getDocumentProgress,
+  getOptimizationHints,
+  getSearchStats,
+  rebuildKnowledgeBaseVectors,
+} from '@/api/rag';
 import type { DocumentInfo, OptimizationHint, SearchStats } from '@/api/rag';
 import { useRagStore } from '@/stores/rag';
 import { useUserStore } from '@/stores/user';
@@ -27,6 +34,7 @@ const previewVisible = ref(false);
 const previewDoc = ref<DocumentInfo | null>(null);
 const searchStats = ref<SearchStats | null>(null);
 const optimizationHints = ref<OptimizationHint[]>([]);
+const rebuildLoading = ref(false);
 /** 文档解析进度映射 */
 const progressMap = ref<Record<number, number>>({});
 let progressTimer: ReturnType<typeof setInterval> | null = null;
@@ -147,6 +155,28 @@ function goChat(): void {
   router.push({ name: 'KnowledgeChat', params: { id: kbId.value } });
 }
 
+/** 全量重建向量库 */
+async function handleRebuildVectors(): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '将清空当前知识库向量并重新解析全部文档，是否继续？',
+      '全量重建确认',
+      { type: 'warning' },
+    );
+    rebuildLoading.value = true;
+    const result = await rebuildKnowledgeBaseVectors(kbId.value);
+    ElMessage.success(`已启动重建，共 ${result.document_count} 个文档`);
+    await loadData();
+    startProgressPolling();
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('[Rebuild Vectors Error]', error);
+    }
+  } finally {
+    rebuildLoading.value = false;
+  }
+}
+
 /** 从引用溯源跳转时自动打开文档预览 */
 async function openCitationPreview(): Promise<void> {
   const docId = Number(route.query.docId);
@@ -189,6 +219,13 @@ onUnmounted(() => {
     >
       <template #actions>
         <el-button text :icon="ArrowLeft" @click="goBack">返回列表</el-button>
+        <el-button
+          v-if="canWrite"
+          :loading="rebuildLoading"
+          @click="handleRebuildVectors"
+        >
+          全量重建向量
+        </el-button>
         <el-button type="primary" :icon="ChatDotRound" round @click="goChat">进入问答</el-button>
       </template>
     </SectionHeader>

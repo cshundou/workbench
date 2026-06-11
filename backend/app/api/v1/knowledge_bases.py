@@ -216,6 +216,26 @@ async def get_parse_progress(
     return success_response(data=result.model_dump())
 
 
+@router.post("/{kb_id}/rebuild-vectors", summary="全量重建向量库")
+async def rebuild_knowledge_base_vectors(
+    kb_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(KB_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    user_ctx: Annotated[UserKeyCtx, Depends(get_user_key_context)],
+) -> dict[str, Any]:
+    """清空知识库向量集合并重新解析全部文档。"""
+    await knowledge_base_service.get_knowledge_base(db, kb_id, tenant_id, current_user)
+    result = await rag_service.rebuild_knowledge_base_vectors(
+        db=db,
+        kb_id=kb_id,
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        user_ctx=user_ctx,
+    )
+    return success_response(data=result, message="向量库全量重建已启动")
+
+
 @router.post("/{kb_id}/search", summary="检索知识库")
 async def search_knowledge_base(
     kb_id: int,
