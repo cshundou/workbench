@@ -15,6 +15,7 @@ import {
 } from '@element-plus/icons-vue';
 import type { Component } from 'vue';
 import { useUserStore } from '@/stores/user';
+import { useAppConfigStore } from '@/stores/appConfig';
 import { ROUTE_PERMISSIONS } from '@/constants/permissions';
 import AppLogo from '@/components/layout/AppLogo.vue';
 import ThemeSwitch from '@/components/layout/ThemeSwitch.vue';
@@ -29,6 +30,7 @@ interface NavItem {
 const route = useRoute();
 const router = useRouter();
 const userStore = useUserStore();
+const appConfig = useAppConfigStore();
 
 const mobileMenuVisible = ref(false);
 
@@ -62,6 +64,9 @@ const topMenuItems = computed<NavItem[]>(() => {
     },
   ];
 
+  if (!userStore.isLoggedIn && appConfig.authMode === 'optional') {
+    return items;
+  }
   return items.filter(
     (item) => !item.permission || userStore.hasPermission(item.permission),
   );
@@ -170,7 +175,15 @@ async function handleLogout(): Promise<void> {
       <!-- 右侧用户区 -->
       <div class="header-right flex-center">
         <ThemeSwitch class="theme-switch" />
-        <el-dropdown trigger="click">
+        <el-button
+          v-if="!userStore.isLoggedIn"
+          type="primary"
+          round
+          @click="router.push({ name: 'Login', query: { redirect: route.fullPath } })"
+        >
+          登录
+        </el-button>
+        <el-dropdown v-else trigger="click">
           <span class="user-dropdown flex-center">
             <el-avatar :size="32" class="user-avatar">
               {{ displayName.charAt(0).toUpperCase() }}

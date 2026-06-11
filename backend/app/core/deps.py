@@ -25,6 +25,29 @@ from app.services.user_service import user_service
 logger = get_logger(__name__)
 
 
+async def get_optional_user_id(request: Request) -> Optional[str]:
+    """获取当前用户 ID，未登录时返回 None（不抛异常）。"""
+    return getattr(request.state, "user_id", None)
+
+
+async def get_optional_current_user(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Optional[User]:
+    """有 JWT 时返回用户实体，无 JWT 时返回 None。"""
+    user_id = getattr(request.state, "user_id", None)
+    payload = getattr(request.state, "token_payload", None)
+    if not user_id or not payload:
+        return None
+    tenant_id = payload.get("tenant_id")
+    if tenant_id is None:
+        return None
+    user = await user_service.get_user_by_id(db, int(user_id), int(tenant_id))
+    if user is None or user.status != 1:
+        return None
+    return user
+
+
 async def get_current_user_id(request: Request) -> str:
     """
     从 request.state 获取当前登录用户 ID。

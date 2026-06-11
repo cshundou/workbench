@@ -6,6 +6,8 @@ import axios, {
 import { ElMessage } from 'element-plus';
 import type { ApiResponse } from '@/types/api';
 import router from '@/router';
+import { shouldRedirectOn401 } from '@/router/guards';
+import { useUserStore } from '@/stores/user';
 
 /** Axios 实例：统一 baseURL、超时与拦截器 */
 const request: AxiosInstance = axios.create({
@@ -52,13 +54,17 @@ request.interceptors.response.use(
 
     if (status === 401) {
       localStorage.removeItem('token');
-      if (router.currentRoute.value.name !== 'Login') {
+      useUserStore().logout();
+      const currentRoute = router.currentRoute.value;
+      if (shouldRedirectOn401(currentRoute) && currentRoute.name !== 'Login') {
         router.push({
           name: 'Login',
-          query: { redirect: router.currentRoute.value.fullPath },
+          query: { redirect: currentRoute.fullPath },
         });
+        ElMessage.error('登录已过期，请重新登录');
+      } else {
+        ElMessage.warning('此操作需要登录');
       }
-      ElMessage.error('登录已过期，请重新登录');
     } else if (status === 428) {
       ElMessage.warning(errorMessage || '请先配置 API 密钥');
       if (router.currentRoute.value.path !== '/settings/api-keys') {

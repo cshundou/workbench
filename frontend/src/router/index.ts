@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import type { RouteRecordRaw } from 'vue-router';
-import { useUserStore } from '@/stores/user';
 import { ROUTE_PERMISSIONS } from '@/constants/permissions';
+import { authGuard } from '@/router/guards';
 
 const routes: RouteRecordRaw[] = [
   {
@@ -15,13 +15,13 @@ const routes: RouteRecordRaw[] = [
     name: 'Layout',
     component: () => import('@/views/Layout.vue'),
     redirect: '/dashboard',
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, accessLevel: 'public' },
     children: [
       {
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/Dashboard.vue'),
-        meta: { title: '控制台', icon: 'Odometer' },
+        meta: { title: '控制台', icon: 'Odometer', accessLevel: 'public' },
       },
       {
         path: 'knowledge',
@@ -30,7 +30,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '知识库',
           icon: 'Collection',
-          permission: ROUTE_PERMISSIONS.knowledge,
+          accessLevel: 'public',
         },
         children: [
           {
@@ -60,7 +60,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '智能体',
           icon: 'Cpu',
-          permission: ROUTE_PERMISSIONS.agents,
+          accessLevel: 'public',
         },
         children: [
           {
@@ -90,7 +90,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '工作流',
           icon: 'Share',
-          permission: ROUTE_PERMISSIONS.workflows,
+          accessLevel: 'public',
         },
         children: [
           {
@@ -126,7 +126,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '监控面板',
           icon: 'DataAnalysis',
-          permission: ROUTE_PERMISSIONS.monitor,
+          accessLevel: 'public',
         },
       },
       {
@@ -141,6 +141,7 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/settings/UserManagement.vue'),
             meta: {
               title: '用户管理',
+              accessLevel: 'permission',
               permission: ROUTE_PERMISSIONS.userManagement,
             },
           },
@@ -150,6 +151,7 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/settings/RoleManagement.vue'),
             meta: {
               title: '角色管理',
+              accessLevel: 'permission',
               permission: ROUTE_PERMISSIONS.roleManagement,
             },
           },
@@ -157,19 +159,19 @@ const routes: RouteRecordRaw[] = [
             path: 'api-keys',
             name: 'ApiKeys',
             component: () => import('@/views/settings/ApiKeys.vue'),
-            meta: { title: 'API 密钥管理' },
+            meta: { title: 'API 密钥管理', accessLevel: 'auth' },
           },
           {
             path: 'tenants',
             name: 'TenantManagement',
             component: () => import('@/views/settings/TenantManagement.vue'),
-            meta: { title: '租户管理', permission: 'tenant:read' },
+            meta: { title: '租户管理', accessLevel: 'permission', permission: 'tenant:read' },
           },
           {
             path: 'audit-logs',
             name: 'AuditLogs',
             component: () => import('@/views/settings/AuditLogs.vue'),
-            meta: { title: '审计日志', permission: 'audit:read' },
+            meta: { title: '审计日志', accessLevel: 'permission', permission: 'audit:read' },
           },
         ],
       },
@@ -186,56 +188,6 @@ const router = createRouter({
   routes,
 });
 
-/** 检查路由及其父级所需的权限 */
-function getRequiredPermission(route: {
-  meta: Record<string, unknown>;
-  matched: { meta: Record<string, unknown> }[];
-}): string | undefined {
-  if (route.meta.permission) {
-    return route.meta.permission as string;
-  }
-  const matched = [...route.matched].reverse();
-  for (const record of matched) {
-    if (record.meta.permission) {
-      return record.meta.permission as string;
-    }
-  }
-  return undefined;
-}
-
-// 路由守卫：认证 + 动态权限校验
-router.beforeEach(async (to, _from, next) => {
-  const userStore = useUserStore();
-
-  if (to.meta.requiresAuth !== false && !userStore.isLoggedIn) {
-    next({ name: 'Login', query: { redirect: to.fullPath } });
-    return;
-  }
-
-  if (to.name === 'Login' && userStore.isLoggedIn) {
-    next({ name: 'Dashboard' });
-    return;
-  }
-
-  // 加载用户信息
-  if (userStore.isLoggedIn && !userStore.userInfo) {
-    try {
-      await userStore.fetchUserInfo();
-    } catch {
-      userStore.logout();
-      next({ name: 'Login' });
-      return;
-    }
-  }
-
-  // 动态权限路由校验
-  const requiredPermission = getRequiredPermission(to);
-  if (requiredPermission && !userStore.hasPermission(requiredPermission)) {
-    next({ name: 'Dashboard' });
-    return;
-  }
-
-  next();
-});
+router.beforeEach(authGuard);
 
 export default router;

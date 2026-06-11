@@ -167,6 +167,44 @@ class KnowledgeBaseService:
             page_size=page_size,
         )
 
+    async def list_public_knowledge_bases(
+        self,
+        db: AsyncSession,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> KnowledgeBaseListResponse:
+        """匿名用户可访问的公开知识库列表。"""
+        public_filter = KnowledgeBase.is_public.is_(True)
+        count_stmt = (
+            select(func.count()).select_from(KnowledgeBase).where(public_filter)
+        )
+        total = (await db.execute(count_stmt)).scalar_one()
+
+        offset = (page - 1) * page_size
+        stmt = (
+            select(KnowledgeBase)
+            .where(public_filter)
+            .order_by(KnowledgeBase.id.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        kbs = (await db.execute(stmt)).scalars().all()
+
+        items: list[KnowledgeBaseResponse] = []
+        for kb in kbs:
+            doc_count_stmt = select(func.count()).select_from(Document).where(
+                Document.kb_id == kb.id
+            )
+            doc_count = (await db.execute(doc_count_stmt)).scalar_one()
+            items.append(self._to_kb_response(kb, doc_count))
+
+        return KnowledgeBaseListResponse(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
     async def create_knowledge_base(
         self,
         db: AsyncSession,

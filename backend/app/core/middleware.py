@@ -11,6 +11,7 @@ from typing import Callable, Optional
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from app.core.auth_policy import get_api_access_level
 from app.core.config import settings
 from app.core.exceptions import AppException
 from app.core.logging import get_logger
@@ -74,8 +75,14 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if request.headers.get("upgrade", "").lower() == "websocket":
             return await call_next(request)
 
+        access_level = get_api_access_level(path, request.method)
         token = _extract_bearer_token(request.headers.get("Authorization"))
+
         if not token:
+            if settings.auth_mode == "optional" and access_level == "optional":
+                request.state.user_id = None
+                request.state.token_payload = None
+                return await call_next(request)
             return JSONResponse(
                 status_code=401,
                 content=error_response(
@@ -96,10 +103,8 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 ),
             )
 
-        # 将用户信息存入 request.state，供后续依赖注入使用
         request.state.user_id = payload.get("sub")
         request.state.token_payload = payload
-
         return await call_next(request)
 
 

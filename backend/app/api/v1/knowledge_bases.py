@@ -14,10 +14,14 @@ from app.core.deps import (
     UserKeyCtx,
     get_current_tenant_id,
     get_db_session,
+    get_optional_current_user,
     get_user_key_context,
+    get_user_permissions,
     require_permission,
 )
-from app.core.permissions import KB_DELETE, KB_READ, KB_WRITE
+from app.core.exceptions import AuthorizationError
+from app.core.permissions import KB_DELETE, KB_READ, KB_WRITE, has_permission
+from app.models.user import User
 from app.core.response import success_response
 from app.schemas.knowledge_base import (
     ChatRequest,
@@ -34,16 +38,23 @@ router = APIRouter(prefix="/knowledge-bases", tags=["知识库管理"])
 
 @router.get("", summary="获取知识库列表")
 async def list_knowledge_bases(
-    current_user: Annotated[CurrentUser, Depends(require_permission(KB_READ))],
-    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User | None, Depends(get_optional_current_user)],
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
 ) -> dict[str, Any]:
-    """分页查询当前用户可访问的知识库列表。"""
-    result = await knowledge_base_service.list_knowledge_bases(
-        db, tenant_id, current_user, page, page_size
-    )
+    """分页查询知识库；未登录时仅返回公开知识库。"""
+    if current_user is None:
+        result = await knowledge_base_service.list_public_knowledge_bases(
+            db, page, page_size
+        )
+    else:
+        permissions = get_user_permissions(current_user)
+        if not has_permission(permissions, KB_READ):
+            raise AuthorizationError(message="权限不足", error=f"Required permission: {KB_READ}")
+        result = await knowledge_base_service.list_knowledge_bases(
+            db, current_user.tenant_id, current_user, page, page_size
+        )
     return success_response(data=result.model_dump())
 
 
