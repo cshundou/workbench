@@ -3,6 +3,7 @@ RAG 编排服务：串联 7 层架构，管理 Chroma 向量库与增量更新�
 """
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
+from app.core.redis import get_redis
 from app.models.document import Document as DocumentModel
 from app.models.document_chunk import DocumentChunk
 from app.models.knowledge_base import KnowledgeBase
@@ -33,8 +35,9 @@ from app.services.token_usage_service import token_usage_service
 
 logger = get_logger(__name__)
 
-# 文档解析进度缓存（document_id -> progress info）
-_parse_progress: dict[int, dict[str, Any]] = {}
+# 文档解析进度 Redis 键前缀与 TTL（秒）
+PARSE_PROGRESS_KEY_PREFIX = "parse_progress:"
+PARSE_PROGRESS_TTL_SECONDS = 86400
 
 
 class RAGService:
@@ -129,30 +132,68 @@ class RAGService:
         self._retrievers.pop(kb_id, None)
 
     @staticmethod
-    def set_parse_progress(
+    def _parse_progress_key(document_id: int) -> str:
+        """生成文档解析进度 Redis 键。"""
+        return f"{PARSE_PROGRESS_KEY_PREFIX}{document_id}"
+
+    @staticmethod
+    async def set_parse_progress(
         document_id: int,
         progress: int,
         message: str,
         status: str = "processing",
     ) -> None:
-        """更新文档解析进度。"""
-        _parse_progress[document_id] = {
+        """更新文档解析进度到 Redis（key: parse_progress:{doc_id}）。"""
+        payload = {
             "document_id": document_id,
             "progress": progress,
             "message": message,
             "status": status,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        try:
+            redis = await get_redis()
+            await redis.set(
+                RAGService._parse_progress_key(document_id),
+                json.dumps(payload, ensure_ascii=False),
+                ex=PARSE_PROGRESS_TTL_SECONDS,
+            )
+        except Exception as exc:
+            logger.error(
+                "写入解析进度到 Redis 失败 document_id=%s: %s",
+                document_id,
+                exc,
+            )
 
     @staticmethod
-    def get_parse_progress(document_id: int) -> Optional[dict[str, Any]]:
-        """获取文档解析进度。"""
-        return _parse_progress.get(document_id)
+    async def get_parse_progress(document_id: int) -> Optional[dict[str, Any]]:
+        """从 Redis 获取文档解析进度。"""
+        try:
+            redis = await get_redis()
+            raw = await redis.get(RAGService._parse_progress_key(document_id))
+            if raw is None:
+                return None
+            return json.loads(raw)
+        except Exception as exc:
+            logger.error(
+                "读取解析进度失败 document_id=%s: %s",
+                document_id,
+                exc,
+            )
+            return None
 
     @staticmethod
-    def clear_parse_progress(document_id: int) -> None:
-        """清除文档解析进度缓存。"""
-        _parse_progress.pop(document_id, None)
+    async def clear_parse_progress(document_id: int) -> None:
+        """清除 Redis 中的文档解析进度。"""
+        try:
+            redis = await get_redis()
+            await redis.delete(RAGService._parse_progress_key(document_id))
+        except Exception as exc:
+            logger.error(
+                "清除解析进度失败 document_id=%s: %s",
+                document_id,
+                exc,
+            )
 
     def _build_chunk_metadata(
         self,
@@ -201,7 +242,7 @@ class RAGService:
         user_ctx = await user_key_resolver.load_context(db, user_id, tenant_id)
         user_ctx.get_embedding_provider()
 
-        self.set_parse_progress(document_id, 5, "开始解析文档")
+        await self.set_parse_progress(document_id, 5, "开始解析文档")
 
         stmt = (
             select(DocumentModel)
@@ -221,7 +262,7 @@ class RAGService:
             raise NotFoundError(message="知识库不存在")
 
         try:
-            self.set_parse_progress(document_id, 15, "加载文档内容")
+            await self.set_parse_progress(document_id, 15, "加载文档内容")
             content = self.document_loader.load_document(document.file_path, document.file_type)
 
             base_metadata: dict[str, Any] = {"tags": tags or []}
@@ -229,8 +270,10 @@ class RAGService:
             chunker = IntelligentChunker(
                 embedding_model=kb.embedding_model,
                 embeddings=embeddings,
+                chunk_size=kb.chunk_size,
+                chunk_overlap=kb.chunk_overlap,
             )
-            self.set_parse_progress(document_id, 35, "智能分块中")
+            await self.set_parse_progress(document_id, 35, "智能分块中")
             raw_chunks = chunker.split_document(content, base_metadata)
 
             # 删除该文档旧分块（增量更新：仅重建当前文档）
@@ -289,14 +332,16 @@ class RAGService:
                 )
                 saved_count += 1
                 progress = 35 + int((saved_count / max(total, 1)) * 55)
-                self.set_parse_progress(document_id, progress, f"向量化中 ({saved_count}/{total})")
+                await self.set_parse_progress(
+                    document_id, progress, f"向量化中 ({saved_count}/{total})"
+                )
 
             document.status = 1
             document.total_chunks = saved_count
             self._invalidate_retriever(kb.id)
             vector_store.persist()
 
-            self.set_parse_progress(document_id, 100, "解析完成", status="completed")
+            await self.set_parse_progress(document_id, 100, "解析完成", status="completed")
             logger.info(
                 "文档解析完成 document_id=%s chunks=%s kb_id=%s",
                 document_id,
@@ -305,7 +350,7 @@ class RAGService:
             )
         except Exception as exc:
             document.status = 2
-            self.set_parse_progress(
+            await self.set_parse_progress(
                 document_id,
                 0,
                 f"解析失败: {exc}",

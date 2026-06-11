@@ -448,6 +448,7 @@ class WorkflowService:
 
         try:
             user_ctx = None
+            graph_definition: dict[str, Any] | None = None
             async with async_session_factory() as db:
                 stmt = select(WorkflowExecution).where(
                     WorkflowExecution.id == execution_id
@@ -455,6 +456,11 @@ class WorkflowService:
                 result = await db.execute(stmt)
                 execution = result.scalar_one()
                 execution.status = "running"
+
+                wf_stmt = select(Workflow).where(Workflow.id == workflow_id)
+                workflow = (await db.execute(wf_stmt)).scalar_one()
+                graph_definition = workflow.graph_definition
+
                 user_ctx = await user_key_resolver.load_context(
                     db, user_id, tenant_id
                 )
@@ -467,7 +473,7 @@ class WorkflowService:
             require_human = bool(input_params.get("require_human_approval"))
             builder = WorkflowBuilder(settings.redis_url, user_ctx=user_ctx)
             builder.set_status_callback(status_callback)
-            graph = builder.build_standard_workflow(require_human=require_human)
+            graph = builder.build_workflow(graph_definition, require_human=require_human)
 
             initial_state = {
                 "messages": [],
@@ -530,6 +536,13 @@ class WorkflowService:
                 result = await db.execute(stmt)
                 execution = result.scalar_one()
                 execution.status = "running"
+
+                wf_stmt = select(Workflow).where(
+                    Workflow.id == execution.workflow_id
+                )
+                workflow = (await db.execute(wf_stmt)).scalar_one()
+                graph_definition = workflow.graph_definition
+
                 user_ctx = await user_key_resolver.load_context(
                     db, execution.created_by, tenant_id
                 )
@@ -538,7 +551,7 @@ class WorkflowService:
             require_human = bool(input_params.get("require_human_approval"))
             builder = WorkflowBuilder(settings.redis_url, user_ctx=user_ctx)
             builder.set_status_callback(status_callback)
-            graph = builder.build_standard_workflow(require_human=require_human)
+            graph = builder.build_workflow(graph_definition, require_human=require_human)
 
             resume_state = {
                 "human_approved": True,

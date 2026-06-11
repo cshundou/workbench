@@ -5,9 +5,11 @@ LangGraph 多智能体工作流构建器。
 以及文档 5.3.3 人工介入节点与 Redis 状态持久化。
 """
 
+import asyncio
 import json
 import logging
 import operator
+import re
 from datetime import datetime, timezone
 from typing import Annotated, Any, Callable, Optional, Sequence, TypedDict
 
@@ -16,10 +18,13 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph import END, StateGraph
 
 from app.core.config import settings
+from app.core.exceptions import ValidationError
 from app.services.user_key_context import UserKeyContext, create_chat_llm
 from app.services.workflow.redis_saver import RedisSaver
 
 logger = logging.getLogger(__name__)
+
+EXECUTION_TIMEOUT_SECONDS = 30
 
 # 标准工作流拓扑（供前端 vue-flow 渲染）
 STANDARD_GRAPH_DEFINITION: dict[str, Any] = {
@@ -75,6 +80,10 @@ STANDARD_GRAPH_DEFINITION: dict[str, Any] = {
 NODE_LABELS: dict[str, str] = {
     node["id"]: node["label"] for node in STANDARD_GRAPH_DEFINITION["nodes"]
 }
+
+VALID_NODE_TYPES = frozenset(
+    {"scheduler", "knowledge", "search", "execution", "human", "reviewer"}
+)
 
 
 class AgentState(TypedDict):
@@ -202,6 +211,177 @@ class WorkflowBuilder:
 
         return workflow.compile(checkpointer=self.checkpointer)
 
+    def validate_graph_definition(self, definition: dict[str, Any]) -> None:
+        """
+        校验自定义工作流图定义。
+
+        要求：有且仅有一个 scheduler 入口、节点类型合法、边引用有效、无环（DAG）。
+        """
+        nodes = definition.get("nodes") or []
+        edges = definition.get("edges") or []
+
+        if not nodes:
+            raise ValidationError(message="工作流图定义不能为空")
+
+        node_ids: set[str] = set()
+        scheduler_ids: list[str] = []
+
+        for node in nodes:
+            node_id = node.get("id")
+            node_type = node.get("type")
+            if not node_id or not isinstance(node_id, str):
+                raise ValidationError(message="节点 id 无效")
+            if node_type not in VALID_NODE_TYPES:
+                raise ValidationError(message=f"不支持的节点类型: {node_type}")
+            if node_id in node_ids:
+                raise ValidationError(message=f"重复的节点 id: {node_id}")
+            node_ids.add(node_id)
+            if node_type == "scheduler":
+                scheduler_ids.append(node_id)
+
+        if len(scheduler_ids) != 1:
+            raise ValidationError(message="必须有且仅有一个 scheduler 入口节点")
+
+        for edge in edges:
+            source = edge.get("source")
+            target = edge.get("target")
+            if source not in node_ids or target not in node_ids:
+                raise ValidationError(message="边引用了不存在的节点")
+
+        adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
+        for edge in edges:
+            adjacency[edge["source"]].append(edge["target"])
+
+        visited: set[str] = set()
+        recursion_stack: set[str] = set()
+
+        def _has_cycle(node_id: str) -> bool:
+            visited.add(node_id)
+            recursion_stack.add(node_id)
+            for neighbor in adjacency.get(node_id, []):
+                if neighbor not in visited:
+                    if _has_cycle(neighbor):
+                        return True
+                elif neighbor in recursion_stack:
+                    return True
+            recursion_stack.remove(node_id)
+            return False
+
+        for node_id in node_ids:
+            if node_id not in visited and _has_cycle(node_id):
+                raise ValidationError(message="工作流图存在环，仅支持 DAG")
+
+    def build_from_definition(
+        self,
+        definition: dict[str, Any],
+        require_human: bool = False,
+    ):
+        """
+        根据 graph_definition 构建 LangGraph 工作流。
+
+        无自定义定义或校验失败时由调用方回退标准拓扑。
+        """
+        self.validate_graph_definition(definition)
+
+        nodes: list[dict[str, Any]] = definition["nodes"]
+        edges: list[dict[str, Any]] = definition.get("edges") or []
+
+        global NODE_LABELS
+        NODE_LABELS = {
+            node["id"]: node.get("label", node["id"]) for node in nodes
+        }
+
+        type_to_node_id: dict[str, str] = {}
+        for node in nodes:
+            node_type = node["type"]
+            if node_type not in type_to_node_id:
+                type_to_node_id[node_type] = node["id"]
+
+        scheduler_id = type_to_node_id["scheduler"]
+        human_id = type_to_node_id.get("human")
+        reviewer_id = type_to_node_id.get("reviewer")
+
+        handler_map = {
+            "scheduler": self.scheduler_node,
+            "knowledge": self.knowledge_agent_node,
+            "search": self.search_agent_node,
+            "execution": self.execution_agent_node,
+            "human": self.human_intervention_node,
+            "reviewer": self.reviewer_node,
+        }
+
+        workflow = StateGraph(AgentState)
+        for node in nodes:
+            workflow.add_node(node["id"], handler_map[node["type"]])
+
+        workflow.set_entry_point(scheduler_id)
+
+        scheduler_targets: dict[str, Any] = {"end": END}
+        for route_key, node_type in (
+            ("knowledge", "knowledge"),
+            ("search", "search"),
+            ("execution", "execution"),
+        ):
+            target_id = type_to_node_id.get(node_type)
+            scheduler_targets[route_key] = target_id if target_id else END
+
+        review_target = human_id or reviewer_id or END
+        scheduler_targets["review"] = review_target
+
+        workflow.add_conditional_edges(
+            scheduler_id,
+            self.route_after_scheduler,
+            scheduler_targets,
+        )
+
+        agent_types = {"knowledge", "search", "execution"}
+        edges_by_source: dict[str, list[str]] = {}
+        for edge in edges:
+            edges_by_source.setdefault(edge["source"], []).append(edge["target"])
+
+        for node in nodes:
+            if node["type"] not in agent_types:
+                continue
+            node_id = node["id"]
+            outgoing = edges_by_source.get(node_id, [])
+            if outgoing:
+                for target in outgoing:
+                    workflow.add_edge(node_id, target)
+            elif human_id:
+                workflow.add_edge(node_id, human_id)
+            elif reviewer_id:
+                workflow.add_edge(node_id, reviewer_id)
+            else:
+                workflow.add_edge(node_id, END)
+
+        if human_id:
+            workflow.add_conditional_edges(
+                human_id,
+                self.route_after_human_intervention,
+                {
+                    "continue": reviewer_id or END,
+                    "end": END,
+                },
+            )
+
+        if reviewer_id:
+            workflow.add_edge(reviewer_id, END)
+
+        return workflow.compile(checkpointer=self.checkpointer)
+
+    def build_workflow(
+        self,
+        graph_definition: dict[str, Any] | None,
+        require_human: bool = False,
+    ):
+        """优先使用 graph_definition 构建工作流，否则回退标准拓扑。"""
+        if graph_definition and graph_definition.get("nodes"):
+            try:
+                return self.build_from_definition(graph_definition, require_human)
+            except ValidationError:
+                logger.warning("自定义图定义无效，回退标准工作流拓扑")
+        return self.build_standard_workflow(require_human=require_human)
+
     def _create_llm(self):
         """创建 LLM 实例，无用户密钥时返回 None。"""
         if self.user_ctx is None or not self.user_ctx.has_llm_key:
@@ -215,10 +395,15 @@ class WorkflowBuilder:
     def scheduler_node(self, state: AgentState) -> AgentState:
         """调度中心节点：任务拆解与分配。"""
         node_id = "scheduler"
-        self._append_log(node_id, "running", input_data={"task": state.get("task")})
         state = dict(state)
         state.setdefault("results", {})
         state.setdefault("subtasks", [])
+        self._append_log(
+            state,
+            node_id,
+            "running",
+            input_data={"task": state.get("task")},
+        )
 
         llm = self._create_llm()
         prompt = f"""
@@ -253,6 +438,7 @@ class WorkflowBuilder:
             state["current_step"] = "scheduler_completed"
             state["status"] = "running"
             self._append_log(
+                state,
                 node_id,
                 "completed",
                 output_data={"subtasks": subtasks},
@@ -261,7 +447,7 @@ class WorkflowBuilder:
             logger.exception("任务拆解失败: %s", exc)
             state["error"] = f"任务拆解失败: {exc}"
             state["status"] = "failed"
-            self._append_log(node_id, "failed", error=str(exc))
+            self._append_log(state, node_id, "failed", error=str(exc))
 
         return state
 
@@ -291,6 +477,7 @@ class WorkflowBuilder:
             None,
         )
         self._append_log(
+            state,
             node_id,
             "running",
             input_data={"task": knowledge_task},
@@ -306,6 +493,7 @@ class WorkflowBuilder:
                     result = f"[知识库模拟结果] 关于「{query}」的内部资料检索完成。"
                 state.setdefault("results", {})["knowledge"] = result
             self._append_log(
+                state,
                 node_id,
                 "completed",
                 output_data={"result": state.get("results", {}).get("knowledge")},
@@ -313,7 +501,7 @@ class WorkflowBuilder:
         except Exception as exc:
             logger.exception("知识库查询失败: %s", exc)
             state.setdefault("results", {})["knowledge"] = f"查询失败: {exc}"
-            self._append_log(node_id, "failed", error=str(exc))
+            self._append_log(state, node_id, "failed", error=str(exc))
 
         return state
 
@@ -357,7 +545,12 @@ class WorkflowBuilder:
             (t for t in state.get("subtasks", []) if t.get("agent") == "search"),
             None,
         )
-        self._append_log(node_id, "running", input_data={"task": search_task})
+        self._append_log(
+            state,
+            node_id,
+            "running",
+            input_data={"task": search_task},
+        )
 
         try:
             if search_task:
@@ -365,6 +558,7 @@ class WorkflowBuilder:
                 result = self._web_search(query)
                 state.setdefault("results", {})["search"] = result
             self._append_log(
+                state,
                 node_id,
                 "completed",
                 output_data={"result": state.get("results", {}).get("search")},
@@ -372,7 +566,7 @@ class WorkflowBuilder:
         except Exception as exc:
             logger.exception("联网搜索失败: %s", exc)
             state.setdefault("results", {})["search"] = f"搜索失败: {exc}"
-            self._append_log(node_id, "failed", error=str(exc))
+            self._append_log(state, node_id, "failed", error=str(exc))
 
         return state
 
@@ -401,30 +595,136 @@ class WorkflowBuilder:
             logger.warning("Tavily 搜索失败: %s", exc)
             return f"[联网搜索模拟结果] 关于「{query}」的外部信息检索完成。"
 
+    def _resolve_execution_tool_type(self, execution_task: dict[str, Any]) -> str:
+        """根据子任务配置或描述推断执行工具类型（python / sql）。"""
+        tool_type = execution_task.get("tool_type")
+        if tool_type in ("python", "sql"):
+            return tool_type
+
+        task_text = execution_task.get("task", "").lower()
+        sql_keywords = ("sql", "select", "数据库", "查询表", "查询用户", "统计")
+        if any(keyword in task_text for keyword in sql_keywords):
+            return "sql"
+        return "python"
+
+    async def _generate_python_code(self, task_desc: str) -> str:
+        """将自然语言任务转换为可执行 Python 代码。"""
+        if any(
+            keyword in task_desc
+            for keyword in ("def ", "import ", "print(", "for ", "while ", "=")
+        ):
+            return task_desc
+
+        llm = self._create_llm()
+        if llm is None:
+            return f"print({json.dumps(task_desc, ensure_ascii=False)})"
+
+        prompt = f"""
+将以下任务转换为可执行的 Python 代码，只输出代码，不要解释。
+禁止使用 os、subprocess、socket 等危险模块。
+
+任务：{task_desc}
+"""
+        response = llm.invoke(prompt)
+        content = response.content
+        code = content if isinstance(content, str) else str(content)
+        if code.startswith("```"):
+            code = re.sub(r"^```\w*\n?", "", code.strip())
+            code = re.sub(r"\n?```$", "", code)
+        return code.strip()
+
+    def _format_execution_result(self, tool_type: str, result: Any) -> str:
+        """格式化工具执行结果为工作流可读文本。"""
+        content = result.content or {}
+        if tool_type == "sql":
+            return (
+                f"SQL: {content.get('sql', '')}\n"
+                f"结果 ({content.get('row_count', 0)} 行):\n"
+                f"{json.dumps(content.get('rows', []), ensure_ascii=False, default=str)}"
+            )
+        return str(content.get("result", content))
+
+    async def _run_execution_task_async(self, execution_task: dict[str, Any]) -> str:
+        """异步调用 PythonReplTool 或 SqlQueryTool 执行子任务。"""
+        from app.core.database import async_session_factory
+        from app.services.agent.tools.python_repl import PythonReplTool
+        from app.services.agent.tools.sql_query import SqlQueryTool
+
+        task_desc = execution_task.get("task", "")
+        tool_type = self._resolve_execution_tool_type(execution_task)
+
+        async with async_session_factory() as db:
+            if tool_type == "sql":
+                if self.user_ctx is None:
+                    raise RuntimeError("未配置 API 密钥，无法执行 SQL 查询")
+                tool = SqlQueryTool(db, self.user_ctx)
+                tool_result = await asyncio.wait_for(
+                    tool.execute({"question": task_desc}),
+                    timeout=EXECUTION_TIMEOUT_SECONDS,
+                )
+            else:
+                code = await self._generate_python_code(task_desc)
+                tool = PythonReplTool()
+                tool_result = await asyncio.wait_for(
+                    tool.execute({"code": code}),
+                    timeout=EXECUTION_TIMEOUT_SECONDS,
+                )
+
+        if not tool_result.success:
+            raise RuntimeError(tool_result.error or "执行工具返回失败")
+        return self._format_execution_result(tool_type, tool_result)
+
+    def _run_execution_task(self, execution_task: dict[str, Any]) -> str:
+        """在同步工作流节点中运行异步执行逻辑。"""
+
+        async def _run() -> str:
+            return await self._run_execution_task_async(execution_task)
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, _run())
+                    return future.result(timeout=EXECUTION_TIMEOUT_SECONDS + 5)
+            return asyncio.run(_run())
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(f"执行超时（{EXECUTION_TIMEOUT_SECONDS}秒）") from exc
+
     def execution_agent_node(self, state: AgentState) -> AgentState:
-        """执行 Agent 节点：代码与计算执行。"""
+        """执行 Agent 节点：调用 PythonReplTool / SqlQueryTool。"""
         node_id = "execution_agent"
         state = dict(state)
         execution_task = next(
             (t for t in state.get("subtasks", []) if t.get("agent") == "execution"),
             None,
         )
-        self._append_log(node_id, "running", input_data={"task": execution_task})
+        self._append_log(
+            state,
+            node_id,
+            "running",
+            input_data={"task": execution_task},
+        )
 
         try:
             if execution_task:
                 task_desc = execution_task.get("task", state["task"])
-                result = f"[执行模拟结果] 已完成任务「{task_desc}」的计算与处理。"
+                result = self._run_execution_task(
+                    {**execution_task, "task": task_desc},
+                )
                 state.setdefault("results", {})["execution"] = result
             self._append_log(
+                state,
                 node_id,
                 "completed",
                 output_data={"result": state.get("results", {}).get("execution")},
             )
         except Exception as exc:
             logger.exception("执行节点失败: %s", exc)
+            state["error"] = f"执行失败: {exc}"
             state.setdefault("results", {})["execution"] = f"执行失败: {exc}"
-            self._append_log(node_id, "failed", error=str(exc))
+            self._append_log(state, node_id, "failed", error=str(exc))
 
         return state
 
@@ -443,6 +743,7 @@ class WorkflowBuilder:
         state["status"] = "waiting_for_human"
         state["current_step"] = "human_intervention"
         self._append_log(
+            state,
             node_id,
             "waiting",
             input_data={"results": state.get("results")},
@@ -455,6 +756,7 @@ class WorkflowBuilder:
         node_id = "reviewer"
         state = dict(state)
         self._append_log(
+            state,
             node_id,
             "running",
             input_data={"results": state.get("results")},
@@ -487,6 +789,7 @@ class WorkflowBuilder:
             state["status"] = "completed"
             state["current_step"] = "reviewer_completed"
             self._append_log(
+                state,
                 node_id,
                 "completed",
                 output_data={"final": final_answer},
@@ -495,7 +798,7 @@ class WorkflowBuilder:
             logger.exception("审核节点失败: %s", exc)
             state["error"] = f"审核失败: {exc}"
             state["status"] = "failed"
-            self._append_log(node_id, "failed", error=str(exc))
+            self._append_log(state, node_id, "failed", error=str(exc))
 
         return state
 

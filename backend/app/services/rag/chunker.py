@@ -21,7 +21,11 @@ class IntelligentChunker:
         self,
         embedding_model: str = "text-embedding-ada-002",
         embeddings: OpenAIEmbeddings | None = None,
+        chunk_size: int = 512,
+        chunk_overlap: int = 100,
     ) -> None:
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
         self.embeddings = embeddings or OpenAIEmbeddings(model=embedding_model)
         self.semantic_chunker = SemanticChunker(
             self.embeddings,
@@ -29,8 +33,8 @@ class IntelligentChunker:
             breakpoint_threshold_amount=95,
         )
         self.recursive_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=512,
-            chunk_overlap=100,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
             separators=["\n\n", "\n", ". ", " ", ""],
         )
 
@@ -50,7 +54,7 @@ class IntelligentChunker:
         final_chunks: list[dict[str, Any]] = []
 
         for index, chunk in enumerate(semantic_chunks):
-            if len(chunk) > 1024:
+            if len(chunk) > self.chunk_size * 2:
                 sub_chunks = self.recursive_splitter.split_text(chunk)
                 for sub_index, sub_chunk in enumerate(sub_chunks):
                     final_chunks.append(

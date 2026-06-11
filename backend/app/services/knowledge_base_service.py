@@ -360,7 +360,7 @@ class KnowledgeBaseService:
         db.add(document)
         await db.flush()
 
-        rag_service.set_parse_progress(document.id, 0, "等待解析", status="pending")
+        await rag_service.set_parse_progress(document.id, 0, "等待解析", status="pending")
         rag_service.schedule_parse_document(
             document.id,
             user.id,
@@ -446,7 +446,7 @@ class KnowledgeBaseService:
             except OSError as exc:
                 logger.warning("删除文件失败: %s", exc)
 
-        rag_service.clear_parse_progress(doc_id)
+        await rag_service.clear_parse_progress(doc_id)
         await db.delete(document)
         logger.info("删除文档 document_id=%s kb_id=%s", doc_id, kb_id)
 
@@ -460,7 +460,7 @@ class KnowledgeBaseService:
     ) -> ParseProgressResponse:
         """查询文档解析进度。"""
         document = await self.get_document(db, kb_id, doc_id, tenant_id, user)
-        progress_info = rag_service.get_parse_progress(doc_id)
+        progress_info = await rag_service.get_parse_progress(doc_id)
 
         if progress_info:
             return ParseProgressResponse(
