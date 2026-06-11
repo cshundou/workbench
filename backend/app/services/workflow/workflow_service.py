@@ -61,6 +61,7 @@ class WorkflowService:
             is_public=workflow.is_public,
             status=workflow.status,
             published_at=workflow.published_at,
+            current_version=workflow.current_version,
             created_at=workflow.created_at,
             updated_at=workflow.updated_at,
         )
@@ -383,19 +384,31 @@ class WorkflowService:
         )
         logger.info("删除工作流 id=%s", workflow_id)
 
+    @staticmethod
+    def _next_semantic_version(current: Optional[str]) -> str:
+        """生成下一个语义化版本号。"""
+        if not current:
+            return "v1.0.0"
+        try:
+            raw = current.lstrip("v")
+            major, minor, patch = [int(part) for part in raw.split(".")]
+            return f"v{major}.{minor}.{patch + 1}"
+        except (ValueError, TypeError):
+            return "v1.0.0"
+
     async def publish_workflow(
         self,
         db: AsyncSession,
         workflow_id: int,
         tenant_id: int,
         user: User,
+        change_note: Optional[str] = None,
     ) -> WorkflowResponse:
-        """发布工作流模板（草稿 -> 已发布）。"""
+        """发布工作流模板并创建新版本快照。"""
+        from app.models.workflow_version import WorkflowVersion
+
         workflow = await self._get_workflow_or_raise(db, workflow_id, tenant_id)
         await self._check_workflow_access(workflow, user, require_owner=True)
-
-        if workflow.status == "published":
-            raise ValidationError(message="工作流已发布")
 
         validation = self.validate_graph_definition(workflow.graph_definition)
         if not validation["valid"]:
@@ -404,8 +417,20 @@ class WorkflowService:
                 error="; ".join(validation["errors"]),
             )
 
+        next_version = self._next_semantic_version(workflow.current_version)
+        version_record = WorkflowVersion(
+            workflow_id=workflow.id,
+            version=next_version,
+            graph_definition=dict(workflow.graph_definition),
+            change_note=change_note,
+            published_by=user.id,
+            published_at=datetime.now(timezone.utc),
+        )
+        db.add(version_record)
+
         workflow.status = "published"
         workflow.published_at = datetime.now(timezone.utc)
+        workflow.current_version = next_version
         await db.flush()
         await db.refresh(workflow)
 
@@ -418,12 +443,93 @@ class WorkflowService:
             resource_id=workflow.id,
             detail={
                 "name": workflow.name,
+                "version": next_version,
                 "success": True,
                 "result": "published",
             },
         )
-        logger.info("发布工作流 id=%s", workflow_id)
+        logger.info("发布工作流 id=%s version=%s", workflow_id, next_version)
         return self._to_workflow_response(workflow)
+
+    async def list_workflow_versions(
+        self,
+        db: AsyncSession,
+        workflow_id: int,
+        tenant_id: int,
+    ) -> list[dict[str, Any]]:
+        """查询工作流版本历史。"""
+        from app.models.workflow_version import WorkflowVersion
+
+        await self._get_workflow_or_raise(db, workflow_id, tenant_id)
+        stmt = (
+            select(WorkflowVersion)
+            .where(WorkflowVersion.workflow_id == workflow_id)
+            .order_by(WorkflowVersion.published_at.desc())
+        )
+        result = await db.execute(stmt)
+        return [
+            {
+                "id": item.id,
+                "version": item.version,
+                "change_note": item.change_note,
+                "published_by": item.published_by,
+                "published_at": item.published_at.isoformat() if item.published_at else None,
+            }
+            for item in result.scalars().all()
+        ]
+
+    async def rollback_workflow_version(
+        self,
+        db: AsyncSession,
+        workflow_id: int,
+        version_id: int,
+        tenant_id: int,
+        user: User,
+        change_note: Optional[str] = None,
+    ) -> WorkflowResponse:
+        """回滚到历史版本（创建新版本，不修改历史）。"""
+        from app.models.workflow_version import WorkflowVersion
+
+        workflow = await self._get_workflow_or_raise(db, workflow_id, tenant_id)
+        await self._check_workflow_access(workflow, user, require_owner=True)
+
+        stmt = select(WorkflowVersion).where(
+            WorkflowVersion.id == version_id,
+            WorkflowVersion.workflow_id == workflow_id,
+        )
+        target = (await db.execute(stmt)).scalar_one_or_none()
+        if target is None:
+            raise NotFoundError(message="版本不存在")
+
+        workflow.graph_definition = dict(target.graph_definition)
+        await db.flush()
+        return await self.publish_workflow(
+            db,
+            workflow_id,
+            tenant_id,
+            user,
+            change_note=change_note or f"回滚自 {target.version}",
+        )
+
+    async def export_execution_logs(
+        self,
+        db: AsyncSession,
+        execution_id: int,
+        tenant_id: int,
+        node_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """导出工作流执行日志为 JSON。"""
+        execution = await self._get_execution_or_raise(db, execution_id, tenant_id)
+        logs = list(execution.execution_logs or [])
+        if node_id:
+            logs = [log for log in logs if log.get("node_id") == node_id]
+        return {
+            "execution_id": execution.id,
+            "workflow_id": execution.workflow_id,
+            "status": execution.status,
+            "logs": logs,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     async def list_executions(
         self,

@@ -43,6 +43,7 @@ class Workflow(Base, TimestampMixin):
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="draft", nullable=False)
     published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="workflows")
     owner: Mapped[Optional["User"]] = relationship(back_populates="owned_workflows")

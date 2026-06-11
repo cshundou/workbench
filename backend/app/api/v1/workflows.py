@@ -4,7 +4,7 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
@@ -158,12 +158,61 @@ async def publish_workflow(
     current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    change_note: str | None = Body(default=None, embed=True),
 ) -> dict[str, Any]:
-    """将草稿工作流发布为可执行模板。"""
+    """将草稿工作流发布为可执行模板并创建新版本。"""
     result = await workflow_service.publish_workflow(
-        db, workflow_id, tenant_id, current_user
+        db, workflow_id, tenant_id, current_user, change_note=change_note
     )
+    await db.commit()
     return success_response(data=result.model_dump(), message="发布成功")
+
+
+@router.get("/{workflow_id}/versions", summary="获取版本历史")
+async def list_workflow_versions(
+    workflow_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """查询工作流全部历史版本。"""
+    items = await workflow_service.list_workflow_versions(db, workflow_id, tenant_id)
+    return success_response(data=items)
+
+
+@router.post("/{workflow_id}/versions/{version_id}/rollback", summary="回滚版本")
+async def rollback_workflow_version(
+    workflow_id: int,
+    version_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    change_note: str | None = Body(default=None, embed=True),
+) -> dict[str, Any]:
+    """回滚到指定历史版本（生成新版本）。"""
+    result = await workflow_service.rollback_workflow_version(
+        db, workflow_id, version_id, tenant_id, current_user, change_note=change_note
+    )
+    await db.commit()
+    return success_response(data=result.model_dump(), message="回滚成功")
+
+
+@router.get(
+    "/executions/{execution_id}/logs/export",
+    summary="导出执行日志",
+)
+async def export_execution_logs(
+    execution_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    node_id: str | None = Query(default=None, description="仅导出指定节点日志"),
+) -> dict[str, Any]:
+    """导出工作流执行日志 JSON。"""
+    data = await workflow_service.export_execution_logs(
+        db, execution_id, tenant_id, node_id=node_id
+    )
+    return success_response(data=data)
 
 
 @router.post("/{workflow_id}/execute", summary="执行工作流")
