@@ -77,6 +77,7 @@ class UserService:
         tenant_id: int,
         page: int = 1,
         page_size: int = 20,
+        keyword: Optional[str] = None,
     ) -> UserListResponse:
         """
         分页查询租户下的用户列表。
@@ -86,11 +87,19 @@ class UserService:
             tenant_id: 租户 ID。
             page: 页码。
             page_size: 每页数量。
+            keyword: 可选关键词，按用户名或邮箱模糊搜索。
 
         Returns:
             分页用户列表。
         """
-        count_stmt = select(func.count()).select_from(User).where(User.tenant_id == tenant_id)
+        conditions = [User.tenant_id == tenant_id]
+        if keyword and keyword.strip():
+            pattern = f"%{keyword.strip()}%"
+            conditions.append(
+                (User.username.ilike(pattern)) | (User.email.ilike(pattern))
+            )
+
+        count_stmt = select(func.count()).select_from(User).where(*conditions)
         total_result = await db.execute(count_stmt)
         total = total_result.scalar_one()
 
@@ -98,7 +107,7 @@ class UserService:
         stmt = (
             select(User)
             .options(selectinload(User.role))
-            .where(User.tenant_id == tenant_id)
+            .where(*conditions)
             .order_by(User.id.asc())
             .offset(offset)
             .limit(page_size)

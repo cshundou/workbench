@@ -30,9 +30,10 @@ async def list_users(
     db: Annotated[AsyncSession, Depends(get_db_session)],
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
+    keyword: str | None = Query(default=None, description="用户名或邮箱关键词"),
 ) -> dict[str, Any]:
     """分页查询当前租户下的用户列表。"""
-    result = await user_service.list_users(db, tenant_id, page, page_size)
+    result = await user_service.list_users(db, tenant_id, page, page_size, keyword=keyword)
     return success_response(data=result.model_dump())
 
 
