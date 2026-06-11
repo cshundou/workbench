@@ -96,10 +96,11 @@ async def delete_knowledge_base(
     current_user: Annotated[CurrentUser, Depends(require_permission(KB_DELETE))],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    user_ctx: Annotated[UserKeyCtx, Depends(get_user_key_context)],
 ) -> dict[str, Any]:
     """删除知识库及其所有文档。"""
     await knowledge_base_service.delete_knowledge_base(
-        db, kb_id, tenant_id, current_user
+        db, kb_id, tenant_id, current_user, user_ctx
     )
     return success_response(message="删除成功")
 

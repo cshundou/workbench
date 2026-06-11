@@ -37,6 +37,10 @@ class VectorStoreBackend(ABC):
     def delete(self, ids: list[str]) -> None:
         """删除向量。"""
 
+    @abstractmethod
+    def delete_collection(self) -> None:
+        """删除整个知识库向量集合。"""
+
     def persist(self) -> None:
         """持久化（部分后端可为空操作）。"""
 
@@ -49,8 +53,10 @@ class ChromaVectorStoreBackend(VectorStoreBackend):
         kb_id: int,
         embeddings: OpenAIEmbeddings,
     ) -> None:
+        self.kb_id = kb_id
+        self.collection_name = f"kb_{kb_id}"
         self.store = Chroma(
-            collection_name=f"kb_{kb_id}",
+            collection_name=self.collection_name,
             embedding_function=embeddings,
             persist_directory=settings.chroma_persist_dir,
         )
@@ -68,6 +74,15 @@ class ChromaVectorStoreBackend(VectorStoreBackend):
 
     def delete(self, ids: list[str]) -> None:
         self.store.delete(ids=ids)
+
+    def delete_collection(self) -> None:
+        """删除 Chroma 中该知识库对应的 collection。"""
+        try:
+            client = self.store._client
+            client.delete_collection(self.collection_name)
+            logger.info("已删除 Chroma 集合 collection=%s", self.collection_name)
+        except Exception as exc:
+            logger.warning("删除 Chroma 集合失败 collection=%s: %s", self.collection_name, exc)
 
     def persist(self) -> None:
         self.store.persist()
@@ -96,11 +111,14 @@ class PineconeVectorStoreBackend(VectorStoreBackend):
 
         client = Pinecone(api_key=pinecone_key.api_key)
         index = client.Index(settings.pinecone_index_name)
+        self.kb_id = kb_id
+        self.namespace = f"kb_{kb_id}"
+        self._pinecone_index = index
         self.store = PineconeVectorStore(
             index=index,
             embedding=embeddings,
             text_key="text",
-            namespace=f"kb_{kb_id}",
+            namespace=self.namespace,
         )
 
     def as_retriever(self, search_kwargs: dict[str, Any] | None = None) -> Any:
@@ -117,6 +135,14 @@ class PineconeVectorStoreBackend(VectorStoreBackend):
 
     def delete(self, ids: list[str]) -> None:
         self.store.delete(ids=ids)
+
+    def delete_collection(self) -> None:
+        """删除 Pinecone 中该知识库的 namespace。"""
+        try:
+            self._pinecone_index.delete(delete_all=True, namespace=self.namespace)
+            logger.info("已删除 Pinecone namespace=%s", self.namespace)
+        except Exception as exc:
+            logger.warning("删除 Pinecone namespace 失败 namespace=%s: %s", self.namespace, exc)
 
 
 def create_vector_store_backend(
