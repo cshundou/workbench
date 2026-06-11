@@ -8,6 +8,7 @@ LangGraph 多智能体工作流构建器。
 import asyncio
 import json
 import logging
+import time
 import operator
 import re
 from datetime import datetime, timezone
@@ -1090,6 +1091,7 @@ class WorkflowBuilder:
             return state
 
         branch_states: list[AgentState] = []
+        parallel_started = time.monotonic()
         max_workers = min(len(handlers), 3)
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
@@ -1108,7 +1110,13 @@ class WorkflowBuilder:
                     failed_state["error"] = f"并行执行失败: {exc}"
                     branch_states.append(failed_state)
 
-        return self.merge_parallel_states(state, branch_states)
+        merged = self.merge_parallel_states(state, branch_states)
+        parallel_duration_ms = int((time.monotonic() - parallel_started) * 1000)
+        for log in merged.get("execution_logs") or []:
+            if isinstance(log, dict) and log.get("status") == "completed":
+                log["branch_duration_ms"] = parallel_duration_ms
+        merged["parallel_duration_ms"] = parallel_duration_ms
+        return merged
 
     def route_after_human_intervention(self, state: AgentState) -> str:
         """人工介入后的路由：未启用人工介入或已批准则继续审核，否则暂停。"""
