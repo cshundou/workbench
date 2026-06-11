@@ -19,6 +19,8 @@ from app.core.exceptions import ApiKeyMissingError
 from app.core.permissions import WF_DELETE, WF_READ, WF_WRITE
 from app.core.response import success_response
 from app.schemas.workflow import (
+    GraphDefinition,
+    GraphValidateRequest,
     HumanInterventionRequest,
     WorkflowCreate,
     WorkflowExecuteRequest,
@@ -152,6 +154,45 @@ async def execute_workflow(
         db, workflow_id, tenant_id, current_user, data
     )
     return success_response(data=result.model_dump(), message="工作流已启动")
+
+
+@router.post("/{workflow_id}/validate-graph", summary="校验工作流图定义")
+async def validate_workflow_graph(
+    workflow_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    data: GraphValidateRequest | None = None,
+) -> dict[str, Any]:
+    """校验 graph_definition 合法性，不传 body 则校验库内定义。"""
+    await workflow_service.get_workflow(db, workflow_id, tenant_id, current_user)
+    if data and data.graph_definition:
+        definition = data.graph_definition.model_dump()
+    else:
+        workflow = await workflow_service.get_workflow(
+            db, workflow_id, tenant_id, current_user
+        )
+        definition = workflow.graph_definition
+    result = workflow_service.validate_graph_definition(definition)
+    return success_response(data=result)
+
+
+@router.get(
+    "/{workflow_id}/executions/{execution_id}/replay",
+    summary="获取重跑参数",
+)
+async def get_execution_replay(
+    workflow_id: int,
+    execution_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """获取历史执行的 input_params 与图定义快照，供重跑使用。"""
+    result = await workflow_service.get_replay_params(
+        db, workflow_id, execution_id, tenant_id
+    )
+    return success_response(data=result)
 
 
 @router.get("/{workflow_id}/executions", summary="获取执行历史")

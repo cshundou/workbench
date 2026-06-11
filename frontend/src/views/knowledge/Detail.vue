@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft, ChatDotRound } from '@element-plus/icons-vue';
 import DocumentUploader from '@/components/knowledge/DocumentUploader.vue';
+import UrlImporter from '@/components/knowledge/UrlImporter.vue';
 import DocumentList from '@/components/knowledge/DocumentList.vue';
 import DocumentPreview from '@/components/knowledge/DocumentPreview.vue';
 import { deleteDocument, downloadDocument, getDocumentProgress, getOptimizationHints, getSearchStats } from '@/api/rag';
@@ -171,7 +172,10 @@ onUnmounted(() => {
       <el-tab-pane label="文档管理" name="documents">
         <el-card shadow="never" class="upload-card">
           <template #header>
-            <span>上传文档</span>
+            <div class="upload-header">
+              <span>上传文档</span>
+              <UrlImporter :kb-id="kbId" :disabled="!canWrite" @imported="handleUploaded" />
+            </div>
           </template>
           <DocumentUploader
             :kb-id="kbId"
@@ -236,6 +240,13 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 .knowledge-detail {
   min-height: 400px;
+}
+
+.upload-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .upload-card {

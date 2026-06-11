@@ -4,8 +4,10 @@
 提供 JWT 令牌生成/校验与密码哈希功能。
 """
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from uuid import uuid4
 
 import bcrypt
 from jose import JWTError, jwt
@@ -14,6 +16,9 @@ from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+TOKEN_TYPE_ACCESS = "access"
+TOKEN_TYPE_REFRESH = "refresh"
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -77,6 +82,8 @@ def create_access_token(
         "sub": str(subject),
         "exp": expire,
         "iat": datetime.now(timezone.utc),
+        "type": TOKEN_TYPE_ACCESS,
+        "jti": str(uuid4()),
     }
     if extra_claims:
         payload.update(extra_claims)
@@ -87,6 +94,38 @@ def create_access_token(
         algorithm=settings.jwt_algorithm,
     )
     return token
+
+
+def create_refresh_token(
+    subject: str | int,
+    expires_delta: Optional[timedelta] = None,
+    extra_claims: Optional[dict[str, Any]] = None,
+) -> str:
+    """创建 JWT Refresh Token（默认 7 天）。"""
+    if expires_delta is None:
+        expires_delta = timedelta(days=settings.jwt_refresh_token_expire_days)
+
+    expire = datetime.now(timezone.utc) + expires_delta
+    payload: dict[str, Any] = {
+        "sub": str(subject),
+        "exp": expire,
+        "iat": datetime.now(timezone.utc),
+        "type": TOKEN_TYPE_REFRESH,
+        "jti": str(uuid4()),
+    }
+    if extra_claims:
+        payload.update(extra_claims)
+
+    return jwt.encode(
+        payload,
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def hash_token(token: str) -> str:
+    """对令牌做 SHA256 哈希，用于 Redis 存储。"""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def decode_access_token(token: str) -> Optional[dict[str, Any]]:
@@ -105,7 +144,25 @@ def decode_access_token(token: str) -> Optional[dict[str, Any]]:
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
         )
+        if payload.get("type") == TOKEN_TYPE_REFRESH:
+            return None
         return payload
     except JWTError as exc:
         logger.debug("JWT 解码失败: %s", exc)
+        return None
+
+
+def decode_refresh_token(token: str) -> Optional[dict[str, Any]]:
+    """解码 Refresh Token，类型不匹配时返回 None。"""
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        if payload.get("type") != TOKEN_TYPE_REFRESH:
+            return None
+        return payload
+    except JWTError as exc:
+        logger.debug("Refresh Token 解码失败: %s", exc)
         return None

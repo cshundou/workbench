@@ -24,6 +24,7 @@ from app.models.chat_history import ChatHistory
 from app.models.user import User
 from app.services.agent.tools import (
     AVAILABLE_TOOL_DEFINITIONS,
+    TOOL_CALCULATOR,
     TOOL_KNOWLEDGE_BASE,
     TOOL_PYTHON_REPL,
     TOOL_SQL_QUERY,
@@ -31,6 +32,7 @@ from app.services.agent.tools import (
 )
 from app.services.agent.tools.base import BaseTool, ToolResult
 from app.services.agent.tools.knowledge_base import KnowledgeBaseTool
+from app.services.agent.tools.calculator import CalculatorTool
 from app.services.agent.tools.python_repl import PythonReplTool
 from app.services.agent.tools.sql_query import SqlQueryTool
 from app.services.agent.tools.tavily_search import TavilySearchTool
@@ -50,6 +52,7 @@ class AgentService:
             TOOL_TAVILY_SEARCH: TavilySearchTool,
             TOOL_PYTHON_REPL: PythonReplTool,
             TOOL_SQL_QUERY: SqlQueryTool,
+            TOOL_CALCULATOR: CalculatorTool,
         }
 
     def register_tool(self, tool_cls: type[BaseTool]) -> None:

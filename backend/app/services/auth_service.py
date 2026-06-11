@@ -12,9 +12,24 @@ from app.core.config import settings
 from app.core.exceptions import AuthenticationError
 from app.core.logging import get_logger
 from app.core.permissions import parse_permissions
-from app.core.security import create_access_token, verify_password
+from app.core.redis import get_redis
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+    hash_token,
+    verify_password,
+)
 from app.models.user import User
-from app.schemas.auth import LoginRequest, LoginResponse, RoleBrief, UserMeInfo, UserMeResponse
+from app.schemas.auth import (
+    LoginRequest,
+    LoginResponse,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
+    RoleBrief,
+    UserMeInfo,
+    UserMeResponse,
+)
 from app.services.audit_service import audit_service
 
 logger = get_logger(__name__)
@@ -69,13 +84,16 @@ class AuthService:
         )
 
         expires_seconds = settings.jwt_access_token_expire_minutes * 60
-        token = create_access_token(
-            subject=user.id,
-            extra_claims={"tenant_id": user.tenant_id},
-        )
+        claims = {"tenant_id": user.tenant_id}
+        token = create_access_token(subject=user.id, extra_claims=claims)
+        refresh_token = create_refresh_token(subject=user.id, extra_claims=claims)
 
         logger.info("用户登录成功 user_id=%s tenant_id=%s", user.id, user.tenant_id)
-        return LoginResponse(token=token, expires_in=expires_seconds)
+        return LoginResponse(
+            token=token,
+            refresh_token=refresh_token,
+            expires_in=expires_seconds,
+        )
 
     async def get_current_user_info(self, db: AsyncSession, user_id: int) -> UserMeResponse:
         """
@@ -120,13 +138,55 @@ class AuthService:
         )
         return UserMeResponse(user=user_info, permissions=permissions)
 
-    async def logout(self) -> None:
+    async def logout(self, refresh_token: str | None = None) -> None:
         """
         用户登出。
 
-        当前采用无状态 JWT，客户端清除令牌即可；服务端记录日志。
+        若提供 refresh_token 则写入 Redis 黑名单。
         """
+        if refresh_token:
+            await self.revoke_refresh_token(refresh_token)
         logger.info("用户登出")
+
+    async def refresh_access_token(
+        self,
+        db: AsyncSession,
+        data: RefreshTokenRequest,
+    ) -> RefreshTokenResponse:
+        """使用 Refresh Token 换取新的 Access Token。"""
+        payload = decode_refresh_token(data.refresh_token)
+        if payload is None:
+            raise AuthenticationError(message="Refresh Token 无效或已过期")
+
+        token_hash = hash_token(data.refresh_token)
+        if await self.is_refresh_token_revoked(token_hash):
+            raise AuthenticationError(message="Refresh Token 已失效")
+
+        user_id = int(payload["sub"])
+        stmt = select(User).where(User.id == user_id)
+        user = (await db.execute(stmt)).scalar_one_or_none()
+        if user is None or user.status != 1:
+            raise AuthenticationError(message="用户不存在或已被禁用")
+
+        expires_seconds = settings.jwt_access_token_expire_minutes * 60
+        token = create_access_token(
+            subject=user.id,
+            extra_claims={"tenant_id": user.tenant_id},
+        )
+        return RefreshTokenResponse(token=token, expires_in=expires_seconds)
+
+    async def revoke_refresh_token(self, refresh_token: str) -> None:
+        """将 Refresh Token 加入 Redis 黑名单。"""
+        token_hash = hash_token(refresh_token)
+        redis = await get_redis()
+        ttl_seconds = settings.jwt_refresh_token_expire_days * 86400
+        await redis.set(f"refresh_blacklist:{token_hash}", "1", ex=ttl_seconds)
+
+    async def is_refresh_token_revoked(self, token_hash: str) -> bool:
+        """检查 Refresh Token 是否已吊销。"""
+        redis = await get_redis()
+        value = await redis.get(f"refresh_blacklist:{token_hash}")
+        return value is not None
 
 
 auth_service = AuthService()

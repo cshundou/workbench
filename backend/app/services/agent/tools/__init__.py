@@ -1,6 +1,7 @@
 """Agent 内置工具包。"""
 
 from app.services.agent.tools.base import BaseTool, ToolResult
+from app.services.agent.tools.calculator import CalculatorTool
 from app.services.agent.tools.knowledge_base import KnowledgeBaseTool
 from app.services.agent.tools.python_repl import PythonReplTool
 from app.services.agent.tools.sql_query import SqlQueryTool
@@ -11,6 +12,7 @@ TOOL_KNOWLEDGE_BASE = "knowledge_base_search"
 TOOL_TAVILY_SEARCH = "tavily_search"
 TOOL_PYTHON_REPL = "python_repl"
 TOOL_SQL_QUERY = "sql_query"
+TOOL_CALCULATOR = "calculator"
 
 AVAILABLE_TOOL_DEFINITIONS: list[dict[str, str]] = [
     {
@@ -33,16 +35,23 @@ AVAILABLE_TOOL_DEFINITIONS: list[dict[str, str]] = [
         "label": "SQL 查询",
         "description": "将自然语言转换为 SQL 并查询数据库",
     },
+    {
+        "name": TOOL_CALCULATOR,
+        "label": "计算器",
+        "description": "执行数学表达式计算",
+    },
 ]
 
 __all__ = [
     "AVAILABLE_TOOL_DEFINITIONS",
     "BaseTool",
+    "CalculatorTool",
     "KnowledgeBaseTool",
     "PythonReplTool",
     "SqlQueryTool",
     "TavilySearchTool",
     "ToolResult",
+    "TOOL_CALCULATOR",
     "TOOL_KNOWLEDGE_BASE",
     "TOOL_PYTHON_REPL",
     "TOOL_SQL_QUERY",

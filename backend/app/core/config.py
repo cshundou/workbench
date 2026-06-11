@@ -50,6 +50,10 @@ class Settings(BaseSettings):
         default=1440,
         description="访问令牌过期时间（分钟）",
     )
+    jwt_refresh_token_expire_days: int = Field(
+        default=7,
+        description="Refresh Token 过期时间（天）",
+    )
 
     # CORS 配置
     cors_origins: List[str] = Field(
@@ -116,11 +120,52 @@ class Settings(BaseSettings):
             "/api/v1/health",
             "/api/v1/monitor/health",
             "/api/v1/auth/login",
+            "/api/v1/auth/refresh",
             "/docs",
             "/redoc",
             "/openapi.json",
         ],
         description="JWT 认证白名单路径",
+    )
+
+    # Python REPL 执行模式
+    python_repl_mode: Literal["local", "docker"] = Field(
+        default="local",
+        description="Python REPL 执行模式（local | docker）",
+    )
+    python_repl_docker_image: str = Field(
+        default="python:3.11-slim",
+        description="Docker 沙箱镜像",
+    )
+    python_repl_timeout_seconds: int = Field(
+        default=30,
+        description="Python REPL 执行超时（秒）",
+    )
+
+    # SQL 工具安全配置
+    sql_tool_readonly_dsn: str = Field(
+        default="",
+        description="SQL 工具只读数据库 DSN（为空则使用主库）",
+    )
+    sql_tool_allowed_tables: str = Field(
+        default="",
+        description="SQL 工具表白名单（逗号分隔，为空则不限制）",
+    )
+
+    # Prometheus 指标
+    prometheus_enabled: bool = Field(
+        default=False,
+        description="是否暴露 /metrics 端点",
+    )
+
+    # LangSmith 项目（前端 trace 链接）
+    langsmith_project: str = Field(
+        default="ai-workbench",
+        description="LangSmith 项目名称",
+    )
+    langsmith_org: str = Field(
+        default="",
+        description="LangSmith 组织 slug（前端 trace 链接）",
     )
 
 

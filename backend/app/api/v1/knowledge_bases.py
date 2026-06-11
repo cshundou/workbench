@@ -21,6 +21,7 @@ from app.core.permissions import KB_DELETE, KB_READ, KB_WRITE
 from app.core.response import success_response
 from app.schemas.knowledge_base import (
     ChatRequest,
+    ImportUrlRequest,
     KnowledgeBaseCreate,
     KnowledgeBaseUpdate,
     SearchRequest,
@@ -291,6 +292,21 @@ async def chat_knowledge_base(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/{kb_id}/import-url", summary="从 URL 导入文档")
+async def import_url_document(
+    kb_id: int,
+    data: ImportUrlRequest,
+    current_user: Annotated[CurrentUser, Depends(require_permission(KB_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """抓取网页正文并入库解析。"""
+    result = await knowledge_base_service.import_url(
+        db, kb_id, tenant_id, current_user, data
+    )
+    return success_response(data=result.model_dump(), message="URL 导入成功")
 
 
 @router.get("/{kb_id}/search-stats", summary="知识库检索统计")

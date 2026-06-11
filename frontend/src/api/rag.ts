@@ -334,6 +334,14 @@ export function getSearchStats(kbId: number): Promise<SearchStats> {
   return request.get(`/knowledge-bases/${kbId}/search-stats`) as Promise<SearchStats>;
 }
 
+/** 从 URL 导入文档 */
+export function importUrlDocument(
+  kbId: number,
+  data: { url: string; title?: string },
+): Promise<DocumentInfo> {
+  return request.post(`/knowledge-bases/${kbId}/import-url`, data) as Promise<DocumentInfo>;
+}
+
 export function getOptimizationHints(
   kbId: number,
 ): Promise<{ hints: OptimizationHint[]; chunk_size: number; chunk_overlap: number }> {

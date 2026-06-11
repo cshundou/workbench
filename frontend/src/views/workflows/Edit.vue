@@ -8,7 +8,7 @@ import '@vue-flow/core/dist/style.css';
 import '@vue-flow/core/dist/theme-default.css';
 import WorkflowNode from '@/components/workflow/WorkflowNode.vue';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
-import { getWorkflow, updateWorkflow } from '@/api/workflow';
+import { getWorkflow, updateWorkflow, validateWorkflowGraph } from '@/api/workflow';
 import type { GraphDefinition, WorkflowEdgeDef, WorkflowNodeDef } from '@/api/workflow';
 
 const route = useRoute();
@@ -89,6 +89,14 @@ async function handleSave(): Promise<void> {
   saving.value = true;
   try {
     const graphDefinition: GraphDefinition = { nodes: nodes.value, edges: edges.value };
+    const validation = await validateWorkflowGraph(workflowId.value, graphDefinition);
+    if (!validation.valid) {
+      ElMessage.error(validation.errors.join('；') || '图定义校验失败');
+      return;
+    }
+    if (validation.warnings.length > 0) {
+      ElMessage.warning(validation.warnings.join('；'));
+    }
     await updateWorkflow(workflowId.value, { graph_definition: graphDefinition });
     ElMessage.success('工作流拓扑已保存');
   } finally {

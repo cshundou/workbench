@@ -695,4 +695,43 @@ class WorkflowService:
         )
 
 
+    def validate_graph_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
+        """
+        校验工作流图定义，返回结构化结果（不抛异常）。
+
+        Returns:
+            {"valid": bool, "errors": list[str], "warnings": list[str]}
+        """
+        builder = WorkflowBuilder()
+        warnings: list[str] = []
+        for node in definition.get("nodes") or []:
+            if node.get("type") == "knowledge":
+                config = node.get("config") or {}
+                if not config.get("kb_ids"):
+                    warnings.append(f"节点 {node.get('id')} 未配置 kb_ids")
+        try:
+            builder.validate_graph_definition(definition)
+            return {"valid": True, "errors": [], "warnings": warnings}
+        except ValidationError as exc:
+            return {"valid": False, "errors": [exc.message], "warnings": warnings}
+
+    async def get_replay_params(
+        self,
+        db: AsyncSession,
+        workflow_id: int,
+        execution_id: int,
+        tenant_id: int,
+    ) -> dict[str, Any]:
+        """获取历史执行的重跑参数与图定义快照。"""
+        execution = await self._get_execution_or_raise(db, execution_id, tenant_id)
+        if execution.workflow_id != workflow_id:
+            raise NotFoundError(message="执行记录不存在")
+        workflow = await self._get_workflow_or_raise(db, workflow_id, tenant_id)
+        return {
+            "execution_id": execution.id,
+            "input_params": execution.input_params,
+            "graph_definition_snapshot": workflow.graph_definition,
+        }
+
+
 workflow_service = WorkflowService()

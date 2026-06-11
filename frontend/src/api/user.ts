@@ -14,6 +14,7 @@ import type {
 /** 后端登录响应（蛇形命名） */
 interface LoginApiData {
   token: string;
+  refresh_token?: string;
   expires_in: number;
 }
 
@@ -32,6 +33,9 @@ interface MeApiData {
 /** 用户登录 */
 export async function login(data: LoginParams): Promise<LoginResult> {
   const res = (await request.post('/auth/login', data)) as LoginApiData;
+  if (res.refresh_token) {
+    localStorage.setItem('refresh_token', res.refresh_token);
+  }
   return {
     token: res.token,
     expiresIn: res.expires_in,
@@ -47,9 +51,19 @@ export async function getUserInfo(): Promise<UserInfoResult> {
   };
 }
 
+/** 刷新访问令牌 */
+export function refreshAccessToken(refreshToken: string): Promise<{ token: string; expires_in: number }> {
+  return request.post('/auth/refresh', { refresh_token: refreshToken }) as Promise<{
+    token: string;
+    expires_in: number;
+  }>;
+}
+
 /** 用户登出 */
 export function logout(): Promise<void> {
-  return request.post('/auth/logout');
+  const refreshToken = localStorage.getItem('refresh_token');
+  localStorage.removeItem('refresh_token');
+  return request.post('/auth/logout', refreshToken ? { refresh_token: refreshToken } : {});
 }
 
 /** 获取用户列表 */

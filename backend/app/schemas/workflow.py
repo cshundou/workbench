@@ -138,3 +138,12 @@ class HumanInterventionRequest(BaseModel):
 
     approved: bool = Field(..., description="是否批准继续执行")
     comment: Optional[str] = Field(default=None, description="审批备注")
+
+
+class GraphValidateRequest(BaseModel):
+    """工作流图校验请求（可选传入待校验定义）。"""
+
+    graph_definition: Optional[GraphDefinition] = Field(
+        default=None,
+        description="待校验的图定义，为空则校验库内已保存定义",
+    )

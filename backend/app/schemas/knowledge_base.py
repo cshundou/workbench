@@ -21,6 +21,13 @@ class KnowledgeBaseCreate(BaseModel):
     )
 
 
+class ImportUrlRequest(BaseModel):
+    """URL 导入请求。"""
+
+    url: str = Field(..., min_length=8, max_length=2048, description="网页 URL")
+    title: Optional[str] = Field(default=None, max_length=255, description="自定义标题")
+
+
 class KnowledgeBaseUpdate(BaseModel):
     """更新知识库请求。"""
 

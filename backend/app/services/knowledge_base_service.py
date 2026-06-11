@@ -22,6 +22,7 @@ from app.models.user import User
 from app.schemas.knowledge_base import (
     DocumentListResponse,
     DocumentResponse,
+    ImportUrlRequest,
     KnowledgeBaseCreate,
     KnowledgeBaseListResponse,
     KnowledgeBaseResponse,
@@ -30,6 +31,7 @@ from app.schemas.knowledge_base import (
 )
 from app.services.rag.document_loader import DocumentLoader
 from app.services.rag.rag_service import rag_service
+from app.services.rag.url_fetcher import UrlFetcher
 from app.services.audit_service import audit_service
 
 logger = get_logger(__name__)
@@ -543,6 +545,66 @@ class KnowledgeBaseService:
             message=message,
             parse_status=parse_status,
         )
+
+    async def import_url(
+        self,
+        db: AsyncSession,
+        kb_id: int,
+        tenant_id: int,
+        user: User,
+        data: ImportUrlRequest,
+    ) -> DocumentResponse:
+        """从 URL 抓取网页正文并入库。"""
+        kb = await self._get_kb_or_raise(db, kb_id, tenant_id)
+        await self._check_kb_access(kb, user, require_owner=True)
+
+        fetcher = UrlFetcher()
+        page_title, content = await fetcher.fetch(data.url)
+        if not content.strip():
+            raise ValidationError(message="未能从 URL 提取有效内容")
+
+        doc_title = data.title or page_title or "Imported Web Page"
+        safe_filename = f"{uuid.uuid4().hex}_{doc_title[:50]}.html"
+        upload_dir = Path(settings.upload_dir) / str(tenant_id) / str(kb_id)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        file_path = upload_dir / safe_filename
+
+        with open(file_path, "w", encoding="utf-8") as output:
+            output.write(content)
+
+        encoded = content.encode("utf-8")
+        document = Document(
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            name=doc_title,
+            file_type=".html",
+            file_size=len(encoded),
+            file_path=str(file_path),
+            uploader_id=user.id,
+            status=DOCUMENT_STATUS_PENDING,
+            total_chunks=0,
+        )
+        db.add(document)
+        await db.flush()
+
+        await rag_service.set_parse_progress(document.id, 0, "等待解析", status="pending")
+        parse_task_id = await rag_service.schedule_parse_document(
+            document.id,
+            user.id,
+            tenant_id,
+            tags=["url-import"],
+        )
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="document.import_url",
+            resource_type="document",
+            resource_id=document.id,
+            detail={"kb_id": kb_id, "url": data.url, "task_id": parse_task_id},
+        )
+        logger.info("URL 导入成功 document_id=%s url=%s", document.id, data.url)
+        return self._to_document_response(document, parse_task_id=parse_task_id)
 
 
 knowledge_base_service = KnowledgeBaseService()

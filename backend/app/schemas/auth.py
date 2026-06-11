@@ -17,8 +17,28 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     """登录响应数据。"""
 
-    token: str = Field(..., description="JWT 令牌")
+    token: str = Field(..., description="JWT 访问令牌")
+    refresh_token: str = Field(..., description="JWT 刷新令牌")
+    expires_in: int = Field(..., description="访问令牌过期时间（秒）")
+
+
+class RefreshTokenRequest(BaseModel):
+    """刷新令牌请求。"""
+
+    refresh_token: str = Field(..., min_length=1, description="Refresh Token")
+
+
+class RefreshTokenResponse(BaseModel):
+    """刷新令牌响应。"""
+
+    token: str = Field(..., description="新的访问令牌")
     expires_in: int = Field(..., description="过期时间（秒）")
+
+
+class LogoutRequest(BaseModel):
+    """登出请求（可选携带 refresh_token 以加入黑名单）。"""
+
+    refresh_token: Optional[str] = Field(default=None, description="Refresh Token")
 
 
 class RoleBrief(BaseModel):

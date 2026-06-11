@@ -159,6 +159,32 @@ export function submitHumanIntervention(
   return request.post(`/workflows/executions/${executionId}/intervene`, data);
 }
 
+/** 校验工作流图定义 */
+export function validateWorkflowGraph(
+  workflowId: number,
+  graphDefinition?: GraphDefinition,
+): Promise<{ valid: boolean; errors: string[]; warnings: string[] }> {
+  return request.post(`/workflows/${workflowId}/validate-graph`, {
+    graph_definition: graphDefinition,
+  }) as Promise<{ valid: boolean; errors: string[]; warnings: string[] }>;
+}
+
+/** 获取重跑参数 */
+export function getExecutionReplay(
+  workflowId: number,
+  executionId: number,
+): Promise<{
+  execution_id: number;
+  input_params: Record<string, unknown>;
+  graph_definition_snapshot: GraphDefinition;
+}> {
+  return request.get(`/workflows/${workflowId}/executions/${executionId}/replay`) as Promise<{
+    execution_id: number;
+    input_params: Record<string, unknown>;
+    graph_definition_snapshot: GraphDefinition;
+  }>;
+}
+
 /** 构建工作流 WebSocket URL */
 export function buildWorkflowWsUrl(executionId: number): string {
   const base = import.meta.env.VITE_API_BASE_URL || '/api/v1';

@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ArrowLeft, VideoPlay } from '@element-plus/icons-vue';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
-import { getExecutionHistory, executeWorkflow } from '@/api/workflow';
+import { getExecutionHistory, executeWorkflow, getExecutionReplay } from '@/api/workflow';
 import type { WorkflowExecution } from '@/api/workflow';
 
 const route = useRoute();
@@ -36,8 +36,9 @@ async function fetchHistory(): Promise<void> {
 }
 
 async function handleReplay(row: WorkflowExecution): Promise<void> {
-  const input = row.input_params || {};
   try {
+    const replay = await getExecutionReplay(workflowId.value, row.id);
+    const input = replay.input_params || row.input_params || {};
     const execution = await executeWorkflow(workflowId.value, {
       task: String(input.task || ''),
       require_human_approval: Boolean(input.require_human_approval),
