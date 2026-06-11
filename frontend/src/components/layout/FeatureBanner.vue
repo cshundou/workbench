@@ -30,11 +30,7 @@ defineProps<{
         <div class="banner-slide gradient-banner">
           <h3 class="banner-title">{{ slide.title }}</h3>
           <div class="feature-cards">
-            <div
-              v-for="(feature, idx) in slide.features"
-              :key="idx"
-              class="feature-card"
-            >
+            <div v-for="(feature, idx) in slide.features" :key="idx" class="feature-card">
               <div v-if="feature.icon" class="feature-icon">
                 <el-icon :size="18"><component :is="feature.icon" /></el-icon>
               </div>

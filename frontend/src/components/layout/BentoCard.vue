@@ -54,7 +54,9 @@ function handleClick(): void {
   border: none;
   border-radius: $border-radius-lg;
   box-shadow: $shadow-card;
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 
   &.is-clickable {
     cursor: pointer;
