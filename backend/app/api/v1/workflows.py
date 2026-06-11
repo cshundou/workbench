@@ -152,6 +152,20 @@ async def delete_workflow(
     return success_response(message="删除成功")
 
 
+@router.post("/{workflow_id}/publish", summary="发布工作流")
+async def publish_workflow(
+    workflow_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """将草稿工作流发布为可执行模板。"""
+    result = await workflow_service.publish_workflow(
+        db, workflow_id, tenant_id, current_user
+    )
+    return success_response(data=result.model_dump(), message="发布成功")
+
+
 @router.post("/{workflow_id}/execute", summary="执行工作流")
 async def execute_workflow(
     workflow_id: int,

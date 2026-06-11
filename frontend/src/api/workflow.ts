@@ -31,6 +31,8 @@ export interface WorkflowInfo {
   graph_definition: GraphDefinition;
   owner_id?: number | null;
   is_public: boolean;
+  status?: 'draft' | 'published' | string;
+  published_at?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -128,6 +130,11 @@ export function updateWorkflow(id: number, data: UpdateWorkflowParams): Promise<
 /** 删除工作流 */
 export function deleteWorkflow(id: number): Promise<void> {
   return request.delete(`/workflows/${id}`);
+}
+
+/** 发布工作流 */
+export function publishWorkflow(workflowId: number): Promise<WorkflowInfo> {
+  return request.post(`/workflows/${workflowId}/publish`) as Promise<WorkflowInfo>;
 }
 
 /** 执行工作流 */

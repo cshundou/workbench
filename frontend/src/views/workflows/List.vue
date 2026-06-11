@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import { Plus, VideoPlay, Edit, Delete, Share } from '@element-plus/icons-vue';
-import type { WorkflowInfo } from '@/api/workflow';
+import { publishWorkflow, type WorkflowInfo } from '@/api/workflow';
 import { useGraphStore } from '@/stores/graph';
 import { useUserStore } from '@/stores/user';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
@@ -110,6 +110,15 @@ function goHistory(wf: WorkflowInfo): void {
   router.push({ name: 'WorkflowHistory', params: { id: wf.id } });
 }
 
+async function handlePublish(wf: WorkflowInfo): Promise<void> {
+  await ElMessageBox.confirm(`确定发布工作流「${wf.name}」？发布后可用于执行。`, '发布确认', {
+    type: 'info',
+  });
+  await publishWorkflow(wf.id);
+  ElMessage.success('发布成功');
+  await fetchList();
+}
+
 onMounted(() => {
   fetchList();
 });
@@ -142,7 +151,11 @@ onMounted(() => {
         <el-card shadow="never" class="wf-card">
           <div class="wf-card-header">
             <el-icon :size="28" class="wf-icon"><Share /></el-icon>
-            <el-tag v-if="wf.is_public" size="small" type="success">公开</el-tag>
+            <div class="wf-tags">
+              <el-tag v-if="wf.status === 'published'" size="small" type="success">已发布</el-tag>
+              <el-tag v-else size="small" type="info">草稿</el-tag>
+              <el-tag v-if="wf.is_public" size="small" type="warning">公开</el-tag>
+            </div>
           </div>
           <h3 class="wf-name">{{ wf.name }}</h3>
           <p class="wf-desc">{{ wf.description || '暂无描述' }}</p>
@@ -154,6 +167,14 @@ onMounted(() => {
               执行
             </el-button>
             <template v-if="canWrite">
+              <el-button
+                v-if="wf.status !== 'published'"
+                size="small"
+                type="success"
+                @click="handlePublish(wf)"
+              >
+                发布
+              </el-button>
               <el-button size="small" @click="goEditGraph(wf)">编辑拓扑</el-button>
               <el-button size="small" @click="goHistory(wf)">历史</el-button>
               <el-button size="small" :icon="Edit" @click="openEditDialog(wf)" />
@@ -229,6 +250,11 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+}
+
+.wf-tags {
+  display: flex;
+  gap: 4px;
 }
 
 .wf-name {

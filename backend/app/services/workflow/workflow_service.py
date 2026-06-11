@@ -57,6 +57,8 @@ class WorkflowService:
             graph_definition=workflow.graph_definition,
             owner_id=workflow.owner_id,
             is_public=workflow.is_public,
+            status=workflow.status,
+            published_at=workflow.published_at,
             created_at=workflow.created_at,
             updated_at=workflow.updated_at,
         )
@@ -318,6 +320,48 @@ class WorkflowService:
         )
         logger.info("删除工作流 id=%s", workflow_id)
 
+    async def publish_workflow(
+        self,
+        db: AsyncSession,
+        workflow_id: int,
+        tenant_id: int,
+        user: User,
+    ) -> WorkflowResponse:
+        """发布工作流模板（草稿 -> 已发布）。"""
+        workflow = await self._get_workflow_or_raise(db, workflow_id, tenant_id)
+        await self._check_workflow_access(workflow, user, require_owner=True)
+
+        if workflow.status == "published":
+            raise ValidationError(message="工作流已发布")
+
+        validation = self.validate_graph_definition(workflow.graph_definition)
+        if not validation["valid"]:
+            raise ValidationError(
+                message="工作流图定义校验失败，无法发布",
+                error="; ".join(validation["errors"]),
+            )
+
+        workflow.status = "published"
+        workflow.published_at = datetime.now(timezone.utc)
+        await db.flush()
+        await db.refresh(workflow)
+
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="workflow.publish",
+            resource_type="workflow",
+            resource_id=workflow.id,
+            detail={
+                "name": workflow.name,
+                "success": True,
+                "result": "published",
+            },
+        )
+        logger.info("发布工作流 id=%s", workflow_id)
+        return self._to_workflow_response(workflow)
+
     async def list_executions(
         self,
         db: AsyncSession,
@@ -382,6 +426,9 @@ class WorkflowService:
         """创建执行记录并异步启动工作流。"""
         workflow = await self._get_workflow_or_raise(db, workflow_id, tenant_id)
         await self._check_workflow_access(workflow, user)
+
+        if workflow.status != "published":
+            raise ValidationError(message="仅已发布的工作流可以执行")
 
         input_params = {
             "task": data.task,

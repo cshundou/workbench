@@ -63,6 +63,8 @@ class WorkflowResponse(BaseModel):
     graph_definition: dict[str, Any]
     owner_id: Optional[int] = None
     is_public: bool
+    status: str = "draft"
+    published_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
