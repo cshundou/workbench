@@ -418,6 +418,12 @@ class KnowledgeBaseService:
         if not content:
             raise ValidationError(message="上传文件为空")
 
+        max_bytes = settings.max_upload_size_mb * 1024 * 1024
+        if len(content) > max_bytes:
+            raise ValidationError(
+                message=f"文件大小超过限制（最大 {settings.max_upload_size_mb}MB）"
+            )
+
         with open(file_path, "wb") as output:
             output.write(content)
 
