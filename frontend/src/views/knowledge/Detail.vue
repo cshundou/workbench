@@ -19,7 +19,8 @@ const ragStore = useRagStore();
 const userStore = useUserStore();
 
 const kbId = computed(() => Number(route.params.id));
-const canWrite = computed(() => userStore.hasPermission('knowledge:write'));
+const canWrite = computed(() => userStore.hasPermission('kb:write'));
+const canDelete = computed(() => userStore.hasPermission('kb:delete'));
 
 const activeTab = ref('documents');
 const previewVisible = ref(false);

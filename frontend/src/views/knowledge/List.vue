@@ -46,7 +46,8 @@ const formRules: FormRules = {
   ],
 };
 
-const canWrite = computed(() => userStore.hasPermission('knowledge:write'));
+const canWrite = computed(() => userStore.hasPermission('kb:write'));
+const canDelete = computed(() => userStore.hasPermission('kb:delete'));
 
 /** 加载知识库列表 */
 async function fetchList(): Promise<void> {

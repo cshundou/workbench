@@ -1,26 +1,32 @@
-/** 系统权限选项（角色配置用） */
+/** 系统权限选项（角色配置用，与后端 core/permissions.py 对齐） */
 export const PERMISSION_OPTIONS = [
   { label: '全部权限', value: '*' },
   { label: '用户查看', value: 'user:read' },
   { label: '用户管理', value: 'user:write' },
+  { label: '用户删除', value: 'user:delete' },
   { label: '角色查看', value: 'role:read' },
   { label: '角色管理', value: 'role:write' },
-  { label: '知识库查看', value: 'knowledge:read' },
-  { label: '知识库管理', value: 'knowledge:write' },
+  { label: '角色删除', value: 'role:delete' },
+  { label: '知识库查看', value: 'kb:read' },
+  { label: '知识库管理', value: 'kb:write' },
+  { label: '知识库删除', value: 'kb:delete' },
   { label: '智能体查看', value: 'agent:read' },
   { label: '智能体管理', value: 'agent:write' },
   { label: '智能体删除', value: 'agent:delete' },
   { label: '工作流查看', value: 'workflow:read' },
   { label: '工作流管理', value: 'workflow:write' },
+  { label: '工作流删除', value: 'workflow:delete' },
   { label: '监控查看', value: 'monitor:read' },
   { label: '审计日志', value: 'audit:read' },
   { label: '租户查看', value: 'tenant:read' },
   { label: '租户管理', value: 'tenant:write' },
+  { label: '租户删除', value: 'tenant:delete' },
+  { label: '任务查看', value: 'task:read' },
 ] as const;
 
 /** 路由权限映射 */
 export const ROUTE_PERMISSIONS = {
-  knowledge: 'knowledge:read',
+  knowledge: 'kb:read',
   agents: 'agent:read',
   workflows: 'workflow:read',
   userManagement: 'user:read',
