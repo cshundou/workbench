@@ -59,6 +59,16 @@ class WorkflowExecution(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    execution_logs: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default="[]",
+    )
+    node_statuses: Mapped[dict[str, str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default="{}",
+    )
 
     workflow: Mapped["Workflow"] = relationship(back_populates="executions")
     tenant: Mapped["Tenant"] = relationship(back_populates="workflow_executions")

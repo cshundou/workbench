@@ -69,7 +69,8 @@ class WorkflowService:
         include_runtime: bool = True,
     ) -> WorkflowExecutionResponse:
         runtime = _runtime_state.get(execution.id, {}) if include_runtime else {}
-        logs_raw = runtime.get("logs", [])
+        logs_raw = runtime.get("logs") or list(execution.execution_logs or [])
+        node_statuses = runtime.get("node_statuses") or dict(execution.node_statuses or {})
         logs = [NodeExecutionLog(**log) for log in logs_raw]
         return WorkflowExecutionResponse(
             id=execution.id,
@@ -84,9 +85,37 @@ class WorkflowService:
             created_by=execution.created_by,
             thread_id=runtime.get("thread_id"),
             task_id=runtime.get("task_id"),
-            node_statuses=runtime.get("node_statuses", {}),
+            node_statuses=node_statuses,
             logs=logs,
         )
+
+    async def _persist_execution_runtime(
+        self,
+        execution_id: int,
+        logs: list[dict[str, Any]],
+        node_statuses: dict[str, str],
+    ) -> None:
+        """将运行时日志与节点状态持久化到数据库。"""
+        from app.core.database import async_session_factory
+
+        try:
+            async with async_session_factory() as db:
+                stmt = select(WorkflowExecution).where(
+                    WorkflowExecution.id == execution_id
+                )
+                result = await db.execute(stmt)
+                execution = result.scalar_one_or_none()
+                if execution is None:
+                    return
+                execution.execution_logs = logs
+                execution.node_statuses = node_statuses
+                await db.commit()
+        except Exception as exc:
+            logger.warning(
+                "持久化工作流执行日志失败 execution_id=%s: %s",
+                execution_id,
+                exc,
+            )
 
     async def _get_workflow_or_raise(
         self,
@@ -163,6 +192,13 @@ class WorkflowService:
         ]
         runtime["parallel_running_nodes"] = running_nodes
         runtime["is_parallel_active"] = len(running_nodes) > 1
+        asyncio.create_task(
+            self._persist_execution_runtime(
+                execution_id,
+                list(runtime.get("logs", [])),
+                dict(runtime.get("node_statuses", {})),
+            )
+        )
 
     async def list_workflows(
         self,

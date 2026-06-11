@@ -34,7 +34,7 @@ function formatTime(iso?: string | null): string {
   <div class="execution-log-panel">
     <div class="panel-header">
       <h4>执行日志</h4>
-      <span class="log-count">{{ logs.length }} 条</span>
+      <span class="log-count">{{ logs.length }} 条（含持久化记录）</span>
     </div>
 
     <el-scrollbar v-if="sortedLogs.length" class="log-list">
