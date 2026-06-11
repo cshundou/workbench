@@ -11,6 +11,7 @@ from app.core.database import Base
 from app.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
+    from app.models.chat_history import ChatHistory
     from app.models.document import Document
     from app.models.tenant import Tenant
     from app.models.user import User
@@ -51,3 +52,4 @@ class KnowledgeBase(Base, TimestampMixin):
     tenant: Mapped["Tenant"] = relationship(back_populates="knowledge_bases")
     owner: Mapped[Optional["User"]] = relationship(back_populates="owned_knowledge_bases")
     documents: Mapped[List["Document"]] = relationship(back_populates="knowledge_base")
+    chat_histories: Mapped[List["ChatHistory"]] = relationship(back_populates="knowledge_base")

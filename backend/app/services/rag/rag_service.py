@@ -39,6 +39,7 @@ from app.services.user_key_context import (
     user_key_resolver,
 )
 from app.core.guardrails import guardrails_service
+from app.services.rag_chat_history_service import rag_chat_history_service
 from app.services.token_quota_service import token_quota_service
 from app.services.token_usage_service import token_usage_service
 
@@ -684,16 +685,38 @@ class RAGService:
         user_ctx: UserKeyContext,
         tenant_id: Optional[int],
         user_id: Optional[int],
+        session_id: Optional[str] = None,
+        kb_id: Optional[int] = None,
+        use_rag: bool = False,
     ):
         """纯 LLM 流式问答（跳过知识库检索）。"""
         llm = create_chat_llm(user_ctx, temperature=0)
+        answer_parts: list[str] = []
         try:
             async for chunk in llm.astream(query):
                 content = chunk.content if hasattr(chunk, "content") else str(chunk)
                 if content:
+                    answer_parts.append(str(content))
                     yield {"type": "token", "content": content}
             yield {"type": "citation", "sources": []}
-            yield {"type": "done"}
+            if (
+                tenant_id is not None
+                and user_id is not None
+                and kb_id is not None
+                and session_id
+            ):
+                await rag_chat_history_service.save_messages(
+                    db=db,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    kb_id=kb_id,
+                    session_id=session_id,
+                    user_query=query,
+                    assistant_answer="".join(answer_parts),
+                    sources=[],
+                    use_rag=use_rag,
+                )
+            yield {"type": "done", "session_id": session_id}
         except Exception as exc:
             logger.error("纯 LLM 流式问答失败: %s", exc)
             yield {"type": "error", "message": str(exc)}
@@ -785,12 +808,16 @@ class RAGService:
         tenant_id: Optional[int] = None,
         user_id: Optional[int] = None,
         use_rag: bool = True,
+        session_id: Optional[str] = None,
     ):
         """流式 RAG 问答生成器。"""
         await guardrails_service.validate_user_input(query)
         if tenant_id is not None:
             await token_quota_service.check_tenant_quota(db, tenant_id)
         user_ctx.get_llm_provider()
+
+        resolved_session_id = session_id or rag_chat_history_service.generate_session_id(kb_id)
+
         if not use_rag:
             async for event in self._answer_stream_without_rag(
                 db=db,
@@ -798,6 +825,9 @@ class RAGService:
                 user_ctx=user_ctx,
                 tenant_id=tenant_id,
                 user_id=user_id,
+                session_id=resolved_session_id,
+                kb_id=kb_id,
+                use_rag=use_rag,
             ):
                 yield event
             return
@@ -813,12 +843,17 @@ class RAGService:
         context, sources = await ContextBuilder(db).build_context(reranked)
 
         generator = AnswerGenerator(user_ctx)
+        answer_parts: list[str] = []
+        citation_sources: list[dict[str, Any]] = []
         async for event in generator.generate_answer_stream(query, context, sources):
             if event.get("type") == "token" and event.get("content"):
+                answer_parts.append(str(event["content"]))
                 event = {
                     **event,
                     "content": await guardrails_service.sanitize_output(str(event["content"])),
                 }
+            if event.get("type") == "citation" and event.get("sources"):
+                citation_sources = list(event["sources"])
             if event.get("type") == "usage" and tenant_id is not None:
                 await token_usage_service.record_from_langchain_response(
                     db=db,
@@ -827,6 +862,21 @@ class RAGService:
                     model_name=event.get("model_name", generator.model_name),
                     response=event.get("llm_response"),
                 )
+                continue
+            if event.get("type") == "done":
+                if tenant_id is not None and user_id is not None:
+                    await rag_chat_history_service.save_messages(
+                        db=db,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        kb_id=kb_id,
+                        session_id=resolved_session_id,
+                        user_query=query,
+                        assistant_answer="".join(answer_parts),
+                        sources=citation_sources,
+                        use_rag=use_rag,
+                    )
+                yield {"type": "done", "session_id": resolved_session_id}
                 continue
             yield event
 

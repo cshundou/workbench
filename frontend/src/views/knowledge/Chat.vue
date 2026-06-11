@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { ArrowLeft, Position, VideoPause } from '@element-plus/icons-vue';
+import { ArrowLeft, Delete, Plus, Position, VideoPause } from '@element-plus/icons-vue';
 import StreamingText from '@/components/chat/StreamingText.vue';
 import CitationPanel from '@/components/knowledge/CitationPanel.vue';
-import { chatKnowledgeStream } from '@/api/rag';
-import type { ChatStreamMessage, CitationSource } from '@/api/rag';
+import {
+  chatKnowledgeStream,
+  deleteRagChatSession,
+  getRagChatHistory,
+  getRagChatSessions,
+} from '@/api/rag';
+import type { ChatStreamMessage, CitationSource, RagChatHistoryItem } from '@/api/rag';
 import { useRagStore } from '@/stores/rag';
 
 interface ChatMessage {
@@ -22,6 +27,8 @@ const ragStore = useRagStore();
 
 const kbId = computed(() => Number(route.params.id));
 
+const sessionId = ref('');
+const sessions = ref<{ session_id: string; last_message: string; updated_at?: string }[]>([]);
 const messages = ref<ChatMessage[]>([]);
 const inputQuery = ref('');
 const isStreaming = ref(false);
@@ -36,7 +43,45 @@ async function loadKbInfo(): Promise<void> {
   await ragStore.fetchKnowledgeBase(kbId.value);
 }
 
-loadKbInfo();
+async function loadSessions(): Promise<void> {
+  sessions.value = await getRagChatSessions(kbId.value);
+}
+
+function handleNewSession(): void {
+  sessionId.value = `kb-${kbId.value}-${Date.now()}`;
+  messages.value = [];
+  currentSources.value = [];
+}
+
+async function loadSessionHistory(targetSessionId: string): Promise<void> {
+  sessionId.value = targetSessionId;
+  const { items } = await getRagChatHistory(kbId.value, {
+    session_id: targetSessionId,
+    limit: 200,
+  });
+  messages.value = items.map((item: RagChatHistoryItem) => ({
+    id: `history-${item.id}`,
+    role: item.message_type === 'user' ? 'user' : 'assistant',
+    content: item.content,
+    sources: (item.metadata?.sources as CitationSource[]) || [],
+  }));
+  const lastAssistant = [...messages.value].reverse().find((m) => m.role === 'assistant');
+  currentSources.value = lastAssistant?.sources || [];
+}
+
+async function handleDeleteSession(targetSessionId: string): Promise<void> {
+  await deleteRagChatSession(kbId.value, targetSessionId);
+  if (sessionId.value === targetSessionId) {
+    handleNewSession();
+  }
+  await loadSessions();
+}
+
+onMounted(async () => {
+  await loadKbInfo();
+  handleNewSession();
+  await loadSessions();
+});
 
 /** 处理 SSE 消息 */
 function handleStreamMessage(data: unknown): void {
@@ -53,6 +98,10 @@ function handleStreamMessage(data: unknown): void {
 
   if (msg.type === 'done') {
     isStreaming.value = false;
+    if (msg.session_id) {
+      sessionId.value = msg.session_id;
+      void loadSessions();
+    }
     return;
   }
 
@@ -76,6 +125,10 @@ async function handleSend(): Promise<void> {
   const query = inputQuery.value.trim();
   if (!query || isStreaming.value) {
     return;
+  }
+
+  if (!sessionId.value) {
+    handleNewSession();
   }
 
   messages.value.push({
@@ -103,7 +156,7 @@ async function handleSend(): Promise<void> {
   try {
     await chatKnowledgeStream(
       kbId.value,
-      { query, use_rag: useRag.value },
+      { query, use_rag: useRag.value, session_id: sessionId.value },
       handleStreamMessage,
       abortController.value.signal,
     );
@@ -181,6 +234,30 @@ onUnmounted(() => {
     </div>
 
     <div class="chat-layout">
+      <div class="session-sidebar">
+        <div class="sidebar-header flex-between">
+          <h3>会话</h3>
+          <el-button text :icon="Plus" @click="handleNewSession">新建</el-button>
+        </div>
+        <div class="session-list">
+          <div
+            v-for="session in sessions"
+            :key="session.session_id"
+            class="session-item"
+            :class="{ active: session.session_id === sessionId }"
+            @click="loadSessionHistory(session.session_id)"
+          >
+            <div class="session-text">{{ session.last_message || '新会话' }}</div>
+            <el-button
+              text
+              type="danger"
+              :icon="Delete"
+              @click.stop="handleDeleteSession(session.session_id)"
+            />
+          </div>
+        </div>
+      </div>
+
       <div class="chat-main">
         <div class="message-list">
           <el-empty
@@ -275,6 +352,60 @@ onUnmounted(() => {
   box-shadow: $shadow-card;
   overflow: hidden;
   background: #fff;
+}
+
+.session-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid $border-color;
+  display: flex;
+  flex-direction: column;
+  background: $bg-color;
+}
+
+.sidebar-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid $border-color;
+
+  h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: $text-primary;
+  }
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: $border-radius-md;
+  cursor: pointer;
+  margin-bottom: 4px;
+
+  &:hover {
+    background: rgba($primary-color, 0.06);
+  }
+
+  &.active {
+    background: rgba($primary-color, 0.12);
+  }
+}
+
+.session-text {
+  flex: 1;
+  font-size: 13px;
+  color: $text-secondary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-main {

@@ -96,6 +96,21 @@ export interface ChatStreamMessage {
   content?: string;
   sources?: CitationSource[];
   message?: string;
+  session_id?: string;
+}
+
+/** RAG 对话历史条目 */
+export interface RagChatHistoryItem {
+  id: number;
+  session_id: string;
+  message_type: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  metadata?: {
+    sources?: CitationSource[];
+    use_rag?: boolean;
+    [key: string]: unknown;
+  };
+  created_at?: string;
 }
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -257,10 +272,53 @@ export function buildChatStreamUrl(
   return url.pathname + url.search;
 }
 
+/** 获取 RAG 对话历史 */
+export function getRagChatHistory(
+  kbId: number,
+  params?: { session_id?: string; limit?: number },
+): Promise<{ items: RagChatHistoryItem[]; total: number }> {
+  return request.get(`/knowledge-bases/${kbId}/history`, { params }) as Promise<{
+    items: RagChatHistoryItem[];
+    total: number;
+  }>;
+}
+
+/** 删除 RAG 对话会话 */
+export function deleteRagChatSession(kbId: number, sessionId: string): Promise<void> {
+  return request.delete(`/knowledge-bases/${kbId}/history/${sessionId}`) as Promise<void>;
+}
+
+/** 获取 RAG 会话列表（从历史聚合） */
+export async function getRagChatSessions(
+  kbId: number,
+): Promise<{ session_id: string; last_message: string; updated_at?: string }[]> {
+  const { items } = await getRagChatHistory(kbId, { limit: 200 });
+  const sessionMap = new Map<string, { session_id: string; last_message: string; updated_at?: string }>();
+  for (const item of items) {
+    const existing = sessionMap.get(item.session_id);
+    if (!existing || (item.created_at && item.created_at > (existing.updated_at || ''))) {
+      sessionMap.set(item.session_id, {
+        session_id: item.session_id,
+        last_message: item.content.slice(0, 80),
+        updated_at: item.created_at,
+      });
+    }
+  }
+  return Array.from(sessionMap.values()).sort(
+    (a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''),
+  );
+}
+
 /** POST 流式问答（支持 use_rag 模式切换） */
 export async function chatKnowledgeStream(
   kbId: number,
-  data: { query: string; use_rag?: boolean; top_k?: number },
+  data: {
+    query: string;
+    use_rag?: boolean;
+    top_k?: number;
+    session_id?: string;
+    filters?: Record<string, unknown>;
+  },
   onMessage: (msg: ChatStreamMessage) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -275,6 +333,8 @@ export async function chatKnowledgeStream(
       query: data.query,
       use_rag: data.use_rag ?? true,
       top_k: data.top_k ?? 5,
+      session_id: data.session_id,
+      filters: data.filters,
     }),
     signal,
   });

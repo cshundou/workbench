@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.knowledge_base import KnowledgeBase
     from app.models.tenant import Tenant
     from app.models.user import User
 
@@ -39,6 +40,11 @@ class ChatHistory(Base):
         index=True,
     )
     session_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    kb_id: Mapped[int | None] = mapped_column(
+        ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     message_type: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     meta_data: Mapped[dict[str, Any]] = mapped_column(
@@ -56,3 +62,4 @@ class ChatHistory(Base):
 
     tenant: Mapped["Tenant"] = relationship(back_populates="chat_histories")
     user: Mapped["User"] = relationship(back_populates="chat_histories")
+    knowledge_base: Mapped["KnowledgeBase | None"] = relationship(back_populates="chat_histories")

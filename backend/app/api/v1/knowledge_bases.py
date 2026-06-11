@@ -32,6 +32,7 @@ from app.schemas.knowledge_base import (
 )
 from app.services.knowledge_base_service import knowledge_base_service
 from app.services.rag.rag_service import rag_service
+from app.services.rag_chat_history_service import rag_chat_history_service
 
 router = APIRouter(prefix="/knowledge-bases", tags=["知识库管理"])
 
@@ -289,6 +290,7 @@ async def chat_knowledge_base(
                 tenant_id=tenant_id,
                 user_id=current_user.id,
                 use_rag=data.use_rag,
+                session_id=data.session_id,
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:
@@ -304,6 +306,48 @@ async def chat_knowledge_base(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/{kb_id}/history", summary="获取 RAG 对话历史")
+async def get_rag_chat_history(
+    kb_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(KB_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    session_id: str | None = Query(default=None, description="会话 ID"),
+    limit: int = Query(default=50, ge=1, le=200, description="返回条数"),
+) -> dict[str, Any]:
+    """获取知识库问答对话历史。"""
+    await knowledge_base_service.get_knowledge_base(db, kb_id, tenant_id, current_user)
+    items = await rag_chat_history_service.get_chat_history(
+        db,
+        tenant_id,
+        current_user.id,
+        kb_id,
+        session_id=session_id,
+        limit=limit,
+    )
+    return success_response(data={"items": items, "total": len(items)})
+
+
+@router.delete("/{kb_id}/history/{session_id}", summary="删除 RAG 对话会话")
+async def delete_rag_chat_session(
+    kb_id: int,
+    session_id: str,
+    current_user: Annotated[CurrentUser, Depends(require_permission(KB_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """删除指定知识库会话的全部历史消息。"""
+    await knowledge_base_service.get_knowledge_base(db, kb_id, tenant_id, current_user)
+    deleted_count = await rag_chat_history_service.delete_chat_session(
+        db=db,
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        kb_id=kb_id,
+        session_id=session_id,
+    )
+    return success_response(data={"deleted": deleted_count}, message="删除成功")
 
 
 @router.post("/{kb_id}/import-url", summary="从 URL 导入文档")

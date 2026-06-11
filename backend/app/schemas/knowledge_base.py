@@ -142,9 +142,28 @@ class ChatRequest(BaseModel):
     """流式问答请求。"""
 
     query: str = Field(..., min_length=1, description="用户问题")
+    session_id: Optional[str] = Field(default=None, description="会话 ID，不传则自动生成")
     top_k: int = Field(default=5, ge=1, le=20, description="检索数量")
     use_rag: bool = Field(default=True, description="是否启用知识库增强检索")
     filters: Optional[dict[str, Any]] = Field(default=None, description="过滤条件")
+
+
+class RagChatHistoryItem(BaseModel):
+    """RAG 对话历史条目。"""
+
+    id: int
+    session_id: str
+    message_type: str
+    content: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+
+
+class RagChatHistoryResponse(BaseModel):
+    """RAG 对话历史响应。"""
+
+    items: List[RagChatHistoryItem]
+    total: int
 
 
 class ChatAnswerResponse(BaseModel):
