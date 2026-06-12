@@ -99,3 +99,12 @@ class TestGraphBuilderGroupChatHook:
         builder._emit_group_chat("scheduler", "task_start", "测试消息")
         assert len(messages) == 1
         assert messages[0]["sender"]["role"] == "project_manager"
+
+    def test_group_chat_audit_retry_route_uses_declared_state_key(self) -> None:
+        """审核打回路由字段须为 AgentState 声明键，避免 LangGraph Invalid state update。"""
+        from app.services.workflow.graph_builder import WorkflowBuilder
+
+        builder = WorkflowBuilder(redis_url="redis://localhost:6379/15")
+        state: dict = {"status": "running", "gc_audit_retry": True}
+        assert builder.route_after_group_chat_audit(state) == "retry"
+        assert "gc_audit_retry" not in state

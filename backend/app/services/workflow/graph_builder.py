@@ -189,6 +189,11 @@ class AgentState(TypedDict):
     human_reject_target: NotRequired[str]
     human_rejected: NotRequired[bool]
     human_intervention_records: NotRequired[list[dict[str, Any]]]
+    # 节点路由辅助字段（须声明在 State 内，禁止以下划线临时键写入 state）
+    gc_audit_retry: NotRequired[bool]
+    audit_retry: NotRequired[bool]
+    supervisor_need_replan: NotRequired[bool]
+    supervisor_incomplete: NotRequired[list[str]]
 
 
 StatusCallback = Callable[[str, str, dict[str, Any]], None]
@@ -1456,7 +1461,7 @@ class WorkflowBuilder:
                 )
                 break
         state["status"] = "running"
-        state["_gc_audit_retry"] = True
+        state["gc_audit_retry"] = True
         self._emit_group_chat_role(
             "auditor",
             "review_result",
@@ -1474,8 +1479,8 @@ class WorkflowBuilder:
             return "human"
         if state.get("status") == "failed":
             return "end"
-        if state.get("_gc_audit_retry"):
-            state.pop("_gc_audit_retry", None)
+        if state.get("gc_audit_retry"):
+            state.pop("gc_audit_retry", None)
             return "retry"
         return "end"
 
@@ -1534,8 +1539,8 @@ class WorkflowBuilder:
         state.setdefault("subtasks", [])
 
         # 监督节点触发的二次规划
-        if state.get("_supervisor_need_replan"):
-            incomplete = list(state.get("_supervisor_incomplete") or [])
+        if state.get("supervisor_need_replan"):
+            incomplete = list(state.get("supervisor_incomplete") or [])
             replan_count = int(state.get("replan_count") or 0) + 1
             state["replan_count"] = replan_count
             subtasks: list[dict[str, Any]] = []
@@ -1545,7 +1550,8 @@ class WorkflowBuilder:
             state["subtasks"] = self._validate_subtasks(subtasks) or subtasks
             state["current_step"] = "scheduler_replanned"
             state["status"] = "running"
-            state.pop("_supervisor_need_replan", None)
+            state.pop("supervisor_need_replan", None)
+            state.pop("supervisor_incomplete", None)
             self._append_log(
                 state,
                 node_id,
@@ -2162,13 +2168,13 @@ class WorkflowBuilder:
             },
         )
         state["current_step"] = "supervisor_checked"
-        state["_supervisor_need_replan"] = need_replan
-        state["_supervisor_incomplete"] = incomplete
+        state["supervisor_need_replan"] = need_replan
+        state["supervisor_incomplete"] = incomplete
         return state
 
     def route_after_supervisor(self, state: AgentState) -> str:
         """监督后路由：需要重规划则回调度，否则继续审核。"""
-        if state.get("_supervisor_need_replan"):
+        if state.get("supervisor_need_replan"):
             return "replan"
         return "continue"
 
@@ -2577,7 +2583,6 @@ class WorkflowBuilder:
             config.get("reject_target", config.get("reject_target_node", "scheduler"))
         )
         state["human_reject_target"] = reject_target
-        state["_audit_reject_target"] = reject_target
 
         if review_count >= max_retries:
             state["status"] = "waiting_for_human"
@@ -2592,7 +2597,7 @@ class WorkflowBuilder:
             return state
 
         state["status"] = "audit_rejected"
-        state["_audit_retry"] = True
+        state["audit_retry"] = True
         self._append_log(
             state,
             node_id,
@@ -2615,8 +2620,8 @@ class WorkflowBuilder:
             return "end"
         if state.get("status") == "waiting_for_human":
             return "human"
-        if state.get("_audit_retry"):
-            state.pop("_audit_retry", None)
+        if state.get("audit_retry"):
+            state.pop("audit_retry", None)
             return "retry"
         return "end"
 
