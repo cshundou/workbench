@@ -9,6 +9,7 @@ export default {
     agents: 'Agents',
     workflows: 'Workflows',
     monitor: 'Monitoring',
+    plugins: 'Plugins',
     settings: 'Settings',
     drawerTitle: 'Navigation',
     settingsGroup: 'Settings',

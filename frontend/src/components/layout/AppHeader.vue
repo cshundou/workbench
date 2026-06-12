@@ -9,6 +9,7 @@ import {
   Cpu,
   Share,
   DataAnalysis,
+  Connection,
   Setting,
   User,
   Key,
@@ -65,6 +66,12 @@ const topMenuItems = computed<NavItem[]>(() => {
       titleKey: 'nav.monitor',
       icon: DataAnalysis,
       permission: ROUTE_PERMISSIONS.monitor,
+    },
+    {
+      path: '/plugins/marketplace',
+      titleKey: 'nav.plugins',
+      icon: Connection,
+      permission: ROUTE_PERMISSIONS.agents,
     },
   ];
 

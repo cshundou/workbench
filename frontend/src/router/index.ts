@@ -136,6 +136,43 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'plugins',
+        name: 'Plugins',
+        redirect: '/plugins/marketplace',
+        meta: {
+          title: '插件市场',
+          icon: 'Connection',
+          accessLevel: 'permission',
+          permission: 'agent:write',
+        },
+        children: [
+          {
+            path: 'marketplace',
+            name: 'PluginMarketplace',
+            component: () => import('@/views/plugins/Marketplace.vue'),
+            meta: { title: '插件市场' },
+          },
+          {
+            path: 'installed',
+            name: 'PluginsInstalled',
+            component: () => import('@/views/plugins/Installed.vue'),
+            meta: { title: '已安装插件' },
+          },
+          {
+            path: 'skills',
+            name: 'SkillsConfig',
+            component: () => import('@/views/plugins/SkillsConfig.vue'),
+            meta: { title: '技能配置' },
+          },
+          {
+            path: ':pluginId',
+            name: 'PluginDetail',
+            component: () => import('@/views/plugins/Detail.vue'),
+            meta: { title: '插件详情' },
+          },
+        ],
+      },
+      {
         path: 'settings',
         name: 'Settings',
         redirect: '/settings/users',
@@ -173,6 +210,16 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/settings/ToolsManagement.vue'),
             meta: {
               title: '工具管理',
+              accessLevel: 'permission',
+              permission: 'agent:write',
+            },
+          },
+          {
+            path: 'mcp',
+            name: 'McpServers',
+            component: () => import('@/views/settings/McpServers.vue'),
+            meta: {
+              title: 'MCP 服务器',
               accessLevel: 'permission',
               permission: 'agent:write',
             },

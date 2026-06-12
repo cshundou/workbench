@@ -9,6 +9,7 @@ export default {
     agents: '智能体',
     workflows: '工作流',
     monitor: '监控面板',
+    plugins: '插件市场',
     settings: '系统设置',
     drawerTitle: '导航菜单',
     settingsGroup: '系统设置',
