@@ -1,0 +1,16 @@
+{
+  "name": "@agent-platform/sdk",
+  "version": "1.0.0",
+  "description": "Agent Platform Plugin & Skill SDK",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "agent-plugin": "./bin/agent-plugin.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": ["agent", "plugin", "skill", "mcp"],
+  "license": "MIT"
+}
