@@ -7,6 +7,64 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.services.workflow.nodes.constants import AGENT_ROLES, SUBTASK_ROLE_MAP
+from app.services.workflow.role_catalog import ROLE_AGENT_TYPE_MAP, build_role_lookup
+
+
+def enrich_subtasks_from_team_config(
+    team_config: dict[str, Any],
+    task: str,
+) -> list[dict[str, Any]]:
+    """
+    根据动态团队配置生成子任务列表（支持串行依赖与并行组）。
+
+    按 workflow 成员顺序分配子任务，跳过审核员与项目经理（除拆解外）。
+    """
+    members = team_config.get("members", [])
+    subtasks: list[dict[str, Any]] = []
+    idx = 0
+    for member in members:
+        role_id = member.get("role_id") or member.get("role", "")
+        if role_id in ("auditor",):
+            continue
+        member_subtasks = member.get("subtasks") or []
+        if role_id == "project_manager" and not member_subtasks:
+            member_subtasks = ["任务拆解与协调"]
+        if not member_subtasks:
+            member_subtasks = [f"执行：{task[:80]}"]
+        agent_type = ROLE_AGENT_TYPE_MAP.get(role_id, "search")
+        if agent_type == "scheduler":
+            agent_type = "search"
+        for subtask_desc in member_subtasks:
+            idx += 1
+            subtasks.append(
+                {
+                    "id": f"subtask_{idx}",
+                    "agent": agent_type,
+                    "role": role_id,
+                    "task": subtask_desc if role_id != "project_manager" else task,
+                    "status": "pending",
+                    "depends_on": member.get("depends_on", []),
+                    "parallel_group": member.get("parallel_group"),
+                }
+            )
+    if not subtasks:
+        return enrich_subtasks_with_roles([], task)
+    # 确保有汇总分析步骤
+    analysis_roles = {
+        r for r, t in ROLE_AGENT_TYPE_MAP.items() if t == "analysis"
+    }
+    if not any(s.get("role") in analysis_roles for s in subtasks):
+        idx += 1
+        subtasks.append(
+            {
+                "id": f"subtask_{idx}",
+                "agent": "analysis",
+                "role": "analyst",
+                "task": f"基于团队成果汇总报告：{task}",
+                "status": "pending",
+            }
+        )
+    return subtasks
 
 
 def enrich_subtasks_with_roles(
@@ -50,10 +108,29 @@ def enrich_subtasks_with_roles(
     return subtasks
 
 
+def _dependencies_met(
+    subtask: dict[str, Any],
+    subtasks: list[dict[str, Any]],
+) -> bool:
+    """检查子任务依赖是否已满足。"""
+    depends_on = subtask.get("depends_on") or []
+    if not depends_on:
+        return True
+    completed_roles = {
+        s.get("role")
+        for s in subtasks
+        if s.get("status") == "completed"
+    }
+    return all(dep in completed_roles for dep in depends_on)
+
+
 def get_pending_subtask(subtasks: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
-    """获取下一个待执行子任务。"""
+    """获取下一个待执行子任务（支持依赖调度，跳过已失败任务）。"""
     for subtask in subtasks:
-        if subtask.get("status") != "completed":
+        status = subtask.get("status")
+        if status in ("completed", "error"):
+            continue
+        if _dependencies_met(subtask, subtasks):
             return subtask
     return None
 
@@ -87,11 +164,16 @@ def build_final_answer(
     task: str,
     deliverables: list[dict[str, Any]],
     review_result: dict[str, Any] | None,
+    team_config: dict[str, Any] | None = None,
 ) -> str:
     """汇总最终交付物为报告文本。"""
+    lookup = build_role_lookup((team_config or {}).get("members"))
     parts = [f"# 任务交付报告\n\n**任务**：{task}\n"]
     for item in deliverables:
-        role_name = AGENT_ROLES.get(item.get("role", ""), {}).get("name", "成员")
+        role_key = item.get("role", "")
+        role_name = lookup.get(role_key, {}).get("name") or AGENT_ROLES.get(
+            role_key, {}
+        ).get("name", "成员")
         parts.append(f"\n## {role_name}交付\n\n{item.get('content', '')}")
     review = review_result or {}
     parts.append(f"\n\n---\n**审核结论**：{review.get('summary', '通过')}")

@@ -36,6 +36,7 @@ from app.services.monitor_service import monitor_service
 from app.services.user_key_context import user_key_resolver
 from app.services.workflow.group_chat_engine import GroupChatEngine
 from app.services.workflow.group_chat_ws_manager import group_chat_ws_manager
+from app.services.workflow.team_builder import team_builder
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,17 @@ class GroupChatService:
                 raise NotFoundError(message="工作流不存在")
 
         title = data.title or data.task[:50]
+
+        # 智能组队：动态团队配置
+        template_id = data.template_id
+        if data.use_classic_five:
+            template_id = "classic_five"
+        team_config = team_builder.build(
+            data.task,
+            template_id=template_id,
+            custom_config=data.team_config,
+        )
+
         session = GroupChatSession(
             tenant_id=tenant_id,
             user_id=user.id,
@@ -95,11 +107,21 @@ class GroupChatService:
             status="pending",
             progress=0.0,
             kb_id=data.kb_id,
-            extra_params={},
+            extra_params={"team_config": team_config},
         )
         db.add(session)
         await db.flush()
         await db.refresh(session)
+
+        # 推送团队组建入场事件
+        await group_chat_ws_manager.broadcast(
+            session.id,
+            {
+                "type": "team_formation",
+                "team_config": team_config,
+                "message": "正在为您组建专属团队…",
+            },
+        )
 
         thread_id = f"group_chat_{session.id}"
         task_id = await enqueue_task(
@@ -111,7 +133,9 @@ class GroupChatService:
             data.kb_id,
             thread_id,
         )
-        session.extra_params = {"thread_id": thread_id, "task_id": task_id}
+        extra = dict(session.extra_params or {})
+        extra.update({"thread_id": thread_id, "task_id": task_id})
+        session.extra_params = extra
         await db.flush()
 
         await audit_service.record_action(
@@ -164,6 +188,39 @@ class GroupChatService:
         )
         rows = (await db.execute(stmt)).scalars().all()
         return [GroupChatMessageResponse.model_validate(row) for row in rows]
+
+    async def adjust_team(
+        self,
+        db: AsyncSession,
+        session_id: int,
+        tenant_id: int,
+        members: list[dict[str, Any]],
+    ) -> GroupChatSessionResponse:
+        """中途调整团队成员与分工。"""
+        session = await self._get_session_or_raise(db, session_id, tenant_id)
+        if session.status in ("completed", "failed", "cancelled"):
+            raise ValidationError(message="会话已结束，无法调整团队")
+
+        extra = dict(session.extra_params or {})
+        team_config = dict(extra.get("team_config") or {})
+        team_config["members"] = members
+        team_config["team_size"] = len(members)
+        extra["team_config"] = team_config
+        session.extra_params = extra
+        await db.flush()
+
+        await group_chat_ws_manager.broadcast(
+            session_id,
+            {
+                "type": "team_adjusted",
+                "team_config": team_config,
+                "members": GroupChatEngine.get_members(
+                    team_config=team_config,
+                    session_status=session.status,
+                ),
+            },
+        )
+        return await self._build_session_response(db, session)
 
     async def send_user_message(
         self,
@@ -462,6 +519,8 @@ class GroupChatService:
         def message_callback(message: dict[str, Any]) -> None:
             asyncio.run_coroutine_threadsafe(persist_and_broadcast(message), main_loop)
 
+        team_config_holder: dict[str, Any] = {}
+
         def member_status_callback(role: str, status: str) -> None:
             member_statuses[role] = status
             asyncio.run_coroutine_threadsafe(
@@ -471,7 +530,14 @@ class GroupChatService:
                         "type": "member_status",
                         "role": role,
                         "status": status,
-                        "members": GroupChatEngine.get_members(member_statuses),
+                        "members": GroupChatEngine.get_members(
+                            member_statuses,
+                            team_config=team_config_holder.get("config"),
+                            subtasks=team_config_holder.get("subtasks"),
+                            session_status=team_config_holder.get("status", "running"),
+                            review_count=team_config_holder.get("review_count", 0),
+                            reject_info=team_config_holder.get("reject_info"),
+                        ),
                     },
                 ),
                 main_loop,
@@ -493,7 +559,20 @@ class GroupChatService:
             async with async_session_factory() as db:
                 user_ctx = await user_key_resolver.load_context(db, user_id, tenant_id)
 
-            engine = GroupChatEngine(settings.redis_url, user_ctx=user_ctx)
+            async with async_session_factory() as db:
+                stmt = select(GroupChatSession).where(GroupChatSession.id == session_id)
+                cfg_session = (await db.execute(stmt)).scalar_one()
+                team_config = (cfg_session.extra_params or {}).get("team_config") or {}
+
+            team_config_holder["config"] = team_config
+            team_config_holder["status"] = "running"
+            team_config_holder["subtasks"] = []
+            team_config_holder["review_count"] = 0
+
+            engine = GroupChatEngine(
+                settings.redis_url, user_ctx=user_ctx, team_config=team_config
+            )
+            engine.set_team_config(team_config)
             engine.set_execution_context(tenant_id, user_id, session_id)
             engine.set_message_callback(message_callback)
             engine.set_member_status_callback(member_status_callback)
@@ -548,6 +627,7 @@ class GroupChatService:
                 "messages": [],
                 "task": task,
                 "kb_id": kb_id,
+                "team_config": team_config,
                 "subtasks": [],
                 "results": {},
                 "deliverables": [],
@@ -737,7 +817,10 @@ class GroupChatService:
 
     def _to_session_response(self, session: GroupChatSession) -> GroupChatSessionResponse:
         """转换为会话响应。"""
-        member_statuses = (session.extra_params or {}).get("member_statuses") or {}
+        extra = session.extra_params or {}
+        member_statuses = extra.get("member_statuses") or {}
+        team_config = extra.get("team_config")
+        reject_info = extra.get("reject_info") or {}
         return GroupChatSessionResponse(
             id=session.id,
             tenant_id=session.tenant_id,
@@ -760,14 +843,24 @@ class GroupChatService:
             updated_at=session.updated_at,
             members=[
                 GroupChatMemberInfo(**m)
-                for m in GroupChatEngine.get_members(member_statuses)
+                for m in GroupChatEngine.get_members(
+                    member_statuses,
+                    team_config=team_config,
+                    subtasks=session.subtasks or [],
+                    session_status=session.status,
+                    review_count=session.review_count,
+                    reject_info=reject_info,
+                )
             ],
             progress_steps=[
                 GroupChatProgressStep(**s)
                 for s in GroupChatEngine.get_progress_steps(
-                    session.status, session.subtasks or []
+                    session.status,
+                    session.subtasks or [],
+                    team_config=team_config,
                 )
             ],
+            team_config=team_config,
         )
 
     def _to_session_detail_response(

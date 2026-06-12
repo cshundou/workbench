@@ -35,9 +35,15 @@ from app.services.workflow.nodes.constants import (
 from app.services.workflow.nodes.group_chat_subtasks import (
     build_final_answer,
     calc_group_chat_progress,
+    enrich_subtasks_from_team_config,
     enrich_subtasks_with_roles,
     get_pending_subtask,
     mark_subtask_completed,
+)
+from app.services.workflow.role_catalog import (
+    AUDIT_REJECT_ROLE_MAP,
+    ROLE_AGENT_TYPE_MAP,
+    build_role_lookup,
 )
 from app.services.workflow.hybrid_checkpoint import create_checkpointer
 from app.services.workflow.redis_saver import RedisSaver
@@ -194,6 +200,8 @@ class AgentState(TypedDict):
     audit_retry: NotRequired[bool]
     supervisor_need_replan: NotRequired[bool]
     supervisor_incomplete: NotRequired[list[str]]
+    team_config: NotRequired[dict[str, Any]]
+    reject_info: NotRequired[dict[str, Any]]
 
 
 StatusCallback = Callable[[str, str, dict[str, Any]], None]
@@ -236,6 +244,19 @@ class WorkflowBuilder:
         self._agent_runner: Optional[WorkflowAgentRunner] = None
         self._tool_manager: Optional[WorkflowToolManager] = None
         self._trace_id: Optional[str] = None
+        self._team_config: dict[str, Any] = {}
+
+    def set_team_config(self, team_config: dict[str, Any]) -> None:
+        """设置动态团队配置。"""
+        self._team_config = team_config or {}
+
+    def _get_role_info(self, role: str, state: AgentState | None = None) -> dict[str, str]:
+        """获取角色展示信息（支持动态团队）。"""
+        members = self._team_config.get("members")
+        if state and not members:
+            members = (state.get("team_config") or {}).get("members")
+        lookup = build_role_lookup(members)
+        return lookup.get(role, AGENT_ROLES.get(role, AGENT_ROLES["project_manager"]))
 
     def set_execution_context(
         self,
@@ -320,15 +341,15 @@ class WorkflowBuilder:
             return
         import uuid
 
-        role_info = AGENT_ROLES.get(role, AGENT_ROLES["project_manager"])
+        role_info = self._get_role_info(role)
         payload: dict[str, Any] = {
             "id": str(uuid.uuid4()),
             "timestamp": self._now_iso(),
             "sender": {
-                "id": role_info["id"],
-                "name": role_info["name"],
+                "id": role_info.get("id", role),
+                "name": role_info.get("name", role),
                 "role": role,
-                "avatar": role_info["avatar"],
+                "avatar": role_info.get("avatar", "🤖"),
             },
             "receiver": receiver,
             "type": message_type,
@@ -1166,6 +1187,18 @@ class WorkflowBuilder:
         workflow.add_edge("gc_human", END)
         return workflow.compile(checkpointer=self.checkpointer)
 
+    def build_dynamic_group_chat_workflow(
+        self, team_config: dict[str, Any] | None = None
+    ):
+        """
+        构建动态团队群聊工作流。
+
+        基于团队配置动态生成子任务与执行链路，图拓扑保持固定以避免递归问题。
+        """
+        if team_config:
+            self.set_team_config(team_config)
+        return self.build_group_chat_workflow()
+
     def group_chat_init_node(self, state: AgentState) -> AgentState:
         """群聊初始化：任务拆解并生成带角色的子任务列表。"""
         state = dict(state)
@@ -1191,27 +1224,33 @@ class WorkflowBuilder:
 
         self._set_member_status("project_manager", "thinking")
 
+        team_config = state.get("team_config") or self._team_config
+
         if not state.get("subtasks"):
             self._emit_group_chat_role(
                 "project_manager",
                 "task_start",
                 f"收到任务！我来拆解并分配给团队成员：\n\n**{state['task']}**",
             )
-            agent_state = self.scheduler_node(state)
-            if agent_state.get("status") == "failed":
-                state["status"] = "failed"
-                state["error"] = agent_state.get("error", "任务拆解失败")
-                self._emit_group_chat_role("project_manager", "error", state["error"])
-                self._set_member_status("project_manager", "idle")
-                return state
+            if team_config and team_config.get("members"):
+                subtasks = enrich_subtasks_from_team_config(team_config, state["task"])
+            else:
+                agent_state = self.scheduler_node(state)
+                if agent_state.get("status") == "failed":
+                    state["status"] = "failed"
+                    state["error"] = agent_state.get("error", "任务拆解失败")
+                    self._emit_group_chat_role("project_manager", "error", state["error"])
+                    self._set_member_status("project_manager", "completed")
+                    return state
+                raw = agent_state.get("subtasks", [])
+                subtasks = enrich_subtasks_with_roles(raw, state["task"])
 
-            raw = agent_state.get("subtasks", [])
-            subtasks = enrich_subtasks_with_roles(raw, state["task"])
             state["subtasks"] = subtasks
             state["status"] = "running"
             state["progress"] = 10.0
+            lookup = build_role_lookup(team_config.get("members") if team_config else None)
             lines = [
-                f"{idx + 1}. {AGENT_ROLES[s['role']]['name']}：{s['task']}"
+                f"{idx + 1}. {lookup.get(s['role'], {}).get('name', s['role'])}：{s['task']}"
                 for idx, s in enumerate(subtasks)
             ]
             self._emit_group_chat_role(
@@ -1221,7 +1260,7 @@ class WorkflowBuilder:
                 metadata={"subtasks": subtasks},
             )
 
-        self._set_member_status("project_manager", "idle")
+        self._set_member_status("project_manager", "completed")
         return state
 
     def group_chat_subtasks_node(self, state: AgentState) -> AgentState:
@@ -1260,6 +1299,7 @@ class WorkflowBuilder:
             task_desc = pending.get("task", state["task"])
             subtask_id = pending.get("id", "")
 
+            self._set_member_status(role, "thinking")
             self._set_member_status(role, "working")
             self._emit_group_chat_role(
                 role,
@@ -1268,9 +1308,17 @@ class WorkflowBuilder:
                 metadata={"task_id": subtask_id},
             )
             started = time.monotonic()
+            role_agent = ROLE_AGENT_TYPE_MAP.get(role, agent_type)
 
             try:
-                if role == "analyst":
+                if role_agent == "analysis" or role in (
+                    "analyst",
+                    "financial_analyst",
+                    "copywriter",
+                    "content_editor",
+                    "data_visualizer",
+                    "compliance_officer",
+                ):
                     result = self._run_analyst_subtask(state, task_desc)
                     result_key = "analysis"
                 elif agent_type == "knowledge":
@@ -1311,18 +1359,24 @@ class WorkflowBuilder:
                     }
                 )
                 mark_subtask_completed(state["subtasks"], subtask_id)
+                role_name = self._get_role_info(role, state).get("name", role)
                 self._emit_group_chat_role(
                     role,
                     "answer",
-                    f"【{AGENT_ROLES[role]['name']}】任务「{task_desc[:30]}」已完成，请查收。",
+                    f"【{role_name}】任务「{task_desc[:30]}」已完成，请查收。",
                     receiver="project_manager",
                 )
             except Exception as exc:
                 logger.exception("群聊子任务失败 role=%s: %s", role, exc)
-                mark_subtask_completed(state["subtasks"], subtask_id)
+                self._set_member_status(role, "error")
                 self._emit_group_chat_role(role, "error", f"任务执行失败：{exc}")
+                for subtask in state.get("subtasks", []):
+                    if subtask.get("id") == subtask_id:
+                        subtask["status"] = "error"
+                        break
 
-            self._set_member_status(role, "idle")
+            else:
+                self._set_member_status(role, "completed")
             state["progress"] = calc_group_chat_progress(
                 state.get("subtasks", []), state.get("status", "running")
             )
@@ -1380,6 +1434,46 @@ class WorkflowBuilder:
             ]
         return []
 
+    def _resolve_audit_assignee(
+        self,
+        review_result: dict[str, Any],
+        state: AgentState,
+    ) -> str:
+        """精准打回：根据审核维度定位负责角色。"""
+        assignee = review_result.get("assignee", "analyst")
+        team_members = (state.get("team_config") or self._team_config).get("members", [])
+        team_role_ids = {
+            m.get("role_id") or m.get("role") for m in team_members
+        }
+        # 根据未通过的审核维度映射打回目标
+        dimensions = review_result.get("dimensions") or {}
+        for dim_key, passed in dimensions.items():
+            if passed:
+                continue
+            mapped = AUDIT_REJECT_ROLE_MAP.get(dim_key)
+            if mapped and (not team_role_ids or mapped in team_role_ids):
+                return mapped
+        # 根据问题描述关键词匹配
+        issues_text = " ".join(review_result.get("issues") or [])
+        keyword_map = {
+            "数据": "engineer",
+            "资料": "researcher",
+            "逻辑": "analyst",
+            "格式": "content_editor",
+            "合规": "compliance_officer",
+        }
+        for kw, role in keyword_map.items():
+            if kw in issues_text and (not team_role_ids or role in team_role_ids):
+                return role
+        if team_role_ids and assignee not in team_role_ids:
+            for candidate in ("analyst", "engineer", "researcher", "copywriter"):
+                if candidate in team_role_ids:
+                    return candidate
+        lookup = build_role_lookup(team_members)
+        if assignee not in lookup:
+            assignee = "analyst"
+        return assignee
+
     def group_chat_audit_node(self, state: AgentState) -> AgentState:
         """群聊强制审核节点（复用通用审核能力）。"""
         state = dict(state)
@@ -1413,6 +1507,7 @@ class WorkflowBuilder:
                 state["task"],
                 state.get("deliverables", []),
                 review_result,
+                state.get("team_config") or self._team_config,
             )
             state["final_answer"] = final_answer
             state["status"] = "completed"
@@ -1450,9 +1545,7 @@ class WorkflowBuilder:
             self._set_member_status("auditor", "idle")
             return state
 
-        assignee = review_result.get("assignee", "analyst")
-        if assignee not in AGENT_ROLES:
-            assignee = "analyst"
+        assignee = self._resolve_audit_assignee(review_result, state)
         for subtask in state.get("subtasks", []):
             if subtask.get("role") == assignee:
                 subtask["status"] = "pending"
@@ -1462,13 +1555,20 @@ class WorkflowBuilder:
                 break
         state["status"] = "running"
         state["gc_audit_retry"] = True
+        state["reject_info"] = {
+            "assignee": assignee,
+            "reason": "; ".join(issues[:2]),
+            "round": review_count,
+        }
+        self._set_member_status(assignee, "revision")
         self._emit_group_chat_role(
             "auditor",
             "review_result",
-            f"❌ 审核不通过（第{review_count}次），请修改后重新提交：\n{issue_text}",
+            f"❌ 审核不通过（第{review_count}次），已打回给"
+            f"{self._get_role_info(assignee, state).get('name', assignee)}：\n{issue_text}",
             metadata={"review": review_result, "assignee": assignee, "retry": review_count},
         )
-        self._set_member_status("auditor", "idle")
+        self._set_member_status("auditor", "completed")
         return state
 
     def route_after_group_chat_audit(self, state: AgentState) -> str:

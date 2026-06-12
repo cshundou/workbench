@@ -19,6 +19,7 @@ from app.core.permissions import WF_READ, WF_WRITE
 from app.core.response import success_response
 from app.core.security import decode_access_token
 from app.schemas.group_chat import GroupChatSessionCreate, GroupChatUserMessage
+from app.schemas.professional_role import TeamAdjustRequest, TeamBuildRequest
 from app.services.workflow.group_chat_service import group_chat_service
 from app.services.workflow.group_chat_ws_manager import group_chat_ws_manager
 
@@ -88,6 +89,38 @@ async def send_group_chat_message(
     )
     await db.commit()
     return success_response(data=result.model_dump(), message="发言成功")
+
+
+@router.post("/sessions/{session_id}/adjust-team", summary="调整团队成员")
+async def adjust_group_chat_team(
+    session_id: int,
+    body: TeamAdjustRequest,
+    _: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """执行中调整团队成员与分工。"""
+    members = [m.model_dump() for m in body.members]
+    result = await group_chat_service.adjust_team(db, session_id, tenant_id, members)
+    await db.commit()
+    return success_response(data=result.model_dump(), message="团队已调整")
+
+
+@router.post("/team/preview", summary="预览智能组队结果")
+async def preview_team_build(
+    data: TeamBuildRequest,
+    _: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+) -> dict[str, Any]:
+    """预览任务驱动的智能组队结果（不创建会话）。"""
+    from app.services.workflow.team_builder import team_builder
+
+    custom = data.team_config.model_dump() if data.team_config else None
+    config = team_builder.build(
+        data.task,
+        template_id=data.template_id,
+        custom_config=custom,
+    )
+    return success_response(data=config)
 
 
 @router.post("/sessions/{session_id}/cancel", summary="取消群聊会话")

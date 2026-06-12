@@ -75,7 +75,7 @@ def run_forced_audit(
   "passed": true/false,
   "grade": "pass" | "conditional" | "reject",
   "issues": ["问题1", "问题2"],
-  "assignee": "researcher" | "engineer" | "analyst",
+  "assignee": "researcher" | "engineer" | "analyst" | "content_editor" | "compliance_officer" | "financial_analyst" | "copywriter",
   "summary": "审核意见摘要",
   "dimensions": {{
     "completeness": true/false,

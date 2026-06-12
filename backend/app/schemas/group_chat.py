@@ -40,13 +40,19 @@ class AgentMessagePayload(BaseModel):
 
 
 class GroupChatMemberInfo(BaseModel):
-    """群成员状态。"""
+    """群成员状态（动态团队）。"""
 
     role: str
     name: str
     avatar: str
     color: str
-    status: str = "idle"
+    status: str = "pending"
+    current_task: Optional[str] = None
+    completed_count: int = 0
+    total_count: int = 0
+    is_auditor: bool = False
+    review_round: Optional[int] = None
+    reject_reason: Optional[str] = None
 
 
 class GroupChatProgressStep(BaseModel):
@@ -64,6 +70,18 @@ class GroupChatSessionCreate(BaseModel):
     workflow_id: Optional[int] = Field(default=None, description="关联工作流 ID")
     kb_id: Optional[int] = Field(default=None, description="知识库 ID")
     title: Optional[str] = Field(default=None, max_length=200, description="会话标题")
+    template_id: Optional[str] = Field(
+        default=None,
+        description="团队模板 ID，classic_five 为经典五角色",
+    )
+    team_config: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="自定义团队配置（覆盖自动组队）",
+    )
+    use_classic_five: bool = Field(
+        default=False,
+        description="使用经典五角色模式（向后兼容）",
+    )
 
 
 class GroupChatUserMessage(BaseModel):
@@ -110,6 +128,7 @@ class GroupChatSessionResponse(BaseModel):
     updated_at: datetime
     members: List[GroupChatMemberInfo] = Field(default_factory=list)
     progress_steps: List[GroupChatProgressStep] = Field(default_factory=list)
+    team_config: Optional[dict[str, Any]] = None
 
     model_config = {"from_attributes": True}
 

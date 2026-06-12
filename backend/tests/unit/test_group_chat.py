@@ -2,10 +2,10 @@
 
 import pytest
 
-from app.services.workflow.group_chat_engine import (
+from app.services.workflow.group_chat_engine import GroupChatEngine
+from app.services.workflow.nodes.constants import (
     AGENT_ROLES,
     MAX_REVIEW_RETRIES,
-    GroupChatEngine,
     SUBTASK_ROLE_MAP,
 )
 
@@ -44,7 +44,7 @@ class TestGroupChatEngineHelpers:
     def test_get_members_default_idle(self, engine: GroupChatEngine) -> None:
         members = engine.get_members()
         assert len(members) == 5
-        assert all(m["status"] == "idle" for m in members)
+        assert all(m["status"] == "pending" for m in members)
 
     def test_get_progress_steps_empty(self, engine: GroupChatEngine) -> None:
         steps = engine.get_progress_steps("pending", [])
