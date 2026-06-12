@@ -23,6 +23,17 @@ export interface MessageAttachment {
   language?: string;
 }
 
+/** 交付物附件扩展 */
+export interface DeliverableAttachment {
+  id: string;
+  name: string;
+  category: 'final' | 'chart' | 'intermediate' | 'reference';
+  fileType: 'md' | 'pdf' | 'png' | 'xlsx' | 'txt' | 'code' | 'chart';
+  size: number;
+  content: string;
+  createBy: string;
+}
+
 /** 标准化 Agent 消息 */
 export interface AgentMessage {
   id: string;
@@ -36,7 +47,11 @@ export interface AgentMessage {
   receiver?: string;
   type: string;
   content: string;
+  /** 内容类型，向后兼容：缺省视为 markdown */
+  contentType?: 'text' | 'markdown' | 'chart' | 'file' | 'image';
   attachments?: MessageAttachment[];
+  /** contentType=chart 时的 ECharts 配置 */
+  chartConfig?: Record<string, unknown>;
   metadata?: {
     taskId?: string;
     step?: number;
