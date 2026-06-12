@@ -134,12 +134,13 @@ class SkillExecutionEngine:
     ) -> dict[str, Any]:
         """执行 Skill 并记录审计日志。"""
         started = time.monotonic()
+        sandbox_level = "process" if skill.source_type == "plugin" else "basic"
         ctx = SandboxContext(
             tenant_id=tenant_id,
             user_id=user.id if user else None,
             skill_key=skill.skill_key,
             declared_permissions=list(skill.permissions or []),
-            level="basic",
+            level=sandbox_level,
         )
 
         async def _run(params: dict[str, Any]) -> Any:
