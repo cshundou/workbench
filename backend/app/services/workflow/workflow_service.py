@@ -111,6 +111,7 @@ class WorkflowService:
             created_by=execution.created_by,
             thread_id=runtime.get("thread_id"),
             task_id=runtime.get("task_id"),
+            trace_id=runtime.get("trace_id"),
             node_statuses=node_statuses,
             logs=logs,
         )
@@ -795,10 +796,10 @@ class WorkflowService:
         try:
             import redis as sync_redis
 
-            from app.services.workflow.redis_saver import RedisSaver
+            from app.services.workflow.hybrid_checkpoint import HybridCheckpointSaver
 
-            redis_client = sync_redis.from_url(settings.redis_url, decode_responses=True)
-            RedisSaver(redis_client).delete_checkpoint(thread_id)
+            redis_client = sync_redis.from_url(settings.redis_url, decode_responses=False)
+            HybridCheckpointSaver(redis_client).delete_checkpoint(thread_id)
         except Exception as exc:
             logger.warning("终止时清理 Redis 检查点失败 execution_id=%s: %s", execution_id, exc)
 
@@ -928,10 +929,12 @@ class WorkflowService:
         execution_id: int,
         status_callback: Any,
         main_loop: Optional[asyncio.AbstractEventLoop] = None,
+        trace_id: Optional[str] = None,
     ) -> None:
         """统一配置 WorkflowBuilder 回调与执行上下文。"""
         builder.set_execution_context(tenant_id, user_id, execution_id)
         builder.set_status_callback(status_callback)
+        builder.set_trace_id(trace_id)
 
         def stream_callback(node_id: str, chunk: str) -> None:
             self._schedule_coroutine(
@@ -942,6 +945,16 @@ class WorkflowService:
             )
 
         builder.set_stream_callback(stream_callback)
+
+        def group_chat_callback(payload: dict[str, Any]) -> None:
+            self._schedule_coroutine(
+                workflow_ws_manager.broadcast_group_chat_message(
+                    execution_id, payload
+                ),
+                main_loop,
+            )
+
+        builder.set_group_chat_callback(group_chat_callback)
 
     async def run_workflow_task(
         self,
@@ -1000,6 +1013,8 @@ class WorkflowService:
             )
 
             require_human = bool(input_params.get("require_human_approval"))
+            runtime = self._load_runtime_state(execution_id)
+            trace_id = runtime.get("trace_id")
             builder = WorkflowBuilder(settings.redis_url, user_ctx=user_ctx)
             self._configure_builder(
                 builder,
@@ -1008,6 +1023,7 @@ class WorkflowService:
                 execution_id,
                 status_callback,
                 main_loop,
+                trace_id=trace_id,
             )
             graph = builder.build_workflow(graph_definition, require_human=require_human)
 
@@ -1140,6 +1156,8 @@ class WorkflowService:
 
             require_human = bool(input_params.get("require_human_approval"))
             user_id = execution.created_by or 0
+            runtime = self._load_runtime_state(execution_id)
+            trace_id = runtime.get("trace_id")
             builder = WorkflowBuilder(settings.redis_url, user_ctx=user_ctx)
             self._configure_builder(
                 builder,
@@ -1148,6 +1166,7 @@ class WorkflowService:
                 execution_id,
                 status_callback,
                 main_loop,
+                trace_id=trace_id,
             )
             graph = builder.build_workflow(graph_definition, require_human=require_human)
 

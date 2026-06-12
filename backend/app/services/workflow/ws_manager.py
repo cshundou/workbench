@@ -121,6 +121,21 @@ class WorkflowWebSocketManager:
         }
         workflow_ws_event_bus.publish(execution_id, message)
 
+    async def broadcast_group_chat_message(
+        self,
+        execution_id: int,
+        chat_message: dict[str, Any],
+    ) -> None:
+        """推送工作流执行过程的群聊视图消息。"""
+        from app.services.workflow.ws_event_bus import workflow_ws_event_bus
+
+        message = {
+            "type": "group_chat_message",
+            "execution_id": execution_id,
+            "message": chat_message,
+        }
+        workflow_ws_event_bus.publish(execution_id, message)
+
     async def disconnect_execution(self, execution_id: int) -> None:
         """关闭指定执行实例的全部 WebSocket 连接。"""
         async with self._lock:
