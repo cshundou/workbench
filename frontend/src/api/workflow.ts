@@ -107,6 +107,7 @@ export interface WorkflowExecution {
   thread_id?: string | null;
   node_statuses?: Record<string, string>;
   logs?: NodeExecutionLog[];
+  trace_id?: string | null;
 }
 
 /** 人工介入参数 */
@@ -117,14 +118,14 @@ export interface HumanInterventionParams {
 
 /** WebSocket 消息 */
 export interface WorkflowWsMessage {
-  type: 'connected' | 'node_status' | 'execution_status' | 'node_stream';
+  type: 'connected' | 'node_status' | 'execution_status' | 'node_stream' | 'group_chat_message';
   execution_id?: number;
   node_id?: string;
   status?: string;
   chunk?: string;
   log?: NodeExecutionLog;
   data?: Record<string, unknown>;
-  message?: string;
+  message?: string | Record<string, unknown>;
 }
 
 /** 获取工作流列表 */

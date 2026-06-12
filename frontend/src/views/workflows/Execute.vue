@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft, VideoPlay, Check, Close, CircleClose, Download, ChatDotRound } from '@element-plus/icons-vue';
 import WorkflowCanvas from '@/components/workflow/WorkflowCanvas.vue';
 import ExecutionLogPanel from '@/components/workflow/ExecutionLogPanel.vue';
+import MessageStream from '@/components/group-chat/MessageStream.vue';
 import StreamingText from '@/components/chat/StreamingText.vue';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
 import { useGraphStore } from '@/stores/graph';
@@ -25,6 +26,7 @@ const isExecuting = ref(false);
 const selectedNodeId = ref<string | null>(null);
 const selectedLog = ref<NodeExecutionLog | null>(null);
 const interventionComment = ref('');
+const viewMode = ref<'topology' | 'groupchat'>('topology');
 
 const graphDefinition = computed(
   () => graphStore.currentWorkflow?.graph_definition || { nodes: [], edges: [] },
@@ -197,7 +199,22 @@ onUnmounted(() => {
     >
       <template #actions>
         <el-button :icon="ArrowLeft" text @click="goBack">返回列表</el-button>
-        <el-button :icon="ChatDotRound" @click="goGroupChat">群聊视图</el-button>
+        <el-button-group>
+          <el-button
+            :type="viewMode === 'topology' ? 'primary' : 'default'"
+            @click="viewMode = 'topology'"
+          >
+            拓扑视图
+          </el-button>
+          <el-button
+            :type="viewMode === 'groupchat' ? 'primary' : 'default'"
+            :icon="ChatDotRound"
+            @click="viewMode = 'groupchat'"
+          >
+            群聊视图
+          </el-button>
+        </el-button-group>
+        <el-button text :icon="ChatDotRound" @click="goGroupChat">独立群聊页</el-button>
         <el-tag v-if="executionStatus !== 'idle'" :type="statusTagType as any" size="small">
           {{ executionStatus }}
         </el-tag>
@@ -206,7 +223,7 @@ onUnmounted(() => {
 
     <el-row :gutter="16" class="main-content">
       <el-col :span="16">
-        <el-card shadow="never" class="canvas-card">
+        <el-card v-show="viewMode === 'topology'" shadow="never" class="canvas-card">
           <template #header>
             <span>工作流拓扑</span>
             <div class="legend">
@@ -224,8 +241,23 @@ onUnmounted(() => {
           />
         </el-card>
 
+        <el-card v-show="viewMode === 'groupchat'" shadow="never" class="canvas-card groupchat-card">
+          <template #header>
+            <span>群聊协同视图</span>
+            <span class="hint">节点执行自动转换为角色发言，与拓扑视图状态实时同步</span>
+          </template>
+          <MessageStream
+            v-if="graphStore.groupChatMessages.length"
+            :messages="graphStore.groupChatMessages"
+          />
+          <el-empty
+            v-else
+            description="执行工作流后，此处将实时展示多 Agent 群聊式协作过程"
+          />
+        </el-card>
+
         <!-- 节点详情 -->
-        <el-card v-if="selectedLog" shadow="never" class="node-detail-card">
+        <el-card v-if="selectedLog && viewMode === 'topology'" shadow="never" class="node-detail-card">
           <template #header>节点详情：{{ selectedLog.node_label }}</template>
           <el-descriptions :column="1" border size="small">
             <el-descriptions-item label="状态">{{ selectedLog.status }}</el-descriptions-item>
@@ -348,6 +380,7 @@ onUnmounted(() => {
           <ExecutionLogPanel
             :logs="graphStore.executionLogs"
             :selected-node-id="selectedNodeId"
+            :trace-id="graphStore.currentExecution?.trace_id"
             @select="handleNodeClick"
           />
         </el-card>

@@ -19,6 +19,7 @@ import {
   type UpdateWorkflowParams,
   type ExecuteWorkflowParams,
 } from '@/api/workflow';
+import type { AgentMessage } from '@/api/groupChat';
 import type { PageParams } from '@/types/api';
 
 /** 节点状态颜色映射 */
@@ -37,6 +38,7 @@ export const useGraphStore = defineStore('graph', () => {
   const nodeStatuses = ref<Record<string, string>>({});
   const executionLogs = ref<NodeExecutionLog[]>([]);
   const streamingFinalAnswer = ref('');
+  const groupChatMessages = ref<AgentMessage[]>([]);
   const isLoading = ref(false);
   const total = ref(0);
 
@@ -222,6 +224,11 @@ export const useGraphStore = defineStore('graph', () => {
     if (message.type === 'node_stream' && message.chunk) {
       streamingFinalAnswer.value += message.chunk;
     }
+
+    if (message.type === 'group_chat_message' && message.message) {
+      const payload = message.message as AgentMessage;
+      groupChatMessages.value = [...groupChatMessages.value, payload];
+    }
   }
 
   /** 重置执行状态 */
@@ -231,6 +238,7 @@ export const useGraphStore = defineStore('graph', () => {
     nodeStatuses.value = {};
     executionLogs.value = [];
     streamingFinalAnswer.value = '';
+    groupChatMessages.value = [];
   }
 
   return {
@@ -240,6 +248,7 @@ export const useGraphStore = defineStore('graph', () => {
     nodeStatuses,
     executionLogs,
     streamingFinalAnswer,
+    groupChatMessages,
     isLoading,
     total,
     fetchWorkflows,

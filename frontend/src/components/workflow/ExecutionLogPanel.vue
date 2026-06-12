@@ -6,6 +6,7 @@ import { NODE_STATUS_COLORS } from '@/stores/graph';
 const props = defineProps<{
   logs: NodeExecutionLog[];
   selectedNodeId?: string | null;
+  traceId?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -70,6 +71,13 @@ function formatTime(iso?: string | null): string {
     <div class="panel-header">
       <h4>执行日志</h4>
       <span class="log-count">{{ logs.length }} 条（含持久化记录）</span>
+      <router-link
+        v-if="traceId"
+        :to="`/monitor/traces?trace_id=${traceId}`"
+        class="trace-link"
+      >
+        查看链路 TraceID
+      </router-link>
     </div>
     <div class="panel-toolbar">
       <el-input v-model="keyword" size="small" placeholder="搜索日志内容" clearable />
