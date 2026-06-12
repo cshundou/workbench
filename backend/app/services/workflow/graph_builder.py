@@ -13,7 +13,7 @@ import operator
 import re
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Annotated, Any, Callable, NamedTuple, Optional, Sequence, TypedDict, Union
+from typing import Annotated, Any, Callable, NamedTuple, NotRequired, Optional, Sequence, TypedDict, Union
 
 import redis
 from langchain_core.messages import BaseMessage
@@ -23,6 +23,7 @@ from app.core.config import settings
 from app.core.exceptions import ValidationError
 from app.services.user_key_context import UserKeyContext, create_chat_llm
 from app.services.workflow.redis_saver import RedisSaver
+from app.services.workflow.workflow_agent_runner import WorkflowAgentRunner
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,14 @@ def merge_execution_logs(
     right: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """合并并行节点追加的执行日志。"""
+    return list(left or []) + list(right or [])
+
+
+def merge_tool_calls(
+    left: list[dict[str, Any]],
+    right: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """合并并行节点工具调用记录。"""
     return list(left or []) + list(right or [])
 
 # 标准工作流拓扑（供前端 vue-flow 渲染）
@@ -106,8 +115,21 @@ NODE_LABELS: dict[str, str] = {
 }
 
 VALID_NODE_TYPES = frozenset(
-    {"scheduler", "knowledge", "search", "execution", "human", "reviewer", "loop"}
+    {
+        "scheduler",
+        "knowledge",
+        "search",
+        "execution",
+        "human",
+        "reviewer",
+        "loop",
+        "condition",
+        "custom_agent",
+        "supervisor",
+    }
 )
+
+VALID_AGENT_TYPES = frozenset({"knowledge", "search", "execution", "review"})
 
 
 class AgentState(TypedDict):
@@ -125,9 +147,18 @@ class AgentState(TypedDict):
     kb_id: Optional[int]
     execution_logs: Annotated[list[dict[str, Any]], merge_execution_logs]
     loop_counters: dict[str, int]
+    replan_count: NotRequired[int]
+    node_configs: NotRequired[dict[str, dict[str, Any]]]
+    tool_calls: NotRequired[Annotated[list[dict[str, Any]], merge_tool_calls]]
+    loop_exit_reason: NotRequired[str]
+    parallel_branch_errors: NotRequired[dict[str, str]]
+    loop_conditions: NotRequired[dict[str, str]]
+    tenant_id: NotRequired[int]
+    user_id: NotRequired[int]
 
 
 StatusCallback = Callable[[str, str, dict[str, Any]], None]
+StreamCallback = Callable[[str, str], None]
 
 
 class WorkflowBuilder:
@@ -150,6 +181,28 @@ class WorkflowBuilder:
             "execution": "execution_agent",
         }
         self._loop_node_max_iterations: dict[str, int] = {}
+        self._loop_conditions: dict[str, str] = {}
+        self._graph_nodes: list[dict[str, Any]] = []
+        self.tenant_id: Optional[int] = None
+        self.user_id: Optional[int] = None
+        self.execution_id: Optional[int] = None
+        self._stream_callback: Optional[StreamCallback] = None
+        self._agent_runner: Optional[WorkflowAgentRunner] = None
+
+    def set_execution_context(
+        self,
+        tenant_id: int,
+        user_id: int,
+        execution_id: Optional[int] = None,
+    ) -> None:
+        """设置工作流执行租户与用户上下文。"""
+        self.tenant_id = tenant_id
+        self.user_id = user_id
+        self.execution_id = execution_id
+
+    def set_stream_callback(self, callback: StreamCallback) -> None:
+        """设置审核节点流式输出回调。"""
+        self._stream_callback = callback
 
     def set_status_callback(self, callback: StatusCallback) -> None:
         """设置节点状态回调，用于 WebSocket 推送。"""
@@ -193,6 +246,160 @@ class WorkflowBuilder:
         self._emit_status(node_id, status, log_entry)
         return log_entry
 
+    def _get_agent_runner(self) -> Optional[WorkflowAgentRunner]:
+        """懒加载工作流 Agent 执行器。"""
+        if self._agent_runner is not None:
+            return self._agent_runner
+        if self.tenant_id is None or self.user_id is None or self.user_ctx is None:
+            return None
+        self._agent_runner = WorkflowAgentRunner(
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            user_ctx=self.user_ctx,
+        )
+        return self._agent_runner
+
+    def _get_node_config(self, state: AgentState, node_id: str) -> dict[str, Any]:
+        """读取节点 config（优先 state 快照，其次图定义）。"""
+        node_configs = state.get("node_configs") or {}
+        if node_id in node_configs:
+            return dict(node_configs[node_id])
+        for node in self._graph_nodes:
+            if node.get("id") == node_id:
+                return dict(node.get("config") or {})
+        return {}
+
+    def _resolve_kb_ids(self, state: AgentState, node_id: str) -> list[int]:
+        """解析知识库 ID 列表：节点 config.kb_ids > 全局 kb_id。"""
+        config = self._get_node_config(state, node_id)
+        kb_ids_raw = config.get("kb_ids")
+        if isinstance(kb_ids_raw, list) and kb_ids_raw:
+            return [int(k) for k in kb_ids_raw if k is not None]
+        global_kb = state.get("kb_id")
+        if global_kb is not None:
+            return [int(global_kb)]
+        return []
+
+    def _parse_scheduler_json(self, content: str) -> list[dict[str, Any]]:
+        """从 LLM 输出解析子任务 JSON，支持代码块提取。"""
+        text = content.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```\w*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text.strip())
+        start = text.find("[")
+        end = text.rfind("]")
+        if start >= 0 and end > start:
+            text = text[start : end + 1]
+        parsed = json.loads(text)
+        if not isinstance(parsed, list):
+            raise ValueError("子任务必须为 JSON 数组")
+        return parsed
+
+    def _validate_subtasks(self, subtasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """校验并规范化子任务列表。"""
+        normalized: list[dict[str, Any]] = []
+        for item in subtasks:
+            if not isinstance(item, dict):
+                continue
+            agent = item.get("agent")
+            task = str(item.get("task", "")).strip()
+            if agent not in VALID_AGENT_TYPES or not task:
+                continue
+            normalized.append({"agent": agent, "task": task, **item})
+        return normalized
+
+    def _evaluate_loop_condition(
+        self,
+        state: AgentState,
+        node_id: str,
+        condition: str,
+        max_iterations: int,
+    ) -> tuple[bool, str]:
+        """
+        判断是否满足循环退出条件。
+
+        Returns:
+            (should_exit, reason)
+        """
+        current_iteration = int((state.get("loop_counters") or {}).get(node_id, 0))
+        if current_iteration >= max_iterations:
+            return True, f"已达到最大循环次数（{max_iterations}）"
+
+        results = state.get("results") or {}
+        condition_lower = condition.lower()
+
+        # 规则模式：结果包含关键词
+        if "包含" in condition and "年" in condition:
+            match = re.search(r"包含[「\"']?([^」\"'，,]+)", condition)
+            keyword = match.group(1) if match else ""
+            if keyword and keyword in json.dumps(results, ensure_ascii=False):
+                return True, f"结果已包含「{keyword}」"
+
+        if "为空" in condition or "无结果" in condition:
+            target = "knowledge"
+            if "search" in condition_lower:
+                target = "search"
+            value = results.get(target, "")
+            if not value or "未检索" in str(value) or "未找到" in str(value):
+                return False, f"{target} 结果为空，继续循环"
+
+        # LLM 判断模式
+        llm = self._create_llm()
+        if llm is not None and condition.strip():
+            prompt = f"""
+判断以下工作流中间结果是否满足退出条件。
+
+退出条件：{condition}
+
+当前迭代：{current_iteration}/{max_iterations}
+中间结果：
+{json.dumps(results, ensure_ascii=False, default=str)}
+
+请仅输出 JSON：{{"should_exit": true/false, "reason": "说明"}}
+"""
+            try:
+                response = llm.invoke(prompt)
+                content = response.content if isinstance(response.content, str) else str(response.content)
+                payload = json.loads(content.strip().strip("`").replace("json\n", ""))
+                return bool(payload.get("should_exit")), str(payload.get("reason", ""))
+            except Exception as exc:
+                logger.warning("循环条件 LLM 判断失败: %s", exc)
+
+        return False, "继续执行循环体"
+
+    def _run_role_agent(
+        self,
+        role: str,
+        task: str,
+        state: AgentState,
+        node_id: str,
+    ) -> dict[str, Any]:
+        """通过 WorkflowAgentRunner 执行角色 Agent。"""
+        runner = self._get_agent_runner()
+        if runner is None:
+            raise RuntimeError("未配置执行上下文或 API 密钥，无法运行 Agent")
+
+        config = self._get_node_config(state, node_id)
+        kb_id: Optional[int] = None
+        if role == "knowledge":
+            kb_ids = self._resolve_kb_ids(state, node_id)
+            if not kb_ids:
+                raise ValidationError(
+                    message="知识库 Agent 需要配置 kb_id 或节点 kb_ids，请在执行时选择知识库"
+                )
+            kb_id = kb_ids[0]
+
+        model_config: dict[str, Any] = {}
+        if config.get("temperature") is not None:
+            model_config["temperature"] = float(config["temperature"])
+
+        return runner.run_sync(
+            role=role,
+            task=task,
+            kb_id=kb_id,
+            model_config=model_config or None,
+        )
+
     def build_standard_workflow(self, require_human: bool = False):
         """
         构建标准多智能体工作流。
@@ -217,6 +424,7 @@ class WorkflowBuilder:
         workflow.add_node("search_agent", self.search_agent_node)
         workflow.add_node("execution_agent", self.execution_agent_node)
         workflow.add_node("human_intervention", self.human_intervention_node)
+        workflow.add_node("supervisor", self.supervisor_node)
         workflow.add_node("reviewer", self.reviewer_node)
 
         workflow.set_entry_point("scheduler")
@@ -244,8 +452,17 @@ class WorkflowBuilder:
             "human_intervention",
             self.route_after_human_intervention,
             {
-                "continue": "reviewer",
+                "continue": "supervisor",
                 "end": END,
+            },
+        )
+
+        workflow.add_conditional_edges(
+            "supervisor",
+            self.route_after_supervisor,
+            {
+                "replan": "scheduler",
+                "continue": "reviewer",
             },
         )
 
@@ -329,12 +546,22 @@ class WorkflowBuilder:
             parsed = int(raw_value)
             if parsed <= 0:
                 return 5
-            return parsed
+            return min(parsed, 20)
         except (TypeError, ValueError):
             return 5
 
+    def _parse_loop_condition(self, node: dict[str, Any]) -> str:
+        """解析 loop 节点退出条件描述。"""
+        config = node.get("config") if isinstance(node.get("config"), dict) else {}
+        return str(
+            config.get("loop_condition", node.get("loop_condition", "满足退出条件"))
+        )
+
     def _build_loop_node_handler(
-        self, node_id: str, max_iterations: int
+        self,
+        node_id: str,
+        max_iterations: int,
+        loop_condition: str,
     ) -> Callable[[AgentState], AgentState]:
         """为指定 loop 节点构建处理函数。"""
 
@@ -343,12 +570,16 @@ class WorkflowBuilder:
                 state,
                 node_id=node_id,
                 max_iterations=max_iterations,
+                loop_condition=loop_condition,
             )
 
         return _handler
 
     def _build_loop_router(
-        self, node_id: str, max_iterations: int
+        self,
+        node_id: str,
+        max_iterations: int,
+        loop_condition: str,
     ) -> Callable[[AgentState], str]:
         """为指定 loop 节点构建路由函数。"""
 
@@ -357,6 +588,7 @@ class WorkflowBuilder:
                 state,
                 node_id=node_id,
                 max_iterations=max_iterations,
+                loop_condition=loop_condition,
             )
 
         return _router
@@ -382,9 +614,13 @@ class WorkflowBuilder:
         }
 
         self._loop_node_max_iterations = {}
+        self._loop_conditions = {}
+        self._graph_nodes = nodes
 
         type_to_node_id: dict[str, str] = {}
         loop_node_ids: set[str] = set()
+        condition_node_ids: set[str] = set()
+        custom_agent_nodes: dict[str, int] = {}
         for node in nodes:
             node_type = node["type"]
             if node_type not in type_to_node_id:
@@ -394,6 +630,14 @@ class WorkflowBuilder:
                 self._loop_node_max_iterations[node["id"]] = self._parse_loop_max_iterations(
                     node
                 )
+                self._loop_conditions[node["id"]] = self._parse_loop_condition(node)
+            if node_type == "condition":
+                condition_node_ids.add(node["id"])
+            if node_type == "custom_agent":
+                config = node.get("config") or {}
+                agent_id = config.get("agent_id")
+                if agent_id is not None:
+                    custom_agent_nodes[node["id"]] = int(agent_id)
 
         scheduler_id = type_to_node_id["scheduler"]
         human_id = type_to_node_id.get("human")
@@ -412,7 +656,8 @@ class WorkflowBuilder:
             "execution": self.execution_agent_node,
             "human": self.human_intervention_node,
             "reviewer": self.reviewer_node,
-            "loop": self.loop_node,
+            "supervisor": self.supervisor_node,
+            "condition": self.condition_node,
         }
 
         workflow = StateGraph(AgentState)
@@ -422,10 +667,32 @@ class WorkflowBuilder:
             node_type = node["type"]
             if node_type == "loop":
                 max_iterations = self._loop_node_max_iterations.get(node_id, 5)
+                loop_condition = self._loop_conditions.get(node_id, "满足退出条件")
                 workflow.add_node(
                     node_id,
-                    self._build_loop_node_handler(node_id, max_iterations),
+                    self._build_loop_node_handler(
+                        node_id, max_iterations, loop_condition
+                    ),
                 )
+            elif node_type == "custom_agent":
+                agent_id = custom_agent_nodes.get(node_id, 0)
+
+                def _custom_handler(
+                    state: AgentState,
+                    _node_id: str = node_id,
+                    _agent_id: int = agent_id,
+                ) -> AgentState:
+                    return self.custom_agent_node(state, _node_id, _agent_id)
+
+                workflow.add_node(node_id, _custom_handler)
+            elif node_type == "condition":
+
+                def _condition_handler(
+                    state: AgentState, _node_id: str = node_id
+                ) -> AgentState:
+                    return self.condition_node(state, _node_id)
+
+                workflow.add_node(node_id, _condition_handler)
             else:
                 workflow.add_node(node_id, handler_map[node_type])
 
@@ -487,13 +754,57 @@ class WorkflowBuilder:
             else:
                 continue_target = END
             max_iterations = self._loop_node_max_iterations.get(loop_node_id, 5)
+            loop_condition = self._loop_conditions.get(loop_node_id, "满足退出条件")
             workflow.add_conditional_edges(
                 loop_node_id,
-                self._build_loop_router(loop_node_id, max_iterations),
+                self._build_loop_router(
+                    loop_node_id, max_iterations, loop_condition
+                ),
                 {
                     "continue": continue_target,
                     "end": END,
                 },
+            )
+
+        supervisor_id = type_to_node_id.get("supervisor")
+        if supervisor_id:
+            workflow.add_conditional_edges(
+                supervisor_id,
+                self.route_after_supervisor,
+                {
+                    "replan": scheduler_id,
+                    "continue": reviewer_id or human_id or END,
+                },
+            )
+
+        for condition_node_id in condition_node_ids:
+            node_def = next(n for n in nodes if n["id"] == condition_node_id)
+            config = node_def.get("config") or {}
+            branches = config.get("branches") or []
+            default_target = config.get("default_target") or END
+            targets: dict[str, Any] = {"end": END}
+            for branch in branches:
+                target = branch.get("target")
+                if target:
+                    targets[target] = target
+
+            def _build_condition_router(
+                _node_id: str = condition_node_id,
+                _branches: list = branches,
+                _default: str = default_target,
+            ) -> Callable[[AgentState], str]:
+                def _router(state: AgentState) -> str:
+                    route_key = self.route_after_condition(
+                        state, _node_id, _branches, _default
+                    )
+                    return route_key if route_key in targets else "end"
+
+                return _router
+
+            workflow.add_conditional_edges(
+                condition_node_id,
+                _build_condition_router(),
+                targets,
             )
 
         if human_id:
@@ -540,6 +851,32 @@ class WorkflowBuilder:
         state = dict(state)
         state.setdefault("results", {})
         state.setdefault("subtasks", [])
+
+        # 监督节点触发的二次规划
+        if state.get("_supervisor_need_replan"):
+            incomplete = list(state.get("_supervisor_incomplete") or [])
+            replan_count = int(state.get("replan_count") or 0) + 1
+            state["replan_count"] = replan_count
+            subtasks: list[dict[str, Any]] = []
+            for agent in incomplete:
+                fallback = "search" if agent == "knowledge" else agent
+                subtasks.append({"agent": fallback, "task": state["task"]})
+            state["subtasks"] = self._validate_subtasks(subtasks) or subtasks
+            state["current_step"] = "scheduler_replanned"
+            state["status"] = "running"
+            state.pop("_supervisor_need_replan", None)
+            self._append_log(
+                state,
+                node_id,
+                "completed",
+                output_data={
+                    "subtasks": state["subtasks"],
+                    "replan_count": replan_count,
+                    "degraded": False,
+                },
+            )
+            return state
+
         self._append_log(
             state,
             node_id,
@@ -564,17 +901,41 @@ class WorkflowBuilder:
     {{"agent": "search", "task": "查询2024年法定年假天数"}}
 ]
 """
+        degraded = False
+        subtasks: list[dict[str, Any]] = []
+        last_error: Optional[str] = None
+
         try:
             if llm is not None:
-                response = llm.invoke(prompt)
-                content = response.content
-                if isinstance(content, str):
-                    subtasks = json.loads(content.strip())
-                else:
-                    subtasks = json.loads(str(content))
+                for attempt in range(3):
+                    try:
+                        response = llm.invoke(prompt)
+                        content = response.content
+                        text = content if isinstance(content, str) else str(content)
+                        subtasks = self._validate_subtasks(
+                            self._parse_scheduler_json(text)
+                        )
+                        if subtasks:
+                            break
+                        last_error = "子任务列表为空"
+                    except Exception as parse_exc:
+                        last_error = str(parse_exc)
+                        logger.warning(
+                            "调度拆解第%s次解析失败: %s", attempt + 1, parse_exc
+                        )
+                if not subtasks:
+                    subtasks = self._validate_subtasks(
+                        self._mock_decompose_task(state["task"])
+                    )
+                    degraded = True
             else:
-                # 无 API Key 时使用规则拆解，便于开发调试
-                subtasks = self._mock_decompose_task(state["task"])
+                subtasks = self._validate_subtasks(
+                    self._mock_decompose_task(state["task"])
+                )
+                degraded = True
+
+            if not subtasks:
+                raise ValueError(last_error or "无法拆解任务")
 
             state["subtasks"] = subtasks
             state["current_step"] = "scheduler_completed"
@@ -583,7 +944,7 @@ class WorkflowBuilder:
                 state,
                 node_id,
                 "completed",
-                output_data={"subtasks": subtasks},
+                output_data={"subtasks": subtasks, "degraded": degraded},
             )
         except Exception as exc:
             logger.exception("任务拆解失败: %s", exc)
@@ -625,24 +986,33 @@ class WorkflowBuilder:
             input_data={"task": knowledge_task},
         )
 
+        tool_calls: list[dict[str, Any]] = []
         try:
             if knowledge_task:
                 query = knowledge_task.get("task", state["task"])
-                kb_id = state.get("kb_id")
-                if kb_id and self.user_ctx and self.user_ctx.has_llm_key:
-                    result = self._query_knowledge_base(kb_id, query)
-                else:
-                    result = f"[知识库模拟结果] 关于「{query}」的内部资料检索完成。"
+                run_result = self._run_role_agent("knowledge", query, state, node_id)
+                result = run_result.get("answer", "")
+                tool_calls = run_result.get("tool_calls", [])
+                if run_result.get("error"):
+                    raise RuntimeError(run_result["error"])
                 state.setdefault("results", {})["knowledge"] = result
+                state.setdefault("tool_calls", []).extend(tool_calls)
             self._append_log(
                 state,
                 node_id,
                 "completed",
-                output_data={"result": state.get("results", {}).get("knowledge")},
+                output_data={
+                    "result": state.get("results", {}).get("knowledge"),
+                    "tool_calls": tool_calls,
+                },
             )
+        except ValidationError as exc:
+            state.setdefault("results", {})["knowledge"] = f"配置错误: {exc.message}"
+            self._append_log(state, node_id, "failed", error=exc.message)
         except Exception as exc:
             logger.exception("知识库查询失败: %s", exc)
             state.setdefault("results", {})["knowledge"] = f"查询失败: {exc}"
+            state.setdefault("parallel_branch_errors", {})[node_id] = str(exc)
             self._append_log(state, node_id, "failed", error=str(exc))
 
         return state
@@ -694,20 +1064,28 @@ class WorkflowBuilder:
             input_data={"task": search_task},
         )
 
+        tool_calls: list[dict[str, Any]] = []
         try:
             if search_task:
                 query = search_task.get("task", state["task"])
-                result = self._web_search(query)
+                run_result = self._run_role_agent("search", query, state, node_id)
+                result = run_result.get("answer", "")
+                tool_calls = run_result.get("tool_calls", [])
                 state.setdefault("results", {})["search"] = result
+                state.setdefault("tool_calls", []).extend(tool_calls)
             self._append_log(
                 state,
                 node_id,
                 "completed",
-                output_data={"result": state.get("results", {}).get("search")},
+                output_data={
+                    "result": state.get("results", {}).get("search"),
+                    "tool_calls": tool_calls,
+                },
             )
         except Exception as exc:
             logger.exception("联网搜索失败: %s", exc)
             state.setdefault("results", {})["search"] = f"搜索失败: {exc}"
+            state.setdefault("parallel_branch_errors", {})[node_id] = str(exc)
             self._append_log(state, node_id, "failed", error=str(exc))
 
         return state
@@ -849,23 +1227,30 @@ class WorkflowBuilder:
             input_data={"task": execution_task},
         )
 
+        tool_calls: list[dict[str, Any]] = []
         try:
             if execution_task:
                 task_desc = execution_task.get("task", state["task"])
-                result = self._run_execution_task(
-                    {**execution_task, "task": task_desc},
+                run_result = self._run_role_agent(
+                    "execution", task_desc, state, node_id
                 )
+                result = run_result.get("answer", "")
+                tool_calls = run_result.get("tool_calls", [])
                 state.setdefault("results", {})["execution"] = result
+                state.setdefault("tool_calls", []).extend(tool_calls)
             self._append_log(
                 state,
                 node_id,
                 "completed",
-                output_data={"result": state.get("results", {}).get("execution")},
+                output_data={
+                    "result": state.get("results", {}).get("execution"),
+                    "tool_calls": tool_calls,
+                },
             )
         except Exception as exc:
             logger.exception("执行节点失败: %s", exc)
-            state["error"] = f"执行失败: {exc}"
             state.setdefault("results", {})["execution"] = f"执行失败: {exc}"
+            state.setdefault("parallel_branch_errors", {})[node_id] = str(exc)
             self._append_log(state, node_id, "failed", error=str(exc))
 
         return state
@@ -875,16 +1260,34 @@ class WorkflowBuilder:
         state: AgentState,
         node_id: str = "loop",
         max_iterations: int = 5,
+        loop_condition: str = "满足退出条件",
     ) -> AgentState:
-        """循环控制节点：累计迭代次数并限制最大循环次数。"""
+        """循环控制节点：累计迭代次数并评估退出条件。"""
         state = dict(state)
         loop_counters = dict(state.get("loop_counters") or {})
         current_iteration = int(loop_counters.get(node_id, 0)) + 1
         loop_counters[node_id] = current_iteration
         state["loop_counters"] = loop_counters
+
+        loop_conditions = dict(state.get("loop_conditions") or {})
+        loop_conditions[node_id] = loop_condition
+        state["loop_conditions"] = loop_conditions
+
+        should_exit, reason = self._evaluate_loop_condition(
+            state, node_id, loop_condition, max_iterations
+        )
+        if should_exit:
+            state["loop_exit_reason"] = reason
+
         state.setdefault("results", {})["loop"] = {
             "node_id": node_id,
             "current_iteration": current_iteration,
+            "max_iterations": max_iterations,
+            "should_exit": should_exit,
+            "reason": reason,
+        }
+        log_extra = {
+            "loop_iteration": current_iteration,
             "max_iterations": max_iterations,
         }
         self._append_log(
@@ -894,14 +1297,17 @@ class WorkflowBuilder:
             input_data={
                 "current_iteration": current_iteration,
                 "max_iterations": max_iterations,
+                "loop_condition": loop_condition,
+                **log_extra,
             },
         )
-        self._append_log(
+        completed_log = self._append_log(
             state,
             node_id,
             "completed",
-            output_data=state["results"]["loop"],
+            output_data={**state["results"]["loop"], **log_extra},
         )
+        completed_log.update(log_extra)
         return state
 
     def route_after_loop_node(
@@ -909,18 +1315,173 @@ class WorkflowBuilder:
         state: AgentState,
         node_id: str = "loop",
         max_iterations: int = 5,
+        loop_condition: str = "满足退出条件",
     ) -> str:
-        """循环节点路由：达到最大迭代次数后结束，否则继续下一节点。"""
-        current_iteration = int((state.get("loop_counters") or {}).get(node_id, 0))
-        if current_iteration >= max_iterations:
+        """循环节点路由：满足条件或达到最大次数则结束，否则继续循环体。"""
+        should_exit, reason = self._evaluate_loop_condition(
+            state, node_id, loop_condition, max_iterations
+        )
+        if should_exit:
+            state["loop_exit_reason"] = reason
             logger.info(
-                "loop 节点达到最大迭代次数，结束循环 node_id=%s current=%s max=%s",
+                "loop 节点退出 node_id=%s reason=%s",
                 node_id,
-                current_iteration,
-                max_iterations,
+                reason,
             )
             return "end"
         return "continue"
+
+    def condition_node(self, state: AgentState, node_id: str = "condition") -> AgentState:
+        """条件分支节点：记录当前结果供路由函数判断。"""
+        state = dict(state)
+        config = self._get_node_config(state, node_id)
+        self._append_log(
+            state,
+            node_id,
+            "running",
+            input_data={"results": state.get("results"), "config": config},
+        )
+        self._append_log(
+            state,
+            node_id,
+            "completed",
+            output_data={"results_snapshot": state.get("results")},
+        )
+        return state
+
+    def route_after_condition(
+        self,
+        state: AgentState,
+        node_id: str = "condition",
+        branches: Optional[list[dict[str, Any]]] = None,
+        default_target: str = "end",
+    ) -> str:
+        """根据规则或 LLM 选择条件分支目标节点 id。"""
+        results = state.get("results") or {}
+        branches = branches or []
+
+        for branch in branches:
+            condition = str(branch.get("condition", ""))
+            target = str(branch.get("target", ""))
+            if not target:
+                continue
+
+            # 规则：knowledge 为空
+            if "knowledge" in condition and ("为空" in condition or "无结果" in condition):
+                knowledge_result = str(results.get("knowledge", ""))
+                if (
+                    not knowledge_result
+                    or "未检索" in knowledge_result
+                    or "未找到" in knowledge_result
+                    or "查询失败" in knowledge_result
+                ):
+                    return target
+
+            # 规则：包含关键词
+            if "包含" in condition:
+                match = re.search(r"包含[「\"']?([^」\"'，,]+)", condition)
+                keyword = match.group(1) if match else ""
+                if keyword and keyword in json.dumps(results, ensure_ascii=False):
+                    return target
+
+            # LLM 模式
+            llm = self._create_llm()
+            if llm is not None and condition.strip():
+                prompt = f"""
+根据中间结果判断是否满足条件：{condition}
+结果：{json.dumps(results, ensure_ascii=False, default=str)}
+仅回答 yes 或 no。
+"""
+                try:
+                    response = llm.invoke(prompt)
+                    content = (
+                        response.content
+                        if isinstance(response.content, str)
+                        else str(response.content)
+                    )
+                    if content.strip().lower().startswith("y"):
+                        return target
+                except Exception as exc:
+                    logger.warning("条件分支 LLM 判断失败: %s", exc)
+
+        return default_target if default_target else "end"
+
+    def supervisor_node(self, state: AgentState) -> AgentState:
+        """监督节点：检查子任务结果完整性，必要时触发二次规划。"""
+        node_id = "supervisor"
+        state = dict(state)
+        results = state.get("results") or {}
+        replan_count = int(state.get("replan_count") or 0)
+        max_replan = settings.workflow_max_replan_count
+
+        incomplete: list[str] = []
+        for key in ("knowledge", "search", "execution"):
+            value = str(results.get(key, ""))
+            if any(
+                subtask.get("agent") == key for subtask in state.get("subtasks", [])
+            ):
+                if not value or "失败" in value or "查询失败" in value:
+                    incomplete.append(key)
+
+        need_replan = bool(incomplete) and replan_count < max_replan
+        self._append_log(
+            state,
+            node_id,
+            "completed",
+            output_data={
+                "incomplete_agents": incomplete,
+                "need_replan": need_replan,
+                "replan_count": replan_count,
+            },
+        )
+        state["current_step"] = "supervisor_checked"
+        state["_supervisor_need_replan"] = need_replan
+        state["_supervisor_incomplete"] = incomplete
+        return state
+
+    def route_after_supervisor(self, state: AgentState) -> str:
+        """监督后路由：需要重规划则回调度，否则继续审核。"""
+        if state.get("_supervisor_need_replan"):
+            return "replan"
+        return "continue"
+
+    def custom_agent_node(
+        self,
+        state: AgentState,
+        node_id: str,
+        agent_id: int,
+    ) -> AgentState:
+        """执行用户自定义 Agent 节点。"""
+        state = dict(state)
+        subtask = next(
+            (t for t in state.get("subtasks", []) if t.get("agent") == "custom"),
+            None,
+        )
+        task = subtask.get("task", state["task"]) if subtask else state["task"]
+        self._append_log(state, node_id, "running", input_data={"agent_id": agent_id, "task": task})
+
+        runner = self._get_agent_runner()
+        tool_calls: list[dict[str, Any]] = []
+        try:
+            if runner is None:
+                raise RuntimeError("未配置执行上下文")
+            run_result = runner.run_custom_agent_sync(agent_id, task)
+            if run_result.get("error"):
+                raise RuntimeError(run_result["error"])
+            answer = run_result.get("answer", "")
+            tool_calls = run_result.get("tool_calls", [])
+            state.setdefault("results", {})[f"custom_{agent_id}"] = answer
+            state.setdefault("tool_calls", []).extend(tool_calls)
+            self._append_log(
+                state,
+                node_id,
+                "completed",
+                output_data={"result": answer, "tool_calls": tool_calls},
+            )
+        except Exception as exc:
+            logger.exception("自定义 Agent 节点失败: %s", exc)
+            self._append_log(state, node_id, "failed", error=str(exc))
+        return state
 
     def human_intervention_node(self, state: AgentState) -> AgentState:
         """
@@ -969,9 +1530,18 @@ class WorkflowBuilder:
 """
         try:
             if llm is not None:
-                response = llm.invoke(prompt)
-                content = response.content
-                final_answer = content if isinstance(content, str) else str(content)
+                final_chunks: list[str] = []
+                if self._stream_callback is not None:
+                    for chunk in llm.stream(prompt):
+                        piece = chunk.content if isinstance(chunk.content, str) else str(chunk.content)
+                        if piece:
+                            final_chunks.append(piece)
+                            self._stream_callback(node_id, piece)
+                    final_answer = "".join(final_chunks)
+                else:
+                    response = llm.invoke(prompt)
+                    content = response.content
+                    final_answer = content if isinstance(content, str) else str(content)
             else:
                 results = state.get("results", {})
                 final_answer = (
@@ -1092,7 +1662,10 @@ class WorkflowBuilder:
 
         branch_states: list[AgentState] = []
         parallel_started = time.monotonic()
-        max_workers = min(len(handlers), 3)
+        max_workers = min(
+            len(handlers),
+            settings.workflow_parallel_max_workers,
+        )
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
                 pool.submit(handler, dict(send.arg)): node_id

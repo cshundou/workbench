@@ -19,6 +19,7 @@ from app.models.user import User
 from app.models.workflow import Workflow
 from app.models.workflow_execution import WorkflowExecution
 from app.schemas.workflow import (
+    GraphDefinition,
     HumanInterventionRequest,
     NodeExecutionLog,
     WorkflowCreate,
@@ -36,8 +37,14 @@ from app.services.workflow.graph_builder import (
 )
 from app.services.user_key_context import user_key_resolver
 from app.services.workflow.ws_manager import workflow_ws_manager
+from app.services.workflow.runtime_state_store import runtime_state_store
+from app.services.workflow.workflow_templates import (
+    get_workflow_template,
+    list_workflow_templates,
+)
 from app.services.audit_service import audit_service
 from app.services.token_quota_service import token_quota_service
+from app.services.monitor_service import monitor_service
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +73,25 @@ class WorkflowService:
             updated_at=workflow.updated_at,
         )
 
+    def _load_runtime_state(self, execution_id: int) -> dict[str, Any]:
+        """优先从 Redis 读取运行时状态，再回落内存。"""
+        redis_state = runtime_state_store.get(execution_id)
+        if redis_state:
+            _runtime_state[execution_id] = redis_state
+            return redis_state
+        return _runtime_state.get(execution_id, {})
+
+    def _save_runtime_state(self, execution_id: int, runtime: dict[str, Any]) -> None:
+        """同步写入内存与 Redis。"""
+        _runtime_state[execution_id] = runtime
+        runtime_state_store.save(execution_id, runtime)
+
     def _to_execution_response(
         self,
         execution: WorkflowExecution,
         include_runtime: bool = True,
     ) -> WorkflowExecutionResponse:
-        runtime = _runtime_state.get(execution.id, {}) if include_runtime else {}
+        runtime = self._load_runtime_state(execution.id) if include_runtime else {}
         logs_raw = runtime.get("logs") or list(execution.execution_logs or [])
         node_statuses = runtime.get("node_statuses") or dict(execution.node_statuses or {})
         logs = [NodeExecutionLog(**log) for log in logs_raw]
@@ -166,14 +186,29 @@ class WorkflowService:
             raise NotFoundError(message="执行记录不存在")
         return execution
 
-    def _init_runtime_state(self, execution_id: int, thread_id: str) -> None:
+    def _init_runtime_state(
+        self,
+        execution_id: int,
+        thread_id: str,
+        graph_definition: dict[str, Any] | None = None,
+    ) -> None:
         """初始化执行运行时状态。"""
-        node_statuses = {node_id: "waiting" for node_id in NODE_LABELS}
-        _runtime_state[execution_id] = {
-            "thread_id": thread_id,
-            "node_statuses": node_statuses,
-            "logs": [],
-        }
+        node_ids = [
+            node.get("id")
+            for node in (graph_definition or STANDARD_GRAPH_DEFINITION).get("nodes", [])
+            if node.get("id")
+        ]
+        if not node_ids:
+            node_ids = list(NODE_LABELS.keys())
+        node_statuses = {node_id: "waiting" for node_id in node_ids}
+        self._save_runtime_state(
+            execution_id,
+            {
+                "thread_id": thread_id,
+                "node_statuses": node_statuses,
+                "logs": [],
+            },
+        )
 
     def _hydrate_runtime_state_from_execution(self, execution: WorkflowExecution) -> None:
         """当内存态缺失时，从数据库执行记录回填运行时状态。"""
@@ -192,7 +227,7 @@ class WorkflowService:
             "node_statuses": persisted_statuses,
             "logs": persisted_logs,
         }
-        _runtime_state[execution.id] = hydrated
+        self._save_runtime_state(execution.id, hydrated)
         logger.info(
             "已回填工作流运行时状态 execution_id=%s logs=%s nodes=%s",
             execution.id,
@@ -200,17 +235,31 @@ class WorkflowService:
             len(persisted_statuses),
         )
 
+    def _schedule_coroutine(
+        self,
+        coro: Any,
+        main_loop: Optional[asyncio.AbstractEventLoop],
+    ) -> None:
+        """从工作流执行线程安全地调度协程到 ARQ 主事件循环。"""
+        if main_loop is None or not main_loop.is_running():
+            logger.warning("无法调度协程：主事件循环不可用")
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(coro, main_loop)
+        except Exception as exc:
+            logger.warning("调度协程失败: %s", exc)
+
     def _update_node_status(
         self,
         execution_id: int,
         node_id: str,
         status: str,
         log_entry: dict[str, Any],
+        main_loop: Optional[asyncio.AbstractEventLoop] = None,
     ) -> None:
-        runtime = _runtime_state.setdefault(
-            execution_id,
-            {"thread_id": "", "node_statuses": {}, "logs": []},
-        )
+        runtime = self._load_runtime_state(execution_id)
+        if not runtime:
+            runtime = {"thread_id": "", "node_statuses": {}, "logs": []}
         runtime["node_statuses"][node_id] = status
         runtime["logs"].append(log_entry)
         running_nodes = [
@@ -220,12 +269,14 @@ class WorkflowService:
         ]
         runtime["parallel_running_nodes"] = running_nodes
         runtime["is_parallel_active"] = len(running_nodes) > 1
-        asyncio.create_task(
+        self._save_runtime_state(execution_id, runtime)
+        self._schedule_coroutine(
             self._persist_execution_runtime(
                 execution_id,
                 list(runtime.get("logs", [])),
                 dict(runtime.get("node_statuses", {})),
-            )
+            ),
+            main_loop,
         )
 
     async def list_workflows(
@@ -582,7 +633,7 @@ class WorkflowService:
     ) -> WorkflowExecutionResponse:
         """获取执行状态与节点日志。"""
         execution = await self._get_execution_or_raise(db, execution_id, tenant_id)
-        runtime = _runtime_state.get(execution_id)
+        runtime = self._load_runtime_state(execution_id)
         if not runtime or (
             not runtime.get("logs") and not runtime.get("node_statuses")
         ):
@@ -659,7 +710,9 @@ class WorkflowService:
         await db.refresh(execution)
 
         thread_id = f"execution_{execution.id}"
-        self._init_runtime_state(execution.id, thread_id)
+        self._init_runtime_state(
+            execution.id, thread_id, workflow.graph_definition
+        )
 
         task_id = await enqueue_task(
             "execute_workflow_task",
@@ -670,7 +723,9 @@ class WorkflowService:
             input_params,
             thread_id,
         )
-        _runtime_state.setdefault(execution.id, {})["task_id"] = task_id
+        runtime = self._load_runtime_state(execution.id)
+        runtime["task_id"] = task_id
+        self._save_runtime_state(execution.id, runtime)
 
         logger.info(
             "启动工作流执行 execution_id=%s workflow_id=%s task_id=%s",
@@ -711,7 +766,7 @@ class WorkflowService:
         if execution.status not in ("pending", "running", "interrupted"):
             raise ValidationError(message="当前执行无法终止")
 
-        runtime = _runtime_state.get(execution_id, {})
+        runtime = self._load_runtime_state(execution_id)
         thread_id = runtime.get("thread_id", f"execution_{execution_id}")
         task_id = runtime.get("task_id")
         if task_id:
@@ -741,6 +796,7 @@ class WorkflowService:
         execution.completed_at = datetime.now(timezone.utc)
         await db.flush()
 
+        runtime_state_store.delete(execution_id)
         _runtime_state.pop(execution_id, None)
 
         await workflow_ws_manager.broadcast_execution_status(
@@ -774,7 +830,7 @@ class WorkflowService:
         if execution.status != "interrupted":
             raise ValidationError(message="当前执行不处于等待人工确认状态")
 
-        runtime = _runtime_state.get(execution_id, {})
+        runtime = self._load_runtime_state(execution_id)
         thread_id = runtime.get("thread_id", f"execution_{execution_id}")
 
         if not data.approved:
@@ -796,8 +852,43 @@ class WorkflowService:
             thread_id,
             comment=data.comment,
         )
-        _runtime_state.setdefault(execution_id, {})["task_id"] = task_id
+        runtime["task_id"] = task_id
+        self._save_runtime_state(execution_id, runtime)
         return self._to_execution_response(execution)
+
+    def _build_node_configs(
+        self, graph_definition: dict[str, Any] | None
+    ) -> dict[str, dict[str, Any]]:
+        """从图定义提取 node_id -> config 映射。"""
+        configs: dict[str, dict[str, Any]] = {}
+        for node in (graph_definition or {}).get("nodes") or []:
+            node_id = node.get("id")
+            if node_id:
+                configs[node_id] = dict(node.get("config") or {})
+        return configs
+
+    def _configure_builder(
+        self,
+        builder: WorkflowBuilder,
+        tenant_id: int,
+        user_id: int,
+        execution_id: int,
+        status_callback: Any,
+        main_loop: Optional[asyncio.AbstractEventLoop] = None,
+    ) -> None:
+        """统一配置 WorkflowBuilder 回调与执行上下文。"""
+        builder.set_execution_context(tenant_id, user_id, execution_id)
+        builder.set_status_callback(status_callback)
+
+        def stream_callback(node_id: str, chunk: str) -> None:
+            self._schedule_coroutine(
+                workflow_ws_manager.broadcast_node_stream(
+                    execution_id, node_id, chunk
+                ),
+                main_loop,
+            )
+
+        builder.set_stream_callback(stream_callback)
 
     async def run_workflow_task(
         self,
@@ -811,14 +902,20 @@ class WorkflowService:
         """在后台任务中执行 LangGraph 工作流。"""
         from app.core.database import async_session_factory
 
+        started_at = datetime.now(timezone.utc)
+        main_loop = asyncio.get_running_loop()
+
         def status_callback(
             node_id: str, status: str, log_entry: dict[str, Any]
         ) -> None:
-            self._update_node_status(execution_id, node_id, status, log_entry)
-            asyncio.create_task(
+            self._update_node_status(
+                execution_id, node_id, status, log_entry, main_loop
+            )
+            self._schedule_coroutine(
                 workflow_ws_manager.broadcast_node_status(
                     execution_id, node_id, status, log_entry
-                )
+                ),
+                main_loop,
             )
 
         try:
@@ -851,10 +948,17 @@ class WorkflowService:
 
             require_human = bool(input_params.get("require_human_approval"))
             builder = WorkflowBuilder(settings.redis_url, user_ctx=user_ctx)
-            builder.set_status_callback(status_callback)
+            self._configure_builder(
+                builder,
+                tenant_id,
+                user_id,
+                execution_id,
+                status_callback,
+                main_loop,
+            )
             graph = builder.build_workflow(graph_definition, require_human=require_human)
 
-            initial_state = {
+            initial_state: dict[str, Any] = {
                 "messages": [],
                 "task": input_params.get("task", ""),
                 "subtasks": [],
@@ -867,6 +971,11 @@ class WorkflowService:
                 "kb_id": input_params.get("kb_id"),
                 "execution_logs": [],
                 "loop_counters": {},
+                "replan_count": 0,
+                "node_configs": self._build_node_configs(graph_definition),
+                "tool_calls": [],
+                "tenant_id": tenant_id,
+                "user_id": user_id,
             }
 
             config = {"configurable": {"thread_id": thread_id}}
@@ -876,9 +985,13 @@ class WorkflowService:
                 return
 
             loop = asyncio.get_event_loop()
-            final_state = await loop.run_in_executor(
-                None,
-                lambda: graph.invoke(initial_state, config),
+
+            def _invoke() -> dict[str, Any]:
+                return graph.invoke(initial_state, config)
+
+            final_state = await asyncio.wait_for(
+                loop.run_in_executor(None, _invoke),
+                timeout=settings.workflow_execution_timeout_seconds,
             )
 
             if self.is_execution_cancelled(execution_id):
@@ -887,6 +1000,22 @@ class WorkflowService:
 
             await self._finalize_execution(
                 execution_id, final_state, require_human
+            )
+            duration_ms = (
+                datetime.now(timezone.utc) - started_at
+            ).total_seconds() * 1000
+            await monitor_service.record_workflow_execution(
+                success=final_state.get("status") != "failed",
+                duration_ms=duration_ms,
+            )
+        except asyncio.TimeoutError:
+            await self._mark_execution_failed(
+                execution_id,
+                f"工作流执行超时（{settings.workflow_execution_timeout_seconds}秒）",
+            )
+            await monitor_service.record_workflow_execution(
+                success=False,
+                duration_ms=settings.workflow_execution_timeout_seconds * 1000,
             )
         except asyncio.CancelledError:
             logger.info("工作流任务已撤销 execution_id=%s", execution_id)
@@ -897,6 +1026,7 @@ class WorkflowService:
                 await self._mark_execution_failed(execution_id, "工作流已被用户终止")
             else:
                 await self._mark_execution_failed(execution_id, str(exc))
+            await monitor_service.record_workflow_execution(success=False, duration_ms=0)
 
     async def run_resume_workflow_task(
         self,
@@ -907,14 +1037,19 @@ class WorkflowService:
         comment: Optional[str],
     ) -> None:
         """人工批准后恢复工作流执行。"""
+        main_loop = asyncio.get_running_loop()
+
         def status_callback(
             node_id: str, status: str, log_entry: dict[str, Any]
         ) -> None:
-            self._update_node_status(execution_id, node_id, status, log_entry)
-            asyncio.create_task(
+            self._update_node_status(
+                execution_id, node_id, status, log_entry, main_loop
+            )
+            self._schedule_coroutine(
                 workflow_ws_manager.broadcast_node_status(
                     execution_id, node_id, status, log_entry
-                )
+                ),
+                main_loop,
             )
 
         try:
@@ -949,22 +1084,46 @@ class WorkflowService:
                 return
 
             require_human = bool(input_params.get("require_human_approval"))
+            user_id = execution.created_by or 0
             builder = WorkflowBuilder(settings.redis_url, user_ctx=user_ctx)
-            builder.set_status_callback(status_callback)
+            self._configure_builder(
+                builder,
+                tenant_id,
+                user_id,
+                execution_id,
+                status_callback,
+                main_loop,
+            )
             graph = builder.build_workflow(graph_definition, require_human=require_human)
 
-            resume_state = {
+            resume_update: dict[str, Any] = {
                 "human_approved": True,
                 "status": "running",
             }
             if comment:
-                resume_state["results"] = {"human_comment": comment}
+                resume_update["results"] = {"human_comment": comment}
 
             config = {"configurable": {"thread_id": thread_id}}
+
+            def _resume_invoke() -> dict[str, Any]:
+                """从 checkpoint 续跑，避免重复执行已完成节点。"""
+                try:
+                    if hasattr(graph, "get_state"):
+                        snapshot = graph.get_state(config)
+                        if snapshot and getattr(snapshot, "values", None):
+                            return graph.invoke(resume_update, config)
+                except Exception as resume_exc:
+                    logger.warning(
+                        "checkpoint 恢复失败，回退全量 invoke execution_id=%s: %s",
+                        execution_id,
+                        resume_exc,
+                    )
+                return graph.invoke(resume_update, config)
+
             loop = asyncio.get_event_loop()
-            final_state = await loop.run_in_executor(
-                None,
-                lambda: graph.invoke(resume_state, config),
+            final_state = await asyncio.wait_for(
+                loop.run_in_executor(None, _resume_invoke),
+                timeout=settings.workflow_execution_timeout_seconds,
             )
 
             if self.is_execution_cancelled(execution_id):
@@ -1069,6 +1228,31 @@ class WorkflowService:
             execution_id, "failed", {"error": error_message}
         )
 
+
+    async def list_builtin_templates(self) -> list[dict[str, Any]]:
+        """返回内置工作流模板列表。"""
+        return list_workflow_templates()
+
+    async def create_workflow_from_template(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        user: User,
+        template_id: str,
+        name: Optional[str] = None,
+    ) -> WorkflowResponse:
+        """从内置模板创建工作流（仅复制拓扑）。"""
+        template = get_workflow_template(template_id)
+        if template is None:
+            raise NotFoundError(message="工作流模板不存在")
+
+        data = WorkflowCreate(
+            name=name or template["name"],
+            description=template.get("description"),
+            graph_definition=GraphDefinition(**template["graph_definition"]),
+            is_public=False,
+        )
+        return await self.create_workflow(db, tenant_id, user, data)
 
     def validate_graph_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
         """

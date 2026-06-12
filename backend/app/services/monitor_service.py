@@ -41,6 +41,8 @@ ALERT_HISTORY_KEY = "monitor:alert:history"
 ALERT_HISTORY_MAX_SIZE = 100
 TOOL_STATS_PREFIX = "monitor:tool:stats:"
 TOOL_DAILY_PREFIX = "monitor:tool:daily:"
+WORKFLOW_STATS_KEY = "monitor:workflow:stats"
+WORKFLOW_DAILY_PREFIX = "monitor:workflow:daily:"
 
 
 class MonitorService:
@@ -143,6 +145,76 @@ class MonitorService:
             await redis.ltrim(ERROR_LOG_KEY, 0, ERROR_LOG_MAX_SIZE - 1)
         except Exception as exc:
             logger.error("记录错误日志失败: %s", exc)
+
+    async def record_workflow_execution(
+        self,
+        success: bool,
+        duration_ms: float,
+    ) -> None:
+        """记录工作流执行次数、耗时与失败率。"""
+        try:
+            redis = await get_redis()
+            pipe = redis.pipeline()
+            pipe.hincrby(WORKFLOW_STATS_KEY, "total_count", 1)
+            pipe.hincrbyfloat(WORKFLOW_STATS_KEY, "total_duration_ms", duration_ms)
+            if not success:
+                pipe.hincrby(WORKFLOW_STATS_KEY, "failed_count", 1)
+
+            day_key = f"{WORKFLOW_DAILY_PREFIX}{date.today().isoformat()}"
+            pipe.hincrby(day_key, "count", 1)
+            pipe.hincrbyfloat(day_key, "total_duration_ms", duration_ms)
+            if not success:
+                pipe.hincrby(day_key, "failed_count", 1)
+            pipe.expire(day_key, 60 * 60 * 24 * 30)
+            await pipe.execute()
+        except Exception as exc:
+            logger.error("记录工作流执行统计失败: %s", exc)
+
+    async def get_workflow_stats(self, days: int = 7) -> dict[str, Any]:
+        """获取工作流执行统计（次数、平均耗时、失败率）。"""
+        try:
+            redis = await get_redis()
+            raw = await redis.hgetall(WORKFLOW_STATS_KEY)
+            total = int(raw.get("total_count", 0) or 0)
+            failed = int(raw.get("failed_count", 0) or 0)
+            total_ms = float(raw.get("total_duration_ms", 0) or 0)
+            avg_ms = total_ms / total if total else 0
+            failure_rate = failed / total if total else 0
+
+            daily: list[dict[str, Any]] = []
+            for offset in range(days):
+                day = (date.today() - timedelta(days=offset)).isoformat()
+                day_raw = await redis.hgetall(f"{WORKFLOW_DAILY_PREFIX}{day}")
+                if not day_raw:
+                    continue
+                day_count = int(day_raw.get("count", 0) or 0)
+                day_failed = int(day_raw.get("failed_count", 0) or 0)
+                day_ms = float(day_raw.get("total_duration_ms", 0) or 0)
+                daily.append(
+                    {
+                        "date": day,
+                        "count": day_count,
+                        "failed_count": day_failed,
+                        "avg_duration_ms": day_ms / day_count if day_count else 0,
+                    }
+                )
+
+            return {
+                "total_count": total,
+                "failed_count": failed,
+                "avg_duration_ms": round(avg_ms, 2),
+                "failure_rate": round(failure_rate, 4),
+                "daily": daily,
+            }
+        except Exception as exc:
+            logger.error("获取工作流统计失败: %s", exc)
+            return {
+                "total_count": 0,
+                "failed_count": 0,
+                "avg_duration_ms": 0,
+                "failure_rate": 0,
+                "daily": [],
+            }
 
     async def record_tool_call(self, tool_name: str, success: bool) -> None:
         """

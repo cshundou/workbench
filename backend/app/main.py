@@ -49,6 +49,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("LangSmith 链路追踪已启用")
         else:
             logger.warning("LANGCHAIN_TRACING_V2=true 但未配置 LANGCHAIN_API_KEY，已跳过追踪")
+    from app.services.workflow.ws_event_bus import workflow_ws_event_bus
+
     try:
         await init_db()
     except Exception as exc:
@@ -59,9 +61,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.error("数据库初始化失败，应用无法启动: %s", exc)
             raise
 
+    try:
+        await workflow_ws_event_bus.start_subscriber()
+    except Exception as exc:
+        logger.error("工作流 WebSocket 事件订阅启动失败: %s", exc)
+        if settings.app_env != "development":
+            raise
+
     yield
 
     logger.info("应用关闭")
+    try:
+        await workflow_ws_event_bus.stop_subscriber()
+    except Exception as exc:
+        logger.error("停止工作流 WebSocket 事件订阅失败: %s", exc)
     try:
         await close_redis()
     except Exception as exc:

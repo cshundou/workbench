@@ -7,6 +7,7 @@ export interface WorkflowNodeDef {
   type: string;
   label: string;
   position: { x: number; y: number };
+  config?: Record<string, unknown>;
 }
 
 /** 工作流拓扑边 */
@@ -33,8 +34,26 @@ export interface WorkflowInfo {
   is_public: boolean;
   status?: 'draft' | 'published' | string;
   published_at?: string | null;
+  current_version?: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+/** 工作流模板元数据 */
+export interface WorkflowTemplateInfo {
+  id: string;
+  name: string;
+  description: string;
+  node_count: number;
+}
+
+/** 工作流版本记录 */
+export interface WorkflowVersionInfo {
+  id: number;
+  version: string;
+  change_note?: string | null;
+  published_by?: number | null;
+  published_at?: string | null;
 }
 
 /** 创建工作流参数 */
@@ -98,10 +117,11 @@ export interface HumanInterventionParams {
 
 /** WebSocket 消息 */
 export interface WorkflowWsMessage {
-  type: 'connected' | 'node_status' | 'execution_status';
+  type: 'connected' | 'node_status' | 'execution_status' | 'node_stream';
   execution_id?: number;
   node_id?: string;
   status?: string;
+  chunk?: string;
   log?: NodeExecutionLog;
   data?: Record<string, unknown>;
   message?: string;
@@ -132,9 +152,53 @@ export function deleteWorkflow(id: number): Promise<void> {
   return request.delete(`/workflows/${id}`);
 }
 
+/** 获取内置模板列表 */
+export function getWorkflowTemplates(): Promise<WorkflowTemplateInfo[]> {
+  return request.get('/workflows/templates') as Promise<WorkflowTemplateInfo[]>;
+}
+
+/** 从模板创建工作流 */
+export function createWorkflowFromTemplate(
+  templateId: string,
+  name?: string,
+): Promise<WorkflowInfo> {
+  return request.post(`/workflows/from-template/${templateId}`, { name }) as Promise<WorkflowInfo>;
+}
+
 /** 发布工作流 */
-export function publishWorkflow(workflowId: number): Promise<WorkflowInfo> {
-  return request.post(`/workflows/${workflowId}/publish`) as Promise<WorkflowInfo>;
+export function publishWorkflow(
+  workflowId: number,
+  changeNote?: string,
+): Promise<WorkflowInfo> {
+  return request.post(`/workflows/${workflowId}/publish`, {
+    change_note: changeNote,
+  }) as Promise<WorkflowInfo>;
+}
+
+/** 获取版本历史 */
+export function getWorkflowVersions(workflowId: number): Promise<WorkflowVersionInfo[]> {
+  return request.get(`/workflows/${workflowId}/versions`) as Promise<WorkflowVersionInfo[]>;
+}
+
+/** 回滚版本 */
+export function rollbackWorkflowVersion(
+  workflowId: number,
+  versionId: number,
+  changeNote?: string,
+): Promise<WorkflowInfo> {
+  return request.post(`/workflows/${workflowId}/versions/${versionId}/rollback`, {
+    change_note: changeNote,
+  }) as Promise<WorkflowInfo>;
+}
+
+/** 导出执行日志 */
+export function exportExecutionLogs(
+  executionId: number,
+  nodeId?: string,
+): Promise<Record<string, unknown>> {
+  return request.get(`/workflows/executions/${executionId}/logs/export`, {
+    params: nodeId ? { node_id: nodeId } : undefined,
+  }) as Promise<Record<string, unknown>>;
 }
 
 /** 执行工作流 */

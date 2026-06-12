@@ -13,6 +13,7 @@ import {
   getAlertHistory,
   getUserActivity,
   getToolStats,
+  getWorkflowStats,
   type AlertConfig,
   type AlertHistoryItem,
   type ApiStats,
@@ -21,6 +22,7 @@ import {
   type TokenUsageStats,
   type ToolStats,
   type UserActivityStats,
+  type WorkflowStats,
 } from '@/api/monitor';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
 import BentoCard from '@/components/layout/BentoCard.vue';
@@ -32,6 +34,7 @@ const statsDays = ref(7);
 const tokenStats = ref<TokenUsageStats | null>(null);
 const apiStats = ref<ApiStats | null>(null);
 const toolStats = ref<ToolStats | null>(null);
+const workflowStats = ref<WorkflowStats | null>(null);
 const errorLogs = ref<ErrorLogItem[]>([]);
 const health = ref<SystemHealth | null>(null);
 const userActivity = ref<UserActivityStats | null>(null);
@@ -287,20 +290,31 @@ async function loadModelBreakdown(): Promise<void> {
 async function fetchDashboardData(): Promise<void> {
   loading.value = true;
   try {
-    const [tokenData, apiData, toolData, errorData, healthData, activityData, alertCfg, alerts] =
-      await Promise.all([
-        getTokenUsage({ group_by: tokenGroupBy.value }),
-        getApiStats(statsDays.value),
-        getToolStats(statsDays.value),
-        getErrorLogs({ page: 1, page_size: 10 }),
-        getMonitorHealth(),
-        getUserActivity(),
-        getAlertConfig(),
-        getAlertHistory(10),
-      ]);
+    const [
+      tokenData,
+      apiData,
+      toolData,
+      workflowData,
+      errorData,
+      healthData,
+      activityData,
+      alertCfg,
+      alerts,
+    ] = await Promise.all([
+      getTokenUsage({ group_by: tokenGroupBy.value }),
+      getApiStats(statsDays.value),
+      getToolStats(statsDays.value),
+      getWorkflowStats(statsDays.value),
+      getErrorLogs({ page: 1, page_size: 10 }),
+      getMonitorHealth(),
+      getUserActivity(),
+      getAlertConfig(),
+      getAlertHistory(10),
+    ]);
     tokenStats.value = tokenData;
     apiStats.value = apiData;
     toolStats.value = toolData;
+    workflowStats.value = workflowData;
     errorLogs.value = errorData.items;
     health.value = healthData;
     userActivity.value = activityData;
@@ -454,6 +468,24 @@ onUnmounted(() => {
           </template>
           <div ref="modelChartRef" class="chart-container chart-container-sm" />
         </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row v-if="workflowStats" :gutter="20" class="mb-4">
+      <el-col :xs="24" :sm="8">
+        <BentoCard title="工作流执行次数" :value="String(workflowStats.total_count)" />
+      </el-col>
+      <el-col :xs="24" :sm="8">
+        <BentoCard
+          title="平均耗时 (ms)"
+          :value="String(Math.round(workflowStats.avg_duration_ms))"
+        />
+      </el-col>
+      <el-col :xs="24" :sm="8">
+        <BentoCard
+          title="失败率"
+          :value="`${(workflowStats.failure_rate * 100).toFixed(1)}%`"
+        />
       </el-col>
     </el-row>
 

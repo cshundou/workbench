@@ -73,7 +73,9 @@ class WorkflowWebSocketManager:
         status: str,
         log_entry: dict[str, Any] | None = None,
     ) -> None:
-        """推送节点状态变更。"""
+        """推送节点状态变更（经 Redis 转发到 API 进程）。"""
+        from app.services.workflow.ws_event_bus import workflow_ws_event_bus
+
         message: dict[str, Any] = {
             "type": "node_status",
             "execution_id": execution_id,
@@ -82,7 +84,7 @@ class WorkflowWebSocketManager:
         }
         if log_entry:
             message["log"] = log_entry
-        await self.broadcast(execution_id, message)
+        workflow_ws_event_bus.publish(execution_id, message)
 
     async def broadcast_execution_status(
         self,
@@ -90,7 +92,9 @@ class WorkflowWebSocketManager:
         status: str,
         data: dict[str, Any] | None = None,
     ) -> None:
-        """推送工作流整体状态变更。"""
+        """推送工作流整体状态变更（经 Redis 转发到 API 进程）。"""
+        from app.services.workflow.ws_event_bus import workflow_ws_event_bus
+
         message: dict[str, Any] = {
             "type": "execution_status",
             "execution_id": execution_id,
@@ -98,7 +102,24 @@ class WorkflowWebSocketManager:
         }
         if data:
             message["data"] = data
-        await self.broadcast(execution_id, message)
+        workflow_ws_event_bus.publish(execution_id, message)
+
+    async def broadcast_node_stream(
+        self,
+        execution_id: int,
+        node_id: str,
+        chunk: str,
+    ) -> None:
+        """推送节点流式输出片段（经 Redis 转发到 API 进程）。"""
+        from app.services.workflow.ws_event_bus import workflow_ws_event_bus
+
+        message = {
+            "type": "node_stream",
+            "execution_id": execution_id,
+            "node_id": node_id,
+            "chunk": chunk,
+        }
+        workflow_ws_event_bus.publish(execution_id, message)
 
     async def disconnect_execution(self, execution_id: int) -> None:
         """关闭指定执行实例的全部 WebSocket 连接。"""

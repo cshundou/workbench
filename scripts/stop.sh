@@ -19,6 +19,7 @@ stop_pid() {
 }
 
 stop_pid "$ROOT/logs/backend.pid" "后端"
+stop_pid "$ROOT/logs/worker.pid" "ARQ Worker"
 stop_pid "$ROOT/logs/frontend.pid" "前端"
 
 if command -v docker &>/dev/null && [ -f "$ROOT/docker-compose.yml" ]; then

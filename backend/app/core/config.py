@@ -221,6 +221,24 @@ class Settings(BaseSettings):
         description="LangSmith 组织 slug（前端 trace 链接）",
     )
 
+    # 工作流执行配置
+    workflow_parallel_max_workers: int = Field(
+        default=5,
+        description="工作流并行 Agent 最大并发数",
+    )
+    workflow_execution_timeout_seconds: int = Field(
+        default=600,
+        description="工作流全局执行超时（秒）",
+    )
+    workflow_runtime_ttl_seconds: int = Field(
+        default=60 * 60 * 24 * 7,
+        description="工作流运行时状态 Redis TTL（秒）",
+    )
+    workflow_max_replan_count: int = Field(
+        default=2,
+        description="调度中心最大二次规划次数",
+    )
+
     # 监控告警配置
     alert_enabled: bool = Field(default=False, description="是否启用监控告警")
     alert_slow_api_threshold_ms: float = Field(

@@ -31,6 +31,31 @@ from app.services.workflow.workflow_service import workflow_service
 router = APIRouter(prefix="/workflows", tags=["工作流管理"])
 
 
+@router.get("/templates", summary="获取内置工作流模板")
+async def list_workflow_templates(
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+) -> dict[str, Any]:
+    """返回竞品调研、政策问答、数据分析等内置模板元数据。"""
+    items = await workflow_service.list_builtin_templates()
+    return success_response(data=items)
+
+
+@router.post("/from-template/{template_id}", summary="从模板创建工作流")
+async def create_workflow_from_template(
+    template_id: str,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    name: str | None = Body(default=None, embed=True),
+) -> dict[str, Any]:
+    """从内置模板复制拓扑创建新工作流。"""
+    result = await workflow_service.create_workflow_from_template(
+        db, tenant_id, current_user, template_id, name=name
+    )
+    await db.commit()
+    return success_response(data=result.model_dump(), message="创建成功")
+
+
 @router.get("", summary="获取工作流列表")
 async def list_workflows(
     current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],

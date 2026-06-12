@@ -2,11 +2,14 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowLeft, VideoPlay, Check, Close, CircleClose } from '@element-plus/icons-vue';
+import { ArrowLeft, VideoPlay, Check, Close, CircleClose, Download } from '@element-plus/icons-vue';
 import WorkflowCanvas from '@/components/workflow/WorkflowCanvas.vue';
 import ExecutionLogPanel from '@/components/workflow/ExecutionLogPanel.vue';
+import StreamingText from '@/components/chat/StreamingText.vue';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
 import { useGraphStore } from '@/stores/graph';
+import { getKnowledgeBases } from '@/api/rag';
+import { exportExecutionLogs } from '@/api/workflow';
 import type { NodeExecutionLog } from '@/api/workflow';
 
 const route = useRoute();
@@ -16,6 +19,8 @@ const graphStore = useGraphStore();
 const workflowId = computed(() => Number(route.params.id));
 const taskInput = ref('');
 const requireHuman = ref(false);
+const selectedKbId = ref<number | undefined>(undefined);
+const kbOptions = ref<{ id: number; name: string }[]>([]);
 const isExecuting = ref(false);
 const selectedNodeId = ref<string | null>(null);
 const selectedLog = ref<NodeExecutionLog | null>(null);
@@ -33,6 +38,24 @@ const canTerminate = computed(() => ['pending', 'running'].includes(executionSta
 
 const isTerminating = ref(false);
 
+const finalAnswer = computed(() => {
+  if (graphStore.streamingFinalAnswer) {
+    return graphStore.streamingFinalAnswer;
+  }
+  const final = graphStore.currentExecution?.output_result?.final;
+  return typeof final === 'string' ? final : '';
+});
+
+const parallelDurationMs = computed(() => {
+  const logs = graphStore.executionLogs;
+  for (let i = logs.length - 1; i >= 0; i -= 1) {
+    const duration = (logs[i] as NodeExecutionLog & { branch_duration_ms?: number })
+      .branch_duration_ms;
+    if (duration) return duration;
+  }
+  return null;
+});
+
 const statusTagType = computed(() => {
   const map: Record<string, string> = {
     pending: 'info',
@@ -47,11 +70,19 @@ const statusTagType = computed(() => {
 
 async function loadWorkflow(): Promise<void> {
   await graphStore.fetchWorkflow(workflowId.value);
+  const kbRes = await getKnowledgeBases({ page: 1, page_size: 100 });
+  kbOptions.value = kbRes.items.map((kb) => ({ id: kb.id, name: kb.name }));
 }
 
 async function handleExecute(): Promise<void> {
   if (!taskInput.value.trim()) {
     ElMessage.warning('请输入任务描述');
+    return;
+  }
+
+  const hasKnowledgeNode = graphDefinition.value.nodes.some((n) => n.type === 'knowledge');
+  if (hasKnowledgeNode && !selectedKbId.value) {
+    ElMessage.warning('请选择知识库后再执行（知识库 Agent 需要绑定数据源）');
     return;
   }
 
@@ -62,11 +93,12 @@ async function handleExecute(): Promise<void> {
     const execution = await graphStore.runWorkflow(workflowId.value, {
       task: taskInput.value.trim(),
       require_human_approval: requireHuman.value,
+      kb_id: selectedKbId.value,
     });
     graphStore.connectWebSocket(execution.id);
-    ElMessage.success('工作流已启动');
-  } catch {
-    ElMessage.error('启动失败');
+    ElMessage.success(`工作流已启动（执行 ID: ${execution.id}）`);
+  } catch (err) {
+    console.error('[Workflow Execute] 启动失败', err);
   } finally {
     isExecuting.value = false;
   }
@@ -124,8 +156,28 @@ function goBack(): void {
   router.push({ name: 'WorkflowList' });
 }
 
-onMounted(() => {
-  loadWorkflow();
+async function handleExportLogs(): Promise<void> {
+  if (!graphStore.currentExecution) return;
+  const data = await exportExecutionLogs(graphStore.currentExecution.id);
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `workflow-logs-${graphStore.currentExecution.id}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success('日志已导出');
+}
+
+onMounted(async () => {
+  await loadWorkflow();
+  const executionId = Number(route.query.executionId);
+  if (executionId) {
+    await graphStore.refreshExecution(executionId);
+    graphStore.connectWebSocket(executionId);
+  }
 });
 
 onUnmounted(() => {
@@ -190,6 +242,23 @@ onUnmounted(() => {
         <el-card shadow="never" class="control-card">
           <template #header>执行控制</template>
           <el-form label-position="top">
+            <el-form-item label="知识库">
+              <el-select
+                v-model="selectedKbId"
+                clearable
+                filterable
+                placeholder="选择知识库（知识库 Agent 必填）"
+                style="width: 100%"
+                :disabled="executionStatus === 'running'"
+              >
+                <el-option
+                  v-for="kb in kbOptions"
+                  :key="kb.id"
+                  :label="kb.name"
+                  :value="kb.id"
+                />
+              </el-select>
+            </el-form-item>
             <el-form-item label="任务描述">
               <el-input
                 v-model="taskInput"
@@ -204,6 +273,9 @@ onUnmounted(() => {
                 启用人工介入（审核前需人工确认）
               </el-checkbox>
             </el-form-item>
+            <p v-if="parallelDurationMs" class="parallel-hint">
+              并行执行总耗时：{{ parallelDurationMs }} ms
+            </p>
             <div class="execute-actions">
               <el-button
                 type="primary"
@@ -248,19 +320,26 @@ onUnmounted(() => {
         </el-card>
 
         <!-- 最终结果 -->
-        <el-card
-          v-if="graphStore.currentExecution?.output_result?.final"
-          shadow="never"
-          class="result-card"
-        >
+        <el-card v-if="finalAnswer" shadow="never" class="result-card">
           <template #header>最终回答</template>
-          <div class="final-answer">
-            {{ graphStore.currentExecution?.output_result?.final }}
-          </div>
+          <StreamingText :content="finalAnswer" :streaming="executionStatus === 'running'" />
         </el-card>
 
         <!-- 执行日志 -->
         <el-card shadow="never" class="log-card">
+          <template #header>
+            <div class="log-header">
+              <span>执行日志</span>
+              <el-button
+                v-if="graphStore.currentExecution"
+                size="small"
+                :icon="Download"
+                @click="handleExportLogs"
+              >
+                导出 JSON
+              </el-button>
+            </div>
+          </template>
           <ExecutionLogPanel
             :logs="graphStore.executionLogs"
             :selected-node-id="selectedNodeId"

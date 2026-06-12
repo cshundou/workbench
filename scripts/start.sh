@@ -216,8 +216,37 @@ if [ -n "$PG_BIN" ] && "$PG_BIN/pg_isready" -q 2>/dev/null; then
   cd "$ROOT"
 fi
 
+# 启动 ARQ Worker（工作流/文档解析异步任务依赖此进程）
+start_arq_worker() {
+  if [ -f logs/worker.pid ]; then
+    local old_pid
+    old_pid=$(cat logs/worker.pid)
+    kill "$old_pid" 2>/dev/null || true
+    rm -f logs/worker.pid
+  fi
+
+  log "启动 ARQ Worker（工作流异步执行）..."
+  cd "$ROOT/backend"
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+  # 使用 python -m arq，避免 venv 内 arq 脚本指向 Python 3.14 导致事件循环初始化失败
+  nohup python -m arq app.worker.WorkerSettings >> "$ROOT/logs/worker.log" 2>&1 &
+  echo $! > "$ROOT/logs/worker.pid"
+  cd "$ROOT"
+  sleep 2
+  local worker_pid
+  worker_pid=$(cat logs/worker.pid)
+  if ! kill -0 "$worker_pid" 2>/dev/null; then
+    err "ARQ Worker 启动失败，请查看 logs/worker.log"
+    tail -20 "$ROOT/logs/worker.log" >&2 || true
+    exit 1
+  fi
+  log "ARQ Worker 已启动 (PID $worker_pid)"
+}
+
 # ---------- 5. 启动服务 ----------
 start_backend
+start_arq_worker
 start_frontend
 
 # ---------- 6. 登录冒烟测试 ----------

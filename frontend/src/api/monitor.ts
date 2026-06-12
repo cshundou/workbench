@@ -148,6 +148,19 @@ export function getToolStats(days = 7): Promise<ToolStats> {
   return request.get('/monitor/tool-stats', { params: { days } });
 }
 
+/** 工作流执行统计 */
+export interface WorkflowStats {
+  total_count: number;
+  failed_count: number;
+  avg_duration_ms: number;
+  failure_rate: number;
+  daily: { date: string; count: number; failed_count: number; avg_duration_ms: number }[];
+}
+
+export function getWorkflowStats(days = 7): Promise<WorkflowStats> {
+  return request.get('/monitor/workflow-stats', { params: { days } });
+}
+
 /** 分页查询错误日志 */
 export function getErrorLogs(params?: {
   page?: number;

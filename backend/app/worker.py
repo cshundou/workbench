@@ -2,6 +2,7 @@
 ARQ Worker 配置入口。
 """
 
+from arq import cron
 from arq.connections import RedisSettings
 
 from app.core.config import settings
@@ -23,8 +24,9 @@ class WorkerSettings:
         resume_workflow_task,
         purge_audit_logs_task,
     ]
+    # 每天凌晨 3 点清理过期审计日志
     cron_jobs = [
-        ("0 3 * * *", purge_audit_logs_task),
+        cron(purge_audit_logs_task, hour=3, minute=0),
     ]
     job_timeout = 1800  # 30 分钟
     keep_result = 3600  # 结果保留 1 小时

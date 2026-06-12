@@ -4,7 +4,13 @@ import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import { Plus, VideoPlay, Edit, Delete, Share } from '@element-plus/icons-vue';
-import { publishWorkflow, type WorkflowInfo } from '@/api/workflow';
+import {
+  publishWorkflow,
+  getWorkflowTemplates,
+  createWorkflowFromTemplate,
+  type WorkflowInfo,
+  type WorkflowTemplateInfo,
+} from '@/api/workflow';
 import { useGraphStore } from '@/stores/graph';
 import { useUserStore } from '@/stores/user';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
@@ -31,6 +37,12 @@ const wfForm = reactive({
   description: '',
   is_public: false,
 });
+
+const templates = ref<WorkflowTemplateInfo[]>([]);
+const templateDialogVisible = ref(false);
+const publishDialogVisible = ref(false);
+const publishingWorkflow = ref<WorkflowInfo | null>(null);
+const publishChangeNote = ref('');
 
 const formRules: FormRules = {
   name: [
@@ -110,12 +122,29 @@ function goHistory(wf: WorkflowInfo): void {
   router.push({ name: 'WorkflowHistory', params: { id: wf.id } });
 }
 
-async function handlePublish(wf: WorkflowInfo): Promise<void> {
-  await ElMessageBox.confirm(`确定发布工作流「${wf.name}」？发布后可用于执行。`, '发布确认', {
-    type: 'info',
-  });
-  await publishWorkflow(wf.id);
+function openPublishDialog(wf: WorkflowInfo): void {
+  publishingWorkflow.value = wf;
+  publishChangeNote.value = '';
+  publishDialogVisible.value = true;
+}
+
+async function confirmPublish(): Promise<void> {
+  if (!publishingWorkflow.value) return;
+  await publishWorkflow(publishingWorkflow.value.id, publishChangeNote.value || undefined);
   ElMessage.success('发布成功');
+  publishDialogVisible.value = false;
+  await fetchList();
+}
+
+async function loadTemplates(): Promise<void> {
+  templates.value = await getWorkflowTemplates();
+  templateDialogVisible.value = true;
+}
+
+async function handleCreateFromTemplate(templateId: string): Promise<void> {
+  await createWorkflowFromTemplate(templateId);
+  ElMessage.success('已从模板创建工作流');
+  templateDialogVisible.value = false;
   await fetchList();
 }
 
@@ -133,6 +162,7 @@ onMounted(() => {
       description="LangGraph 多智能体协同工作流，支持任务拆解、并行执行与人工介入"
     >
       <template #actions>
+        <el-button v-if="canWrite" round @click="loadTemplates">从模板创建</el-button>
         <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
           新建工作流
         </el-button>
@@ -154,6 +184,7 @@ onMounted(() => {
           <p class="wf-desc">{{ wf.description || '暂无描述' }}</p>
           <div class="wf-meta">
             <span>{{ wf.graph_definition?.nodes?.length || 0 }} 个节点</span>
+            <span v-if="wf.current_version"> · {{ wf.current_version }}</span>
           </div>
           <div class="wf-actions">
             <el-button type="primary" size="small" :icon="VideoPlay" @click="goExecute(wf)">
@@ -164,7 +195,7 @@ onMounted(() => {
                 v-if="wf.status !== 'published'"
                 size="small"
                 type="success"
-                @click="handlePublish(wf)"
+                @click="openPublishDialog(wf)"
               >
                 发布
               </el-button>
@@ -192,6 +223,33 @@ onMounted(() => {
         @current-change="handlePageChange"
       />
     </div>
+
+    <el-dialog v-model="templateDialogVisible" title="从模板创建" width="520px">
+      <el-row :gutter="12">
+        <el-col v-for="tpl in templates" :key="tpl.id" :span="24">
+          <el-card shadow="never" class="tpl-card">
+            <h4>{{ tpl.name }}</h4>
+            <p>{{ tpl.description }}</p>
+            <el-button type="primary" size="small" @click="handleCreateFromTemplate(tpl.id)">
+              使用此模板
+            </el-button>
+          </el-card>
+        </el-col>
+      </el-row>
+    </el-dialog>
+
+    <el-dialog v-model="publishDialogVisible" title="发布工作流" width="420px">
+      <el-input
+        v-model="publishChangeNote"
+        type="textarea"
+        :rows="3"
+        placeholder="变更说明（可选）"
+      />
+      <template #footer>
+        <el-button @click="publishDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmPublish">确认发布</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="480px" destroy-on-close>
       <el-form ref="formRef" :model="wfForm" :rules="formRules" label-width="90px">

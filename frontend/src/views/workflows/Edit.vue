@@ -7,9 +7,22 @@ import { VueFlow } from '@vue-flow/core';
 import '@vue-flow/core/dist/style.css';
 import '@vue-flow/core/dist/theme-default.css';
 import WorkflowNode from '@/components/workflow/WorkflowNode.vue';
+import NodeConfigDrawer from '@/components/workflow/NodeConfigDrawer.vue';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
-import { getWorkflow, updateWorkflow, validateWorkflowGraph } from '@/api/workflow';
-import type { GraphDefinition, WorkflowEdgeDef, WorkflowNodeDef } from '@/api/workflow';
+import {
+  getWorkflow,
+  updateWorkflow,
+  validateWorkflowGraph,
+  getWorkflowVersions,
+  rollbackWorkflowVersion,
+  publishWorkflow,
+} from '@/api/workflow';
+import type {
+  GraphDefinition,
+  WorkflowEdgeDef,
+  WorkflowNodeDef,
+  WorkflowVersionInfo,
+} from '@/api/workflow';
 
 const route = useRoute();
 const router = useRouter();
@@ -27,16 +40,38 @@ const nodeTypes = [
   { type: 'search', label: '搜索 Agent' },
   { type: 'execution', label: '执行 Agent' },
   { type: 'human', label: '人工介入' },
+  { type: 'supervisor', label: '监督节点' },
   { type: 'reviewer', label: '审核 Agent' },
+  { type: 'condition', label: '条件分支' },
+  { type: 'custom_agent', label: '自定义 Agent' },
   { type: 'loop', label: '循环节点' },
 ];
+
+const configDrawerVisible = ref(false);
+const editingNode = ref<WorkflowNodeDef | null>(null);
+const versions = ref<WorkflowVersionInfo[]>([]);
+const workflowStatus = ref('draft');
+const currentVersion = ref<string | null>(null);
 
 function addNode(type: string, label: string): void {
   const id = `${type}_${Date.now()}`;
   const config =
     type === 'loop'
       ? { loop_condition: '满足退出条件', max_iterations: 10 }
-      : {};
+      : type === 'condition'
+        ? {
+            branches: [
+              {
+                label: '知识库无结果',
+                condition: 'knowledge 为空',
+                target: '',
+              },
+            ],
+            default_target: '',
+          }
+        : type === 'custom_agent'
+          ? { agent_id: null }
+          : {};
   nodes.value.push({
     id,
     type,
@@ -79,16 +114,45 @@ async function loadWorkflow(): Promise<void> {
   try {
     const wf = await getWorkflow(workflowId.value);
     workflowName.value = wf.name;
+    workflowStatus.value = wf.status || 'draft';
+    currentVersion.value = wf.current_version || null;
     nodes.value = JSON.parse(JSON.stringify(wf.graph_definition.nodes || []));
     edges.value = JSON.parse(JSON.stringify(wf.graph_definition.edges || []));
+    versions.value = await getWorkflowVersions(workflowId.value);
   } finally {
     loading.value = false;
+  }
+}
+
+function openNodeConfig(nodeId: string): void {
+  const node = nodes.value.find((item) => item.id === nodeId);
+  if (!node) return;
+  editingNode.value = node;
+  configDrawerVisible.value = true;
+}
+
+function handleNodeConfigSave(updated: WorkflowNodeDef): void {
+  const index = nodes.value.findIndex((item) => item.id === updated.id);
+  if (index >= 0) {
+    nodes.value[index] = updated;
   }
 }
 
 function removeSelected(nodeId: string): void {
   nodes.value = nodes.value.filter((node) => node.id !== nodeId);
   edges.value = edges.value.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
+}
+
+async function handleRollback(versionId: number): Promise<void> {
+  await rollbackWorkflowVersion(workflowId.value, versionId);
+  ElMessage.success('已回滚并生成新版本');
+  await loadWorkflow();
+}
+
+async function handlePublish(): Promise<void> {
+  await publishWorkflow(workflowId.value);
+  ElMessage.success('发布成功');
+  await loadWorkflow();
 }
 
 async function handleSave(): Promise<void> {
@@ -125,6 +189,31 @@ onMounted(() => {
     </SectionHeader>
 
     <div class="edit-layout">
+      <div class="version-panel">
+        <h4>版本历史</h4>
+        <p class="version-meta">
+          状态：{{ workflowStatus === 'published' ? '已发布' : '草稿' }}
+          <span v-if="currentVersion"> · {{ currentVersion }}</span>
+        </p>
+        <el-button
+          v-if="workflowStatus !== 'published'"
+          type="success"
+          size="small"
+          class="mb-2"
+          @click="handlePublish"
+        >
+          发布
+        </el-button>
+        <el-scrollbar max-height="320px">
+          <div v-for="ver in versions" :key="ver.id" class="version-item">
+            <div class="ver-title">{{ ver.version }}</div>
+            <div class="ver-time">{{ ver.published_at }}</div>
+            <el-button link size="small" type="primary" @click="handleRollback(ver.id)">
+              回滚
+            </el-button>
+          </div>
+        </el-scrollbar>
+      </div>
       <div class="palette">
         <h4>添加节点</h4>
         <el-button
@@ -145,7 +234,8 @@ onMounted(() => {
           :nodes-connectable="true"
           fit-view-on-init
           @connect="onConnect"
-          @node-double-click="({ node }) => removeSelected(node.id)"
+          @node-double-click="({ node }) => openNodeConfig(node.id)"
+          @node-contextmenu="({ node, event }) => { event.preventDefault(); removeSelected(node.id); }"
         >
           <template #node-workflow="nodeProps">
             <WorkflowNode
@@ -158,6 +248,12 @@ onMounted(() => {
         </VueFlow>
       </div>
     </div>
+
+    <NodeConfigDrawer
+      v-model:visible="configDrawerVisible"
+      :node="editingNode"
+      @save="handleNodeConfigSave"
+    />
   </div>
 </template>
 
@@ -173,6 +269,40 @@ onMounted(() => {
   display: flex;
   gap: 12px;
   min-height: 0;
+}
+
+.version-panel {
+  width: 200px;
+  padding: 12px;
+  background: #fff;
+  border-radius: $border-radius-md;
+  box-shadow: $shadow-soft;
+
+  h4 {
+    margin: 0 0 8px;
+    font-size: 14px;
+  }
+}
+
+.version-meta {
+  font-size: 12px;
+  color: $text-secondary;
+  margin: 0 0 8px;
+}
+
+.version-item {
+  padding: 8px 0;
+  border-bottom: 1px solid $border-color;
+}
+
+.ver-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ver-time {
+  font-size: 11px;
+  color: $text-secondary;
 }
 
 .palette {

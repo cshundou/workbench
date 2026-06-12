@@ -80,6 +80,16 @@ async def get_api_stats(
     return success_response(data=result)
 
 
+@router.get("/workflow-stats", summary="工作流执行统计")
+async def get_workflow_stats(
+    _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],
+    days: int = Query(default=7, ge=1, le=30, description="统计最近天数"),
+) -> dict[str, Any]:
+    """查询工作流执行次数、平均耗时与失败率。"""
+    result = await monitor_service.get_workflow_stats(days=days)
+    return success_response(data=result)
+
+
 @router.get("/tool-stats", summary="工具调用成功率统计")
 async def get_tool_stats(
     _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],

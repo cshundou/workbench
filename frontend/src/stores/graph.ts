@@ -36,10 +36,12 @@ export const useGraphStore = defineStore('graph', () => {
   const currentExecution = ref<WorkflowExecution | null>(null);
   const nodeStatuses = ref<Record<string, string>>({});
   const executionLogs = ref<NodeExecutionLog[]>([]);
+  const streamingFinalAnswer = ref('');
   const isLoading = ref(false);
   const total = ref(0);
 
   let ws: WebSocket | null = null;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
 
   /** 加载工作流列表 */
   async function fetchWorkflows(params?: PageParams): Promise<void> {
@@ -126,12 +128,40 @@ export const useGraphStore = defineStore('graph', () => {
     executionLogs.value = execution.logs || [];
   }
 
+  /** 轮询执行状态（WebSocket 不可用时的兜底） */
+  function startExecutionPolling(executionId: number, intervalMs = 2000): void {
+    stopExecutionPolling();
+    pollTimer = setInterval(async () => {
+      try {
+        await refreshExecution(executionId);
+        const status = currentExecution.value?.status;
+        if (status && ['completed', 'failed', 'interrupted'].includes(status)) {
+          stopExecutionPolling();
+        }
+      } catch (err) {
+        console.error('[Workflow Poll] 刷新失败', err);
+      }
+    }, intervalMs);
+  }
+
+  function stopExecutionPolling(): void {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
   /** 连接 WebSocket 实时推送 */
   function connectWebSocket(executionId: number): void {
     disconnectWebSocket();
+    startExecutionPolling(executionId);
 
     const url = buildWorkflowWsUrl(executionId);
     ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      console.info('[Workflow WS] 已连接 execution_id=%s', executionId);
+    };
 
     ws.onmessage = (event: MessageEvent) => {
       try {
@@ -153,6 +183,7 @@ export const useGraphStore = defineStore('graph', () => {
 
   /** 断开 WebSocket */
   function disconnectWebSocket(): void {
+    stopExecutionPolling();
     if (ws) {
       ws.close();
       ws = null;
@@ -171,6 +202,10 @@ export const useGraphStore = defineStore('graph', () => {
       }
     }
 
+    if (message.type === 'connected') {
+      console.info('[Workflow WS] 服务端确认连接', message);
+    }
+
     if (message.type === 'execution_status' && message.status) {
       if (currentExecution.value) {
         currentExecution.value = {
@@ -179,6 +214,13 @@ export const useGraphStore = defineStore('graph', () => {
           output_result: message.data || currentExecution.value.output_result,
         };
       }
+      if (['completed', 'failed', 'interrupted'].includes(message.status)) {
+        stopExecutionPolling();
+      }
+    }
+
+    if (message.type === 'node_stream' && message.chunk) {
+      streamingFinalAnswer.value += message.chunk;
     }
   }
 
@@ -188,6 +230,7 @@ export const useGraphStore = defineStore('graph', () => {
     currentExecution.value = null;
     nodeStatuses.value = {};
     executionLogs.value = [];
+    streamingFinalAnswer.value = '';
   }
 
   return {
@@ -196,6 +239,7 @@ export const useGraphStore = defineStore('graph', () => {
     currentExecution,
     nodeStatuses,
     executionLogs,
+    streamingFinalAnswer,
     isLoading,
     total,
     fetchWorkflows,
@@ -209,6 +253,8 @@ export const useGraphStore = defineStore('graph', () => {
     cancelExecution,
     connectWebSocket,
     disconnectWebSocket,
+    startExecutionPolling,
+    stopExecutionPolling,
     resetExecution,
   };
 });
