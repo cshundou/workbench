@@ -16,6 +16,7 @@ from app.models.mcp_server import McpServer, McpTool
 from app.models.group_chat import GroupChatMessage, GroupChatSession
 from app.models.workflow import Workflow
 from app.models.workflow_execution import WorkflowExecution
+from app.models.workflow_checkpoint import WorkflowCheckpoint
 from app.models.plugin import (
     Plugin,
     PluginInstallation,
@@ -37,6 +38,7 @@ __all__ = [
     "Agent",
     "Workflow",
     "WorkflowExecution",
+    "WorkflowCheckpoint",
     "GroupChatSession",
     "GroupChatMessage",
     "McpServer",

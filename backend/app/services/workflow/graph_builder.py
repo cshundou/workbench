@@ -39,7 +39,9 @@ from app.services.workflow.nodes.group_chat_subtasks import (
     get_pending_subtask,
     mark_subtask_completed,
 )
+from app.services.workflow.hybrid_checkpoint import create_checkpointer
 from app.services.workflow.redis_saver import RedisSaver
+from app.services.workflow.workflow_tracing import record_workflow_node_span
 from app.services.workflow.tool_manager import WorkflowToolManager
 from app.services.workflow.workflow_agent_runner import WorkflowAgentRunner
 
@@ -207,7 +209,7 @@ class WorkflowBuilder:
     ) -> None:
         url = redis_url or settings.redis_url
         self.redis = redis.Redis.from_url(url, decode_responses=False)
-        self.checkpointer = RedisSaver(self.redis)
+        self.checkpointer = create_checkpointer(self.redis)
         self._status_callback: Optional[StatusCallback] = None
         self.user_ctx = user_ctx
         # agent 类型 -> 图节点 id（build 时按 graph_definition 填充）
@@ -228,6 +230,7 @@ class WorkflowBuilder:
         self._supplement_loader: Optional[Callable[[], list[str]]] = None
         self._agent_runner: Optional[WorkflowAgentRunner] = None
         self._tool_manager: Optional[WorkflowToolManager] = None
+        self._trace_id: Optional[str] = None
 
     def set_execution_context(
         self,
@@ -257,6 +260,10 @@ class WorkflowBuilder:
     def set_supplement_loader(self, loader: Callable[[], list[str]]) -> None:
         """设置用户补充要求加载器。"""
         self._supplement_loader = loader
+
+    def set_trace_id(self, trace_id: Optional[str]) -> None:
+        """设置全链路 TraceID。"""
+        self._trace_id = trace_id
 
     def _emit_group_chat(
         self,
@@ -366,6 +373,14 @@ class WorkflowBuilder:
         }
         state.setdefault("execution_logs", []).append(log_entry)
         self._emit_status(node_id, status, log_entry)
+        if status in ("completed", "failed", "waiting"):
+            record_workflow_node_span(
+                self._trace_id,
+                self.tenant_id,
+                node_id,
+                status,
+                log_entry,
+            )
         return log_entry
 
     def _get_agent_runner(self) -> Optional[WorkflowAgentRunner]:
