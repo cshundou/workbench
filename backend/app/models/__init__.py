@@ -12,6 +12,7 @@ from app.models.tenant import Tenant
 from app.models.token_usage import TokenUsage
 from app.models.user import User
 from app.models.user_api_key import UserApiKey
+from app.models.group_chat import GroupChatMessage, GroupChatSession
 from app.models.workflow import Workflow
 from app.models.workflow_execution import WorkflowExecution
 
@@ -27,6 +28,8 @@ __all__ = [
     "Agent",
     "Workflow",
     "WorkflowExecution",
+    "GroupChatSession",
+    "GroupChatMessage",
     "ChatHistory",
     "TokenUsage",
     "UserApiKey",

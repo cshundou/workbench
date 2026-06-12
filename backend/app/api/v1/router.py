@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from app.api.v1.group_chat import router as group_chat_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.config import router as config_router
 from app.api.v1.agents import router as agents_router
@@ -37,6 +38,7 @@ api_router.include_router(roles_router)
 api_router.include_router(knowledge_bases_router)
 api_router.include_router(workflows_router)
 api_router.include_router(workflow_ws_router)
+api_router.include_router(group_chat_router)
 api_router.include_router(monitor_router)
 api_router.include_router(agents_router)
 api_router.include_router(user_api_keys_router)

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.tenant import Tenant
     from app.models.user import User
     from app.models.workflow import Workflow
+    from app.models.group_chat import GroupChatSession
 
 
 class WorkflowExecution(Base):
@@ -74,4 +75,8 @@ class WorkflowExecution(Base):
     tenant: Mapped["Tenant"] = relationship(back_populates="workflow_executions")
     created_by_user: Mapped[Optional["User"]] = relationship(
         back_populates="workflow_executions"
+    )
+    group_chat_session: Mapped[Optional["GroupChatSession"]] = relationship(
+        back_populates="execution",
+        uselist=False,
     )

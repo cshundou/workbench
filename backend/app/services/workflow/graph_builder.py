@@ -126,6 +126,7 @@ VALID_NODE_TYPES = frozenset(
         "condition",
         "custom_agent",
         "supervisor",
+        "sub_workflow",
     }
 )
 
@@ -159,6 +160,17 @@ class AgentState(TypedDict):
 
 StatusCallback = Callable[[str, str, dict[str, Any]], None]
 StreamCallback = Callable[[str, str], None]
+GroupChatCallback = Callable[[dict[str, Any]], None]
+
+# 工作流节点到群聊角色的映射（群聊视图可选展示）
+NODE_GROUP_CHAT_ROLE: dict[str, str] = {
+    "scheduler": "project_manager",
+    "knowledge_agent": "researcher",
+    "search_agent": "researcher",
+    "execution_agent": "engineer",
+    "reviewer": "auditor",
+    "supervisor": "project_manager",
+}
 
 
 class WorkflowBuilder:
@@ -187,6 +199,7 @@ class WorkflowBuilder:
         self.user_id: Optional[int] = None
         self.execution_id: Optional[int] = None
         self._stream_callback: Optional[StreamCallback] = None
+        self._group_chat_callback: Optional[GroupChatCallback] = None
         self._agent_runner: Optional[WorkflowAgentRunner] = None
 
     def set_execution_context(
@@ -203,6 +216,42 @@ class WorkflowBuilder:
     def set_stream_callback(self, callback: StreamCallback) -> None:
         """设置审核节点流式输出回调。"""
         self._stream_callback = callback
+
+    def set_group_chat_callback(self, callback: GroupChatCallback) -> None:
+        """设置群聊消息回调，用于群聊视图实时展示工作流过程。"""
+        self._group_chat_callback = callback
+
+    def _emit_group_chat(
+        self,
+        node_id: str,
+        message_type: str,
+        content: str,
+        *,
+        attachments: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """向群聊视图推送标准化消息（WorkflowBuilder 节点钩子）。"""
+        if not self._group_chat_callback:
+            return
+        from app.services.workflow.group_chat_engine import AGENT_ROLES
+
+        role = NODE_GROUP_CHAT_ROLE.get(node_id, "project_manager")
+        role_info = AGENT_ROLES.get(role, AGENT_ROLES["project_manager"])
+        payload: dict[str, Any] = {
+            "id": f"wf-{node_id}-{int(time.time() * 1000)}",
+            "timestamp": self._now_iso(),
+            "sender": {
+                "id": role_info["id"],
+                "name": role_info["name"],
+                "role": role,
+                "avatar": role_info["avatar"],
+            },
+            "type": message_type,
+            "content": content,
+            "attachments": attachments or [],
+            "metadata": metadata or {"node_id": node_id},
+        }
+        self._group_chat_callback(payload)
 
     def set_status_callback(self, callback: StatusCallback) -> None:
         """设置节点状态回调，用于 WebSocket 推送。"""
@@ -538,17 +587,126 @@ class WorkflowBuilder:
                     )
                 break
 
+    def sub_workflow_node(
+        self,
+        state: AgentState,
+        node_id: str,
+        sub_config: dict[str, Any],
+    ) -> AgentState:
+        """子流程节点：嵌入并执行另一个工作流，独立日志与版本锁定。"""
+        state = dict(state)
+        workflow_id = sub_config.get("workflow_id")
+        locked_version = sub_config.get("version")
+        self._append_log(
+            state,
+            node_id,
+            "running",
+            input_data={
+                "workflow_id": workflow_id,
+                "version": locked_version,
+                "task": state.get("task"),
+            },
+        )
+        try:
+            if not workflow_id:
+                raise ValidationError(message="子流程节点未配置 workflow_id")
+            result = self._invoke_sub_workflow(
+                int(workflow_id),
+                str(state.get("task", "")),
+                locked_version,
+                state,
+            )
+            state.setdefault("results", {})[node_id] = result.get("output", "")
+            state.setdefault("sub_workflow_logs", {})[node_id] = result.get("logs", [])
+            self._append_log(
+                state,
+                node_id,
+                "completed",
+                output_data=result,
+            )
+        except Exception as exc:
+            logger.exception("子流程执行失败 node=%s: %s", node_id, exc)
+            state.setdefault("results", {})[node_id] = f"子流程失败: {exc}"
+            self._append_log(state, node_id, "failed", error=str(exc))
+        return state
+
+    def _invoke_sub_workflow(
+        self,
+        workflow_id: int,
+        task: str,
+        version: Optional[str],
+        parent_state: AgentState,
+    ) -> dict[str, Any]:
+        """同步调用嵌套工作流（在线程池中执行异步逻辑）。"""
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        async def _run() -> dict[str, Any]:
+            from app.core.database import async_session_factory
+            from app.models.workflow import Workflow
+            from app.models.workflow_version import WorkflowVersion
+            from sqlalchemy import select
+
+            async with async_session_factory() as db:
+                wf_stmt = select(Workflow).where(Workflow.id == workflow_id)
+                workflow = (await db.execute(wf_stmt)).scalar_one_or_none()
+                if workflow is None:
+                    return {"output": "子工作流不存在", "logs": []}
+
+                graph_def = workflow.graph_definition
+                if version:
+                    ver_stmt = select(WorkflowVersion).where(
+                        WorkflowVersion.workflow_id == workflow_id,
+                        WorkflowVersion.version == version,
+                    )
+                    ver = (await db.execute(ver_stmt)).scalar_one_or_none()
+                    if ver:
+                        graph_def = ver.graph_definition
+
+                if self.user_ctx is None:
+                    return {"output": "未配置 API 密钥", "logs": []}
+
+                builder = WorkflowBuilder(settings.redis_url, user_ctx=self.user_ctx)
+                graph = builder.build_workflow(graph_def)
+                sub_state: dict[str, Any] = {
+                    "messages": [],
+                    "task": task,
+                    "subtasks": [],
+                    "results": {},
+                    "current_step": "init",
+                    "status": "running",
+                    "error": "",
+                    "kb_id": parent_state.get("kb_id"),
+                    "execution_logs": [],
+                    "loop_counters": {},
+                }
+                final = graph.invoke(sub_state)
+                logs = list(final.get("execution_logs") or [])
+                output = final.get("results", {}).get("review") or str(
+                    final.get("results", {})
+                )
+                return {"output": output, "logs": logs, "version": version}
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    return pool.submit(asyncio.run, _run()).result()
+            return asyncio.run(_run())
+        except RuntimeError:
+            return asyncio.run(_run())
+
     def _parse_loop_max_iterations(self, node: dict[str, Any]) -> int:
-        """解析 loop 节点最大迭代次数，默认 5。"""
+        """解析 loop 节点最大迭代次数，默认 10。"""
         config = node.get("config") if isinstance(node.get("config"), dict) else {}
-        raw_value = config.get("max_iterations", node.get("max_iterations", 5))
+        raw_value = config.get("max_iterations", node.get("max_iterations", 10))
         try:
             parsed = int(raw_value)
             if parsed <= 0:
-                return 5
+                return 10
             return min(parsed, 20)
         except (TypeError, ValueError):
-            return 5
+            return 10
 
     def _parse_loop_condition(self, node: dict[str, Any]) -> str:
         """解析 loop 节点退出条件描述。"""
@@ -621,6 +779,7 @@ class WorkflowBuilder:
         loop_node_ids: set[str] = set()
         condition_node_ids: set[str] = set()
         custom_agent_nodes: dict[str, int] = {}
+        sub_workflow_nodes: dict[str, dict[str, Any]] = {}
         for node in nodes:
             node_type = node["type"]
             if node_type not in type_to_node_id:
@@ -638,6 +797,14 @@ class WorkflowBuilder:
                 agent_id = config.get("agent_id")
                 if agent_id is not None:
                     custom_agent_nodes[node["id"]] = int(agent_id)
+            if node_type == "sub_workflow":
+                config = node.get("config") or {}
+                wf_id = config.get("workflow_id")
+                if wf_id is not None:
+                    sub_workflow_nodes[node["id"]] = {
+                        "workflow_id": int(wf_id),
+                        "version": config.get("version"),
+                    }
 
         scheduler_id = type_to_node_id["scheduler"]
         human_id = type_to_node_id.get("human")
@@ -693,8 +860,22 @@ class WorkflowBuilder:
                     return self.condition_node(state, _node_id)
 
                 workflow.add_node(node_id, _condition_handler)
+            elif node_type == "sub_workflow":
+                sub_cfg = sub_workflow_nodes.get(node_id, {})
+
+                def _sub_workflow_handler(
+                    state: AgentState,
+                    _node_id: str = node_id,
+                    _cfg: dict[str, Any] = sub_cfg,
+                ) -> AgentState:
+                    return self.sub_workflow_node(state, _node_id, _cfg)
+
+                workflow.add_node(node_id, _sub_workflow_handler)
             else:
-                workflow.add_node(node_id, handler_map[node_type])
+                handler = handler_map.get(node_type)
+                if handler is None:
+                    raise ValidationError(message=f"未知节点类型: {node_type}")
+                workflow.add_node(node_id, handler)
 
         workflow.set_entry_point(scheduler_id)
 
@@ -836,11 +1017,22 @@ class WorkflowBuilder:
         return self.build_standard_workflow(require_human=require_human)
 
     def _create_llm(self):
-        """创建 LLM 实例，无用户密钥时返回 None。"""
+        """创建 LLM 实例（含运行时故障降级），无用户密钥时返回 None。"""
         if self.user_ctx is None or not self.user_ctx.has_llm_key:
             return None
         try:
-            return create_chat_llm(self.user_ctx, temperature=0)
+            from app.services.llm_fallback_service import llm_fallback_service
+
+            primary_config = self.user_ctx.get_llm_provider()
+            primary_model = primary_config.model_name or "gpt-4o-mini"
+            llm, _, _ = llm_fallback_service.create_llm_with_fallback(
+                self.user_ctx,
+                model_name=primary_model,
+                temperature=0,
+                top_p=None,
+                max_tokens=None,
+            )
+            return llm
         except Exception as exc:
             logger.warning("创建 LLM 失败，将使用规则降级: %s", exc)
             return None
@@ -946,11 +1138,22 @@ class WorkflowBuilder:
                 "completed",
                 output_data={"subtasks": subtasks, "degraded": degraded},
             )
+            lines = [
+                f"{idx + 1}. {item.get('agent', '')}: {item.get('task', '')}"
+                for idx, item in enumerate(subtasks)
+            ]
+            self._emit_group_chat(
+                node_id,
+                "task_assignment",
+                "任务拆解完成：\n" + "\n".join(lines),
+                metadata={"subtasks": subtasks, "degraded": degraded},
+            )
         except Exception as exc:
             logger.exception("任务拆解失败: %s", exc)
             state["error"] = f"任务拆解失败: {exc}"
             state["status"] = "failed"
             self._append_log(state, node_id, "failed", error=str(exc))
+            self._emit_group_chat(node_id, "error", f"任务拆解失败: {exc}")
 
         return state
 
@@ -1006,14 +1209,24 @@ class WorkflowBuilder:
                     "tool_calls": tool_calls,
                 },
             )
+            result_text = str(state.get("results", {}).get("knowledge", ""))
+            self._emit_group_chat(
+                node_id,
+                "result_delivery",
+                "知识库检索完成",
+                attachments=[{"type": "text", "name": "检索结果", "content": result_text}],
+                metadata={"tool_calls": tool_calls},
+            )
         except ValidationError as exc:
             state.setdefault("results", {})["knowledge"] = f"配置错误: {exc.message}"
             self._append_log(state, node_id, "failed", error=exc.message)
+            self._emit_group_chat(node_id, "error", f"知识库配置错误: {exc.message}")
         except Exception as exc:
             logger.exception("知识库查询失败: %s", exc)
             state.setdefault("results", {})["knowledge"] = f"查询失败: {exc}"
             state.setdefault("parallel_branch_errors", {})[node_id] = str(exc)
             self._append_log(state, node_id, "failed", error=str(exc))
+            self._emit_group_chat(node_id, "error", f"知识库查询失败: {exc}")
 
         return state
 
@@ -1082,11 +1295,20 @@ class WorkflowBuilder:
                     "tool_calls": tool_calls,
                 },
             )
+            result_text = str(state.get("results", {}).get("search", ""))
+            self._emit_group_chat(
+                node_id,
+                "result_delivery",
+                "联网搜索完成",
+                attachments=[{"type": "text", "name": "搜索结果", "content": result_text}],
+                metadata={"tool_calls": tool_calls},
+            )
         except Exception as exc:
             logger.exception("联网搜索失败: %s", exc)
             state.setdefault("results", {})["search"] = f"搜索失败: {exc}"
             state.setdefault("parallel_branch_errors", {})[node_id] = str(exc)
             self._append_log(state, node_id, "failed", error=str(exc))
+            self._emit_group_chat(node_id, "error", f"联网搜索失败: {exc}")
 
         return state
 
@@ -1247,11 +1469,27 @@ class WorkflowBuilder:
                     "tool_calls": tool_calls,
                 },
             )
+            result_text = str(state.get("results", {}).get("execution", ""))
+            self._emit_group_chat(
+                node_id,
+                "result_delivery",
+                "代码执行完成",
+                attachments=[
+                    {
+                        "type": "code",
+                        "name": "执行结果",
+                        "content": result_text,
+                        "language": "python",
+                    }
+                ],
+                metadata={"tool_calls": tool_calls},
+            )
         except Exception as exc:
             logger.exception("执行节点失败: %s", exc)
             state.setdefault("results", {})["execution"] = f"执行失败: {exc}"
             state.setdefault("parallel_branch_errors", {})[node_id] = str(exc)
             self._append_log(state, node_id, "failed", error=str(exc))
+            self._emit_group_chat(node_id, "error", f"代码执行失败: {exc}")
 
         return state
 
@@ -1558,11 +1796,18 @@ class WorkflowBuilder:
                 "completed",
                 output_data={"final": final_answer},
             )
+            self._emit_group_chat(
+                node_id,
+                "review_result",
+                "✅ 审核汇总完成，最终成果已生成",
+                attachments=[{"type": "text", "name": "最终报告", "content": final_answer}],
+            )
         except Exception as exc:
             logger.exception("审核节点失败: %s", exc)
             state["error"] = f"审核失败: {exc}"
             state["status"] = "failed"
             self._append_log(state, node_id, "failed", error=str(exc))
+            self._emit_group_chat(node_id, "error", f"审核失败: {exc}")
 
         return state
 
@@ -1626,21 +1871,35 @@ class WorkflowBuilder:
         base_state: AgentState,
         branch_states: list[AgentState],
     ) -> AgentState:
-        """合并并行分支状态（results / execution_logs）。"""
+        """
+        合并并行分支状态（results / execution_logs）。
+
+        单个分支失败不影响其他分支；仅当全部分支失败时才标记整体 failed。
+        """
         merged = dict(base_state)
         merged_results: dict[str, Any] = dict(base_state.get("results") or {})
         merged_logs: list[dict[str, Any]] = list(base_state.get("execution_logs") or [])
+        merged_errors: dict[str, str] = dict(base_state.get("parallel_branch_errors") or {})
 
+        failed_branch_count = 0
         for branch in branch_states:
             merged_results.update(branch.get("results") or {})
             merged_logs.extend(branch.get("execution_logs") or [])
-            if branch.get("error"):
-                merged["error"] = branch["error"]
+            merged_errors.update(branch.get("parallel_branch_errors") or {})
             if branch.get("status") == "failed":
-                merged["status"] = "failed"
+                failed_branch_count += 1
 
         merged["results"] = merged_results
         merged["execution_logs"] = merged_logs
+        merged["parallel_branch_errors"] = merged_errors
+
+        if branch_states and failed_branch_count == len(branch_states):
+            merged["status"] = "failed"
+            merged["error"] = "所有并行分支均执行失败"
+        elif failed_branch_count > 0:
+            # 部分分支失败：保留成功结果，继续后续审核节点
+            merged["status"] = merged.get("status") or "running"
+
         return merged
 
     def parallel_dispatch_node(self, state: AgentState) -> AgentState:
@@ -1674,13 +1933,15 @@ class WorkflowBuilder:
                 if send.node == node_id
             }
             for future in as_completed(futures):
+                node_id = futures[future]
                 try:
                     branch_states.append(future.result())
                 except Exception as exc:
-                    logger.exception("并行节点执行失败: %s", exc)
-                    failed_state = dict(state)
-                    failed_state["status"] = "failed"
-                    failed_state["error"] = f"并行执行失败: {exc}"
+                    logger.exception("并行节点执行失败 node=%s: %s", node_id, exc)
+                    failed_state: AgentState = dict(state)
+                    failed_state.setdefault("parallel_branch_errors", {})[node_id] = str(
+                        exc
+                    )
                     branch_states.append(failed_state)
 
         merged = self.merge_parallel_states(state, branch_states)

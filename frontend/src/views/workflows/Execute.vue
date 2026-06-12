@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowLeft, VideoPlay, Check, Close, CircleClose, Download } from '@element-plus/icons-vue';
+import { ArrowLeft, VideoPlay, Check, Close, CircleClose, Download, ChatDotRound } from '@element-plus/icons-vue';
 import WorkflowCanvas from '@/components/workflow/WorkflowCanvas.vue';
 import ExecutionLogPanel from '@/components/workflow/ExecutionLogPanel.vue';
 import StreamingText from '@/components/chat/StreamingText.vue';
@@ -156,6 +156,10 @@ function goBack(): void {
   router.push({ name: 'WorkflowList' });
 }
 
+function goGroupChat(): void {
+  router.push({ name: 'WorkflowGroupChat', params: { id: workflowId.value } });
+}
+
 async function handleExportLogs(): Promise<void> {
   if (!graphStore.currentExecution) return;
   const data = await exportExecutionLogs(graphStore.currentExecution.id);
@@ -193,6 +197,7 @@ onUnmounted(() => {
     >
       <template #actions>
         <el-button :icon="ArrowLeft" text @click="goBack">返回列表</el-button>
+        <el-button :icon="ChatDotRound" @click="goGroupChat">群聊视图</el-button>
         <el-tag v-if="executionStatus !== 'idle'" :type="statusTagType as any" size="small">
           {{ executionStatus }}
         </el-tag>

@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from app.core.logging import get_logger
 from app.services.rag.rag_service import rag_service
+from app.services.workflow.group_chat_service import group_chat_service
 from app.services.workflow.workflow_service import workflow_service
 
 logger = get_logger(__name__)
@@ -27,6 +28,31 @@ async def parse_document_task(
     )
     logger.info("文档解析任务完成 document_id=%s", document_id)
     return {"document_id": document_id, "status": "completed"}
+
+
+async def execute_group_chat_task(
+    ctx: dict[str, Any],
+    session_id: int,
+    tenant_id: int,
+    user_id: int,
+    task: str,
+    kb_id: Optional[int],
+    thread_id: str,
+) -> dict[str, Any]:
+    """执行群聊协同任务。"""
+    if group_chat_service.is_session_cancelled(session_id):
+        logger.info("群聊任务已取消 session_id=%s", session_id)
+        return {"session_id": session_id, "status": "cancelled"}
+    await group_chat_service.run_group_chat_task(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        task=task,
+        kb_id=kb_id,
+        thread_id=thread_id,
+    )
+    logger.info("群聊协同任务完成 session_id=%s", session_id)
+    return {"session_id": session_id, "status": "completed"}
 
 
 async def execute_workflow_task(

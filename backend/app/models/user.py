@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from app.models.token_usage import TokenUsage
     from app.models.workflow import Workflow
     from app.models.user_api_key import UserApiKey
+    from app.models.group_chat import GroupChatSession
 
 
 class User(Base, TimestampMixin):
@@ -66,6 +67,9 @@ class User(Base, TimestampMixin):
     owned_workflows: Mapped[list["Workflow"]] = relationship(back_populates="owner")
     workflow_executions: Mapped[list["WorkflowExecution"]] = relationship(
         back_populates="created_by_user"
+    )
+    group_chat_sessions: Mapped[list["GroupChatSession"]] = relationship(
+        back_populates="user"
     )
     chat_histories: Mapped[list["ChatHistory"]] = relationship(back_populates="user")
     token_usages: Mapped[list["TokenUsage"]] = relationship(back_populates="user")

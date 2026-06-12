@@ -7,7 +7,7 @@ const route = useRoute();
 
 /** 聊天/工作流执行页使用全宽布局 */
 const isFluidLayout = computed(() => {
-  const fluidRoutes = ['AgentChat', 'KnowledgeChat', 'WorkflowExecute'];
+  const fluidRoutes = ['AgentChat', 'KnowledgeChat', 'WorkflowExecute', 'WorkflowGroupChat'];
   return fluidRoutes.includes(route.name as string);
 });
 </script>

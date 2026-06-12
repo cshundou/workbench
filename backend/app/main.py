@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("LangSmith 链路追踪已启用")
         else:
             logger.warning("LANGCHAIN_TRACING_V2=true 但未配置 LANGCHAIN_API_KEY，已跳过追踪")
+    from app.services.workflow.group_chat_ws_event_bus import group_chat_ws_event_bus
     from app.services.workflow.ws_event_bus import workflow_ws_event_bus
 
     try:
@@ -63,8 +64,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     try:
         await workflow_ws_event_bus.start_subscriber()
+        await group_chat_ws_event_bus.start_subscriber()
     except Exception as exc:
-        logger.error("工作流 WebSocket 事件订阅启动失败: %s", exc)
+        logger.error("WebSocket 事件订阅启动失败: %s", exc)
         if settings.app_env != "development":
             raise
 
@@ -73,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("应用关闭")
     try:
         await workflow_ws_event_bus.stop_subscriber()
+        await group_chat_ws_event_bus.stop_subscriber()
     except Exception as exc:
         logger.error("停止工作流 WebSocket 事件订阅失败: %s", exc)
     try:

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from app.models.tenant import Tenant
     from app.models.user import User
     from app.models.workflow_execution import WorkflowExecution
+    from app.models.group_chat import GroupChatSession
 
 
 class Workflow(Base, TimestampMixin):
@@ -48,5 +49,8 @@ class Workflow(Base, TimestampMixin):
     tenant: Mapped["Tenant"] = relationship(back_populates="workflows")
     owner: Mapped[Optional["User"]] = relationship(back_populates="owned_workflows")
     executions: Mapped[List["WorkflowExecution"]] = relationship(
+        back_populates="workflow"
+    )
+    group_chat_sessions: Mapped[List["GroupChatSession"]] = relationship(
         back_populates="workflow"
     )
