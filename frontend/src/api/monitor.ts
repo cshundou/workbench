@@ -138,9 +138,24 @@ export function getTokenUsage(params?: TokenUsageQuery): Promise<TokenUsageStats
   return request.get('/monitor/token-usage', { params });
 }
 
+/** 群聊协同专项统计 */
+export interface GroupChatStats {
+  session_count: number;
+  avg_duration_ms: number;
+  review_pass_rate: number;
+  total_review_retries: number;
+  events: Record<string, number>;
+  daily: Array<{ date: string; count: number; avg_duration_ms: number }>;
+}
+
 /** 查询 API 调用统计 */
 export function getApiStats(days = 7): Promise<ApiStats> {
   return request.get('/monitor/api-stats', { params: { days } });
+}
+
+/** 查询群聊协同专项统计 */
+export function getGroupChatStats(days = 7): Promise<GroupChatStats> {
+  return request.get('/monitor/group-chat-stats', { params: { days } });
 }
 
 /** 工具调用成功率统计 */

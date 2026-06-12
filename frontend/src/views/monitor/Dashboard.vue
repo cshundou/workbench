@@ -14,7 +14,9 @@ import {
   getUserActivity,
   getToolStats,
   getWorkflowStats,
+  getGroupChatStats,
   type AlertConfig,
+  type GroupChatStats,
   type AlertHistoryItem,
   type ApiStats,
   type ErrorLogItem,
@@ -35,6 +37,7 @@ const tokenStats = ref<TokenUsageStats | null>(null);
 const apiStats = ref<ApiStats | null>(null);
 const toolStats = ref<ToolStats | null>(null);
 const workflowStats = ref<WorkflowStats | null>(null);
+const groupChatStats = ref<GroupChatStats | null>(null);
 const errorLogs = ref<ErrorLogItem[]>([]);
 const health = ref<SystemHealth | null>(null);
 const userActivity = ref<UserActivityStats | null>(null);
@@ -295,6 +298,7 @@ async function fetchDashboardData(): Promise<void> {
       apiData,
       toolData,
       workflowData,
+      groupChatData,
       errorData,
       healthData,
       activityData,
@@ -305,6 +309,7 @@ async function fetchDashboardData(): Promise<void> {
       getApiStats(statsDays.value),
       getToolStats(statsDays.value),
       getWorkflowStats(statsDays.value),
+      getGroupChatStats(statsDays.value),
       getErrorLogs({ page: 1, page_size: 10 }),
       getMonitorHealth(),
       getUserActivity(),
@@ -315,6 +320,7 @@ async function fetchDashboardData(): Promise<void> {
     apiStats.value = apiData;
     toolStats.value = toolData;
     workflowStats.value = workflowData;
+    groupChatStats.value = groupChatData;
     errorLogs.value = errorData.items;
     health.value = healthData;
     userActivity.value = activityData;
@@ -485,6 +491,30 @@ onUnmounted(() => {
         <BentoCard
           title="失败率"
           :value="`${(workflowStats.failure_rate * 100).toFixed(1)}%`"
+        />
+      </el-col>
+    </el-row>
+
+    <el-row v-if="groupChatStats" :gutter="20" class="mb-4">
+      <el-col :xs="24" :sm="6">
+        <BentoCard title="群聊会话数" :value="String(groupChatStats.session_count)" />
+      </el-col>
+      <el-col :xs="24" :sm="6">
+        <BentoCard
+          title="群聊平均时长 (ms)"
+          :value="String(Math.round(groupChatStats.avg_duration_ms))"
+        />
+      </el-col>
+      <el-col :xs="24" :sm="6">
+        <BentoCard
+          title="审核通过率"
+          :value="`${(groupChatStats.review_pass_rate * 100).toFixed(1)}%`"
+        />
+      </el-col>
+      <el-col :xs="24" :sm="6">
+        <BentoCard
+          title="审核打回次数"
+          :value="String(groupChatStats.total_review_retries)"
         />
       </el-col>
     </el-row>

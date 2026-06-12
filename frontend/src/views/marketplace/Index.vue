@@ -11,6 +11,7 @@ const loading = ref(false);
 const templates = ref<MarketplaceTemplateItem[]>([]);
 const keyword = ref('');
 const category = ref('');
+const industry = ref('');
 
 async function fetchTemplates(): Promise<void> {
   loading.value = true;
@@ -18,6 +19,7 @@ async function fetchTemplates(): Promise<void> {
     const result = await listMarketplaceTemplates({
       keyword: keyword.value || undefined,
       category: category.value || undefined,
+      industry: industry.value || undefined,
     });
     templates.value = result.items;
   } finally {
@@ -50,12 +52,27 @@ onMounted(fetchTemplates);
         <el-option label="客服" value="客服" />
         <el-option label="销售" value="销售" />
         <el-option label="市场" value="市场" />
+        <el-option label="人事" value="人事" />
+        <el-option label="财务" value="财务" />
+        <el-option label="行政" value="行政" />
         <el-option label="行业方案" value="行业方案" />
+      </el-select>
+      <el-select v-model="industry" placeholder="行业" clearable style="width: 140px">
+        <el-option label="制造业" value="制造业" />
+        <el-option label="金融" value="金融" />
+        <el-option label="医疗" value="医疗" />
+        <el-option label="教育" value="教育" />
+        <el-option label="零售" value="零售" />
       </el-select>
       <el-button type="primary" @click="fetchTemplates">搜索</el-button>
     </div>
     <el-table v-loading="loading" :data="templates" stripe>
-      <el-table-column prop="name" label="名称" min-width="180" />
+      <el-table-column prop="name" label="名称" min-width="180">
+        <template #default="{ row }">
+          {{ row.name }}
+          <el-tag v-if="row.is_official" size="small" type="success" class="official-tag">官方</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="category" label="分类" width="100" />
       <el-table-column prop="industry" label="行业" width="100" />
       <el-table-column prop="description" label="描述" min-width="240" show-overflow-tooltip />
