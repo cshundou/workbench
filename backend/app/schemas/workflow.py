@@ -142,6 +142,10 @@ class HumanInterventionRequest(BaseModel):
 
     approved: bool = Field(..., description="是否批准继续执行")
     comment: Optional[str] = Field(default=None, description="审批备注")
+    reject_target: Optional[str] = Field(
+        default=None,
+        description="驳回时打回的目标节点 id（默认 scheduler）",
+    )
 
 
 class GraphValidateRequest(BaseModel):

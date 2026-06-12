@@ -87,8 +87,10 @@ async def resume_workflow_task(
     input_params: dict[str, Any],
     thread_id: str,
     comment: Optional[str] = None,
+    approved: bool = True,
+    reject_target: Optional[str] = None,
 ) -> dict[str, Any]:
-    """恢复工作流任务。"""
+    """恢复工作流任务（人工批准续跑或驳回打回）。"""
     if workflow_service.is_execution_cancelled(execution_id):
         logger.info("工作流恢复任务已取消 execution_id=%s", execution_id)
         return {"execution_id": execution_id, "status": "cancelled"}
@@ -98,6 +100,8 @@ async def resume_workflow_task(
         input_params=input_params,
         thread_id=thread_id,
         comment=comment,
+        approved=approved,
+        reject_target=reject_target,
     )
     logger.info("工作流恢复任务完成 execution_id=%s", execution_id)
     return {"execution_id": execution_id, "status": "completed"}

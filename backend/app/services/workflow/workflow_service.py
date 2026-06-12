@@ -852,17 +852,48 @@ class WorkflowService:
         runtime = self._load_runtime_state(execution_id)
         thread_id = runtime.get("thread_id", f"execution_{execution_id}")
 
+        input_params = dict(execution.input_params or {})
+        reject_target = data.reject_target or runtime.get("human_reject_target", "scheduler")
+
         if not data.approved:
-            execution.status = "failed"
-            execution.error_message = data.comment or "人工审批已拒绝"
-            execution.completed_at = datetime.now(timezone.utc)
-            await db.flush()
-            await workflow_ws_manager.broadcast_execution_status(
-                execution_id, "failed", {"message": execution.error_message}
+            await audit_service.record_action(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=execution.created_by,
+                action="workflow.human_reject",
+                resource_type="workflow_execution",
+                resource_id=execution_id,
+                detail={
+                    "comment": data.comment,
+                    "reject_target": reject_target,
+                },
             )
+            task_id = await enqueue_task(
+                "resume_workflow_task",
+                execution_id,
+                tenant_id,
+                input_params,
+                thread_id,
+                comment=data.comment,
+                approved=False,
+                reject_target=reject_target,
+            )
+            runtime["task_id"] = task_id
+            runtime["human_reject_target"] = reject_target
+            self._save_runtime_state(execution_id, runtime)
+            execution.status = "running"
+            await db.flush()
             return self._to_execution_response(execution)
 
-        input_params = execution.input_params
+        await audit_service.record_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=execution.created_by,
+            action="workflow.human_approve",
+            resource_type="workflow_execution",
+            resource_id=execution_id,
+            detail={"comment": data.comment},
+        )
         task_id = await enqueue_task(
             "resume_workflow_task",
             execution_id,
@@ -870,9 +901,12 @@ class WorkflowService:
             input_params,
             thread_id,
             comment=data.comment,
+            approved=True,
         )
         runtime["task_id"] = task_id
         self._save_runtime_state(execution_id, runtime)
+        execution.status = "running"
+        await db.flush()
         return self._to_execution_response(execution)
 
     def _build_node_configs(
@@ -1054,8 +1088,10 @@ class WorkflowService:
         input_params: dict[str, Any],
         thread_id: str,
         comment: Optional[str],
+        approved: bool = True,
+        reject_target: Optional[str] = None,
     ) -> None:
-        """人工批准后恢复工作流执行。"""
+        """人工介入后恢复工作流：批准续跑或驳回打回指定节点。"""
         main_loop = asyncio.get_running_loop()
 
         def status_callback(
@@ -1116,11 +1152,28 @@ class WorkflowService:
             graph = builder.build_workflow(graph_definition, require_human=require_human)
 
             resume_update: dict[str, Any] = {
-                "human_approved": True,
                 "status": "running",
+                "require_human_approval": True,
             }
+            if approved:
+                resume_update["human_approved"] = True
+                resume_update["human_rejected"] = False
+            else:
+                resume_update["human_approved"] = False
+                resume_update["human_rejected"] = True
+                resume_update["human_reject_target"] = reject_target or "scheduler"
+            records = []
+            records.append(
+                {
+                    "action": "approve" if approved else "reject",
+                    "comment": comment,
+                    "reject_target": reject_target,
+                }
+            )
+            resume_update["human_intervention_records"] = records
             if comment:
-                resume_update["results"] = {"human_comment": comment}
+                resume_update.setdefault("results", {})
+                resume_update["results"]["human_comment"] = comment
 
             config = {"configurable": {"thread_id": thread_id}}
 
