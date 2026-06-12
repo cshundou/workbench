@@ -1,12 +1,18 @@
 import request from './request';
 
-/** 群聊成员 */
+/** 群聊成员（动态团队） */
 export interface GroupChatMember {
   role: string;
   name: string;
   avatar: string;
   color: string;
-  status: 'idle' | 'thinking' | 'working' | string;
+  status: 'pending' | 'thinking' | 'working' | 'completed' | 'error' | 'revision' | string;
+  current_task?: string | null;
+  completed_count?: number;
+  total_count?: number;
+  is_auditor?: boolean;
+  review_round?: number | null;
+  reject_reason?: string | null;
 }
 
 /** 消息附件 */
@@ -71,6 +77,7 @@ export interface GroupChatSession {
   updated_at: string;
   members: GroupChatMember[];
   progress_steps: ProgressStep[];
+  team_config?: TeamConfig | null;
   messages?: GroupChatMessageRecord[];
 }
 
@@ -85,18 +92,40 @@ export interface GroupChatMessageRecord {
   created_at: string;
 }
 
+/** 团队配置 */
+export interface TeamConfig {
+  team_id: string;
+  task_description: string;
+  team_size: number;
+  members: Record<string, unknown>[];
+  workflow: string;
+  max_review_rounds: number;
+  template_id?: string;
+}
+
 /** 创建群聊会话参数 */
 export interface CreateGroupChatParams {
   task: string;
   workflow_id?: number;
   kb_id?: number;
   title?: string;
+  template_id?: string;
+  team_config?: TeamConfig;
+  use_classic_five?: boolean;
 }
 
 /** WebSocket 消息 */
 export interface GroupChatWsMessage {
-  type: 'connected' | 'group_chat_message' | 'member_status' | 'session_update';
+  type:
+    | 'connected'
+    | 'group_chat_message'
+    | 'member_status'
+    | 'session_update'
+    | 'team_formation'
+    | 'team_adjusted';
   session_id?: number;
+  formation_message?: string;
+  team_config?: TeamConfig;
   message?: AgentMessage;
   role?: string;
   status?: string;

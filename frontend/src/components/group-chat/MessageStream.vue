@@ -1,13 +1,21 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import StreamingText from '@/components/chat/StreamingText.vue';
 import MessageAttachmentView from '@/components/group-chat/MessageAttachment.vue';
 import { ROLE_BUBBLE_COLORS, type AgentMessage } from '@/api/groupChat';
 
-defineProps<{
+const props = defineProps<{
   messages: AgentMessage[];
   typingRole?: string | null;
+  filterRole?: string | null;
 }>();
+
+const displayMessages = computed(() => {
+  if (!props.filterRole) return props.messages;
+  return props.messages.filter(
+    (m) => m.sender.role === props.filterRole || m.sender.role === 'user',
+  );
+});
 
 const expandedIds = ref<Set<string>>(new Set());
 
@@ -47,8 +55,9 @@ const roleLabels: Record<string, string> = {
 
 <template>
   <div class="message-stream">
+    <div v-if="filterRole" class="filter-hint">仅显示 {{ filterRole }} 相关消息</div>
     <div
-      v-for="msg in messages"
+      v-for="msg in displayMessages"
       :key="msg.id"
       class="message-row"
       :class="{ 'message-row--user': msg.sender.role === 'user' }"
@@ -192,6 +201,15 @@ const roleLabels: Record<string, string> = {
     white-space: pre-wrap;
     word-break: break-all;
   }
+}
+
+.filter-hint {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: $primary-color;
+  background: rgba($primary-color, 0.06);
+  border-radius: 6px;
+  margin-bottom: 8px;
 }
 
 .typing-indicator {

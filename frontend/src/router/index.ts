@@ -130,6 +130,12 @@ const routes: RouteRecordRaw[] = [
             meta: { title: '群聊协同' },
           },
           {
+            path: 'agent-roles',
+            name: 'AgentRoles',
+            component: () => import('@/views/workflows/AgentRoles.vue'),
+            meta: { title: '专业角色库', permission: 'workflow:write' },
+          },
+          {
             path: 'marketplace',
             name: 'WorkflowMarketplace',
             component: () => import('@/views/marketplace/Index.vue'),

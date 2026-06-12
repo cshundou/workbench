@@ -7,6 +7,8 @@ import MemberList from '@/components/group-chat/MemberList.vue';
 import MessageStream from '@/components/group-chat/MessageStream.vue';
 import TaskProgress from '@/components/group-chat/TaskProgress.vue';
 import ChatInput from '@/components/group-chat/ChatInput.vue';
+import TeamAdjustDialog from '@/components/group-chat/TeamAdjustDialog.vue';
+import type { TeamConfig } from '@/api/agentRoles';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
 import { useGroupChatStore } from '@/stores/groupChat';
@@ -33,6 +35,9 @@ const kbOptions = ref<{ id: number; name: string }[]>([]);
 const isStarting = ref(false);
 const isSending = ref(false);
 const streamRef = ref<HTMLElement | null>(null);
+const showTeamAdjust = ref(false);
+const pendingTeamConfig = ref<TeamConfig | null>(null);
+const useClassicFive = ref(false);
 
 const showStartForm = computed(() => !groupChatStore.currentSession);
 const sessionTitle = computed(() => groupChatStore.currentSession?.title || '虚拟项目群');
@@ -68,7 +73,11 @@ async function handleStart(): Promise<void> {
       task: taskInput.value.trim(),
       workflow_id: workflowId.value,
       kb_id: selectedKbId.value,
+      team_config: pendingTeamConfig.value || undefined,
+      use_classic_five: useClassicFive.value,
+      template_id: pendingTeamConfig.value?.template_id,
     });
+    pendingTeamConfig.value = null;
     router.replace({
       name: 'WorkflowGroupChat',
       params: route.params,
@@ -210,7 +219,7 @@ onUnmounted(() => {
         </div>
         <h2>创建虚拟项目群</h2>
         <p class="start-desc">
-          提交复杂任务后，项目经理、研究员、工程师、分析师、审核员将在群内协同工作，全程透明可追溯。
+          提交任务后，系统将智能分析并组建专属项目团队（2-8 人），动态分工协同执行，全程透明可追溯。
         </p>
         <el-form label-position="top" class="start-form">
           <el-form-item label="任务描述" required>
@@ -236,15 +245,27 @@ onUnmounted(() => {
               />
             </el-select>
           </el-form-item>
-          <el-button
-            type="primary"
-            size="large"
-            :loading="isStarting"
-            @click="handleStart"
-          >
-            启动项目群协作
-          </el-button>
+          <div class="start-actions">
+            <el-button size="large" @click="showTeamAdjust = true">调整团队</el-button>
+            <el-button
+              type="primary"
+              size="large"
+              :loading="isStarting"
+              @click="handleStart"
+            >
+              启动项目群协作
+            </el-button>
+          </div>
+          <el-checkbox v-model="useClassicFive" class="classic-checkbox">
+            使用经典五角色模式
+          </el-checkbox>
         </el-form>
+        <TeamAdjustDialog
+          v-model:visible="showTeamAdjust"
+          :task="taskInput"
+          :initial-config="pendingTeamConfig"
+          @confirm="(cfg) => { pendingTeamConfig = cfg; }"
+        />
       </div>
     </div>
 
@@ -253,6 +274,10 @@ onUnmounted(() => {
       <MemberList
         :members="groupChatStore.members"
         :typing-role="groupChatStore.typingRole"
+        :progress="groupChatStore.progress"
+        :is-forming="groupChatStore.isFormingTeam"
+        :selected-role="groupChatStore.selectedRole"
+        @select-member="groupChatStore.selectMember"
       />
 
       <main class="chat-main">
@@ -287,6 +312,7 @@ onUnmounted(() => {
           <MessageStream
             :messages="groupChatStore.messages"
             :typing-role="groupChatStore.typingRole"
+            :filter-role="groupChatStore.selectedRole"
           />
         </div>
         <ChatInput
@@ -359,6 +385,18 @@ onUnmounted(() => {
 
 .start-form {
   text-align: left;
+}
+
+.start-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.classic-checkbox {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
 }
 
 .chat-layout {
