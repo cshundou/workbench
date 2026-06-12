@@ -1,0 +1,1140 @@
+{
+  "metrics": {
+    "total_pairs": 125,
+    "recall_at_5": 100.0,
+    "accuracy_at_1": 96.8,
+    "avg_latency_ms": 0.35,
+    "p95_latency_ms": 0.44,
+    "max_latency_ms": 1.04,
+    "passed_recall": true,
+    "passed_accuracy": true,
+    "passed_latency": true
+  },
+  "details": [
+    {
+      "id": "qa-0001",
+      "question": "工龄1至5年员工每年享有多少天年假",
+      "expected_doc_id": "hr-leave-001",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 1.04,
+      "top_doc_id": "hr-leave-001"
+    },
+    {
+      "id": "qa-0002",
+      "question": "年假需要提前多少个工作日申请",
+      "expected_doc_id": "hr-leave-001",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.44,
+      "top_doc_id": "hr-leave-001"
+    },
+    {
+      "id": "qa-0003",
+      "question": "未休年假折现截止日期是什么时候",
+      "expected_doc_id": "hr-leave-001",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.44,
+      "top_doc_id": "hr-leave-001"
+    },
+    {
+      "id": "qa-0004",
+      "question": "工龄5至10年的年假天数",
+      "expected_doc_id": "hr-leave-001",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.44,
+      "top_doc_id": "hr-leave-001"
+    },
+    {
+      "id": "qa-0005",
+      "question": "工龄10年以上的年假天数",
+      "expected_doc_id": "hr-leave-001",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.41,
+      "top_doc_id": "hr-leave-001"
+    },
+    {
+      "id": "qa-0006",
+      "question": "病假工资按基本工资的多少比例发放",
+      "expected_doc_id": "hr-sick-002",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.45,
+      "top_doc_id": "hr-sick-002"
+    },
+    {
+      "id": "qa-0007",
+      "question": "申请病假需要拿什么医院证明",
+      "expected_doc_id": "hr-sick-002",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.39,
+      "top_doc_id": "hr-sick-002"
+    },
+    {
+      "id": "qa-0008",
+      "question": "连续病假超过多少天需复查报告",
+      "expected_doc_id": "hr-sick-002",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.41,
+      "top_doc_id": "hr-sick-002"
+    },
+    {
+      "id": "qa-0009",
+      "question": "工龄不满2年医疗期多长",
+      "expected_doc_id": "hr-sick-002",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.36,
+      "top_doc_id": "hr-sick-002"
+    },
+    {
+      "id": "qa-0010",
+      "question": "工龄5年以上最长医疗期",
+      "expected_doc_id": "hr-sick-002",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.36,
+      "top_doc_id": "hr-sick-002"
+    },
+    {
+      "id": "qa-0011",
+      "question": "新员工试用期多长时间",
+      "expected_doc_id": "hr-onboard-003",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.34,
+      "top_doc_id": "hr-onboard-003"
+    },
+    {
+      "id": "qa-0012",
+      "question": "入职首日需要完成哪些事项",
+      "expected_doc_id": "hr-onboard-003",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.38,
+      "top_doc_id": "hr-onboard-003"
+    },
+    {
+      "id": "qa-0013",
+      "question": "入职多久内完成导师配对",
+      "expected_doc_id": "hr-onboard-003",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.36,
+      "top_doc_id": "hr-onboard-003"
+    },
+    {
+      "id": "qa-0014",
+      "question": "转正评估在试用期满前多少天",
+      "expected_doc_id": "hr-onboard-003",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.4,
+      "top_doc_id": "hr-onboard-003"
+    },
+    {
+      "id": "qa-0015",
+      "question": "入职需要参加什么安全培训",
+      "expected_doc_id": "hr-onboard-003",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.43,
+      "top_doc_id": "hr-onboard-003"
+    },
+    {
+      "id": "qa-0016",
+      "question": "绩效考核中工作业绩占比多少",
+      "expected_doc_id": "hr-perf-004",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.41,
+      "top_doc_id": "hr-perf-004"
+    },
+    {
+      "id": "qa-0017",
+      "question": "绩效等级A档占比上限",
+      "expected_doc_id": "hr-perf-004",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.33,
+      "top_doc_id": "hr-perf-004"
+    },
+    {
+      "id": "qa-0018",
+      "question": "连续两个季度D档会启动什么",
+      "expected_doc_id": "hr-perf-004",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.38,
+      "top_doc_id": "hr-perf-004"
+    },
+    {
+      "id": "qa-0019",
+      "question": "团队协作在考核中占比",
+      "expected_doc_id": "hr-perf-004",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.33,
+      "top_doc_id": "hr-perf-004"
+    },
+    {
+      "id": "qa-0020",
+      "question": "公司绩效考核周期",
+      "expected_doc_id": "hr-perf-004",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "hr-perf-004"
+    },
+    {
+      "id": "qa-0021",
+      "question": "员工生日礼金多少元",
+      "expected_doc_id": "hr-benefit-005",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.3,
+      "top_doc_id": "hr-benefit-005"
+    },
+    {
+      "id": "qa-0022",
+      "question": "餐饮补贴每月多少",
+      "expected_doc_id": "hr-benefit-005",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.27,
+      "top_doc_id": "hr-benefit-005"
+    },
+    {
+      "id": "qa-0023",
+      "question": "交通补贴每月多少",
+      "expected_doc_id": "hr-benefit-005",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.27,
+      "top_doc_id": "hr-benefit-005"
+    },
+    {
+      "id": "qa-0024",
+      "question": "子女教育补贴每年最高多少",
+      "expected_doc_id": "hr-benefit-005",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "hr-benefit-005"
+    },
+    {
+      "id": "qa-0025",
+      "question": "公司提供什么医疗保险",
+      "expected_doc_id": "hr-benefit-005",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.3,
+      "top_doc_id": "hr-benefit-005"
+    },
+    {
+      "id": "qa-0026",
+      "question": "企业密码最少多少位",
+      "expected_doc_id": "it-pwd-006",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.32,
+      "top_doc_id": "it-pwd-006"
+    },
+    {
+      "id": "qa-0027",
+      "question": "密码每隔多少天强制更换",
+      "expected_doc_id": "it-pwd-006",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "it-pwd-006"
+    },
+    {
+      "id": "qa-0028",
+      "question": "连续几次登录失败会锁定账号",
+      "expected_doc_id": "it-pwd-006",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.39,
+      "top_doc_id": "it-pwd-006"
+    },
+    {
+      "id": "qa-0029",
+      "question": "账号锁定多长时间",
+      "expected_doc_id": "it-pwd-006",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "it-pwd-006"
+    },
+    {
+      "id": "qa-0030",
+      "question": "密码须包含哪些字符类型",
+      "expected_doc_id": "it-pwd-006",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "it-pwd-006"
+    },
+    {
+      "id": "qa-0031",
+      "question": "VPN客户端最低版本号",
+      "expected_doc_id": "it-vpn-007",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.37,
+      "top_doc_id": "it-vpn-007"
+    },
+    {
+      "id": "qa-0032",
+      "question": "VPN连接超时时间多长",
+      "expected_doc_id": "it-vpn-007",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.37,
+      "top_doc_id": "it-vpn-007"
+    },
+    {
+      "id": "qa-0033",
+      "question": "远程办公需要通过什么接入内网",
+      "expected_doc_id": "it-vpn-007",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.42,
+      "top_doc_id": "it-vpn-007"
+    },
+    {
+      "id": "qa-0034",
+      "question": "VPN是否支持双因素认证",
+      "expected_doc_id": "it-vpn-007",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.39,
+      "top_doc_id": "it-vpn-007"
+    },
+    {
+      "id": "qa-0035",
+      "question": "谁定期审计VPN流量日志",
+      "expected_doc_id": "it-vpn-007",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.4,
+      "top_doc_id": "it-vpn-007"
+    },
+    {
+      "id": "qa-0036",
+      "question": "笔记本标准配置内存和硬盘",
+      "expected_doc_id": "it-laptop-008",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.37,
+      "top_doc_id": "it-laptop-008"
+    },
+    {
+      "id": "qa-0037",
+      "question": "IT设备审批周期几个工作日",
+      "expected_doc_id": "it-laptop-008",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.41,
+      "top_doc_id": "it-laptop-008"
+    },
+    {
+      "id": "qa-0038",
+      "question": "P1级设备故障响应时间",
+      "expected_doc_id": "it-laptop-008",
+      "recall_hit": true,
+      "accuracy_hit": false,
+      "latency_ms": 0.38,
+      "top_doc_id": "product-sla-020"
+    },
+    {
+      "id": "qa-0039",
+      "question": "笔记本电脑通过什么渠道申请",
+      "expected_doc_id": "it-laptop-008",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.47,
+      "top_doc_id": "it-laptop-008"
+    },
+    {
+      "id": "qa-0040",
+      "question": "离职时设备如何处理",
+      "expected_doc_id": "it-laptop-008",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "it-laptop-008"
+    },
+    {
+      "id": "qa-0041",
+      "question": "发现安全事件应报告哪个邮箱",
+      "expected_doc_id": "it-security-009",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.4,
+      "top_doc_id": "it-security-009"
+    },
+    {
+      "id": "qa-0042",
+      "question": "P0数据泄露响应时间",
+      "expected_doc_id": "it-security-009",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.36,
+      "top_doc_id": "it-security-009"
+    },
+    {
+      "id": "qa-0043",
+      "question": "安全事件内线电话",
+      "expected_doc_id": "it-security-009",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "it-security-009"
+    },
+    {
+      "id": "qa-0044",
+      "question": "USB端口默认状态",
+      "expected_doc_id": "it-security-009",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.32,
+      "top_doc_id": "it-security-009"
+    },
+    {
+      "id": "qa-0045",
+      "question": "P1恶意软件响应时间",
+      "expected_doc_id": "it-security-009",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "it-security-009"
+    },
+    {
+      "id": "qa-0046",
+      "question": "员工电脑允许安装什么范围软件",
+      "expected_doc_id": "it-software-010",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.42,
+      "top_doc_id": "it-software-010"
+    },
+    {
+      "id": "qa-0047",
+      "question": "禁止安装哪类下载工具",
+      "expected_doc_id": "it-software-010",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.31,
+      "top_doc_id": "it-software-010"
+    },
+    {
+      "id": "qa-0048",
+      "question": "开发工具需要什么",
+      "expected_doc_id": "it-software-010",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "it-software-010"
+    },
+    {
+      "id": "qa-0049",
+      "question": "常用办公软件包括哪些",
+      "expected_doc_id": "it-software-010",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.32,
+      "top_doc_id": "it-software-010"
+    },
+    {
+      "id": "qa-0050",
+      "question": "未授权远程控制软件能否安装",
+      "expected_doc_id": "it-software-010",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.38,
+      "top_doc_id": "it-software-010"
+    },
+    {
+      "id": "qa-0051",
+      "question": "费用报销需在消费后多少日内提交",
+      "expected_doc_id": "fin-expense-011",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.44,
+      "top_doc_id": "fin-expense-011"
+    },
+    {
+      "id": "qa-0052",
+      "question": "超过多少天不予报销",
+      "expected_doc_id": "fin-expense-011",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.31,
+      "top_doc_id": "fin-expense-011"
+    },
+    {
+      "id": "qa-0053",
+      "question": "单笔超过多少元需提前申请预算",
+      "expected_doc_id": "fin-expense-011",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.42,
+      "top_doc_id": "fin-expense-011"
+    },
+    {
+      "id": "qa-0054",
+      "question": "报销审批全程多少工作日",
+      "expected_doc_id": "fin-expense-011",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.36,
+      "top_doc_id": "fin-expense-011"
+    },
+    {
+      "id": "qa-0055",
+      "question": "报销需要什么类型单据",
+      "expected_doc_id": "fin-expense-011",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.33,
+      "top_doc_id": "fin-expense-011"
+    },
+    {
+      "id": "qa-0056",
+      "question": "国内出差飞机票舱位标准",
+      "expected_doc_id": "fin-travel-012",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "fin-travel-012"
+    },
+    {
+      "id": "qa-0057",
+      "question": "一线城市住宿每晚不超过多少",
+      "expected_doc_id": "fin-travel-012",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.39,
+      "top_doc_id": "fin-travel-012"
+    },
+    {
+      "id": "qa-0058",
+      "question": "出差补贴每天多少无需发票",
+      "expected_doc_id": "fin-travel-012",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.38,
+      "top_doc_id": "fin-travel-012"
+    },
+    {
+      "id": "qa-0059",
+      "question": "国际出差需提前多久申请",
+      "expected_doc_id": "fin-travel-012",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.34,
+      "top_doc_id": "fin-travel-012"
+    },
+    {
+      "id": "qa-0060",
+      "question": "高铁座位标准",
+      "expected_doc_id": "fin-travel-012",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.24,
+      "top_doc_id": "fin-travel-012"
+    },
+    {
+      "id": "qa-0061",
+      "question": "公司可开具哪些发票类型",
+      "expected_doc_id": "fin-invoice-013",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "fin-invoice-013"
+    },
+    {
+      "id": "qa-0062",
+      "question": "开票申请后几个工作日开具",
+      "expected_doc_id": "fin-invoice-013",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.37,
+      "top_doc_id": "fin-invoice-013"
+    },
+    {
+      "id": "qa-0063",
+      "question": "红冲发票需要什么",
+      "expected_doc_id": "fin-invoice-013",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.27,
+      "top_doc_id": "fin-invoice-013"
+    },
+    {
+      "id": "qa-0064",
+      "question": "开票信息须包含哪些内容",
+      "expected_doc_id": "fin-invoice-013",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.33,
+      "top_doc_id": "fin-invoice-013"
+    },
+    {
+      "id": "qa-0065",
+      "question": "开票通过什么系统提交",
+      "expected_doc_id": "fin-invoice-013",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.34,
+      "top_doc_id": "fin-invoice-013"
+    },
+    {
+      "id": "qa-0066",
+      "question": "年度预算编制在什么时间段",
+      "expected_doc_id": "fin-budget-014",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.36,
+      "top_doc_id": "fin-budget-014"
+    },
+    {
+      "id": "qa-0067",
+      "question": "预算执行偏差超过多少需说明",
+      "expected_doc_id": "fin-budget-014",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.39,
+      "top_doc_id": "fin-budget-014"
+    },
+    {
+      "id": "qa-0068",
+      "question": "季度预算回顾何时召开",
+      "expected_doc_id": "fin-budget-014",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.32,
+      "top_doc_id": "fin-budget-014"
+    },
+    {
+      "id": "qa-0069",
+      "question": "预算由谁最终审批",
+      "expected_doc_id": "fin-budget-014",
+      "recall_hit": true,
+      "accuracy_hit": false,
+      "latency_ms": 0.27,
+      "top_doc_id": "fin-expense-011"
+    },
+    {
+      "id": "qa-0070",
+      "question": "各部门按什么提交预算",
+      "expected_doc_id": "fin-budget-014",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.31,
+      "top_doc_id": "fin-budget-014"
+    },
+    {
+      "id": "qa-0071",
+      "question": "保密协议保密期限离职后多久",
+      "expected_doc_id": "legal-nda-015",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.38,
+      "top_doc_id": "legal-nda-015"
+    },
+    {
+      "id": "qa-0072",
+      "question": "违反保密协议后果",
+      "expected_doc_id": "legal-nda-015",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.26,
+      "top_doc_id": "legal-nda-015"
+    },
+    {
+      "id": "qa-0073",
+      "question": "对外披露信息需谁批准",
+      "expected_doc_id": "legal-nda-015",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.33,
+      "top_doc_id": "legal-nda-015"
+    },
+    {
+      "id": "qa-0074",
+      "question": "员工何时签署NDA",
+      "expected_doc_id": "legal-nda-015",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.33,
+      "top_doc_id": "legal-nda-015"
+    },
+    {
+      "id": "qa-0075",
+      "question": "哪些资料属于保密范围",
+      "expected_doc_id": "legal-nda-015",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.32,
+      "top_doc_id": "legal-nda-015"
+    },
+    {
+      "id": "qa-0076",
+      "question": "公司遵守哪部个人信息保护法",
+      "expected_doc_id": "legal-privacy-016",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.4,
+      "top_doc_id": "legal-privacy-016"
+    },
+    {
+      "id": "qa-0077",
+      "question": "用户对个人数据有什么权利",
+      "expected_doc_id": "legal-privacy-016",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.37,
+      "top_doc_id": "legal-privacy-016"
+    },
+    {
+      "id": "qa-0078",
+      "question": "数据跨境传输需完成什么",
+      "expected_doc_id": "legal-privacy-016",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "legal-privacy-016"
+    },
+    {
+      "id": "qa-0079",
+      "question": "隐私官联系邮箱",
+      "expected_doc_id": "legal-privacy-016",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.27,
+      "top_doc_id": "legal-privacy-016"
+    },
+    {
+      "id": "qa-0080",
+      "question": "是否遵守GDPR",
+      "expected_doc_id": "legal-privacy-016",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.3,
+      "top_doc_id": "legal-privacy-016"
+    },
+    {
+      "id": "qa-0081",
+      "question": "10万元以下合同谁审批",
+      "expected_doc_id": "legal-contract-017",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.42,
+      "top_doc_id": "legal-contract-017"
+    },
+    {
+      "id": "qa-0082",
+      "question": "100万以上合同谁审批",
+      "expected_doc_id": "legal-contract-017",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.37,
+      "top_doc_id": "legal-contract-017"
+    },
+    {
+      "id": "qa-0083",
+      "question": "非标合同审核周期",
+      "expected_doc_id": "legal-contract-017",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "legal-contract-017"
+    },
+    {
+      "id": "qa-0084",
+      "question": "合同原件保管多久",
+      "expected_doc_id": "legal-contract-017",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.28,
+      "top_doc_id": "legal-contract-017"
+    },
+    {
+      "id": "qa-0085",
+      "question": "10至100万合同审批流程",
+      "expected_doc_id": "legal-contract-017",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.41,
+      "top_doc_id": "legal-contract-017"
+    },
+    {
+      "id": "qa-0086",
+      "question": "AI工作台三大核心能力是什么",
+      "expected_doc_id": "product-feature-018",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.4,
+      "top_doc_id": "product-feature-018"
+    },
+    {
+      "id": "qa-0087",
+      "question": "支持哪些文档格式上传",
+      "expected_doc_id": "product-feature-018",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.31,
+      "top_doc_id": "product-feature-018"
+    },
+    {
+      "id": "qa-0088",
+      "question": "RAG链路包含什么检索方式",
+      "expected_doc_id": "product-feature-018",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.37,
+      "top_doc_id": "product-feature-018"
+    },
+    {
+      "id": "qa-0089",
+      "question": "是否支持多租户隔离",
+      "expected_doc_id": "product-feature-018",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "product-feature-018"
+    },
+    {
+      "id": "qa-0090",
+      "question": "对话支持什么输出方式",
+      "expected_doc_id": "product-feature-018",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.3,
+      "top_doc_id": "product-feature-018"
+    },
+    {
+      "id": "qa-0091",
+      "question": "产品分为哪三个版本",
+      "expected_doc_id": "product-pricing-019",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "product-pricing-019"
+    },
+    {
+      "id": "qa-0092",
+      "question": "标准版支持多少用户",
+      "expected_doc_id": "product-pricing-019",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "product-pricing-019"
+    },
+    {
+      "id": "qa-0093",
+      "question": "专业版知识库容量",
+      "expected_doc_id": "product-pricing-019",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.27,
+      "top_doc_id": "product-pricing-019"
+    },
+    {
+      "id": "qa-0094",
+      "question": "年付享受几折优惠",
+      "expected_doc_id": "product-pricing-019",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.26,
+      "top_doc_id": "product-pricing-019"
+    },
+    {
+      "id": "qa-0095",
+      "question": "试用期多少天",
+      "expected_doc_id": "product-pricing-019",
+      "recall_hit": true,
+      "accuracy_hit": false,
+      "latency_ms": 0.23,
+      "top_doc_id": "hr-onboard-003"
+    },
+    {
+      "id": "qa-0096",
+      "question": "企业版可用性承诺",
+      "expected_doc_id": "product-sla-020",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.27,
+      "top_doc_id": "product-sla-020"
+    },
+    {
+      "id": "qa-0097",
+      "question": "月度不可用时间不超过多少分钟",
+      "expected_doc_id": "product-sla-020",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.39,
+      "top_doc_id": "product-sla-020"
+    },
+    {
+      "id": "qa-0098",
+      "question": "P0故障响应时间",
+      "expected_doc_id": "product-sla-020",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.28,
+      "top_doc_id": "product-sla-020"
+    },
+    {
+      "id": "qa-0099",
+      "question": "数据RPO不超过多久",
+      "expected_doc_id": "product-sla-020",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.34,
+      "top_doc_id": "product-sla-020"
+    },
+    {
+      "id": "qa-0100",
+      "question": "数据RTO不超过多久",
+      "expected_doc_id": "product-sla-020",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.33,
+      "top_doc_id": "product-sla-020"
+    },
+    {
+      "id": "qa-0101",
+      "question": "总部办公时间段",
+      "expected_doc_id": "ops-office-021",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.25,
+      "top_doc_id": "ops-office-021"
+    },
+    {
+      "id": "qa-0102",
+      "question": "会议室单次预约最长多久",
+      "expected_doc_id": "ops-office-021",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.33,
+      "top_doc_id": "ops-office-021"
+    },
+    {
+      "id": "qa-0103",
+      "question": "地下停车场月卡费用",
+      "expected_doc_id": "ops-office-021",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "ops-office-021"
+    },
+    {
+      "id": "qa-0104",
+      "question": "食堂午餐供应时间",
+      "expected_doc_id": "ops-office-021",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.27,
+      "top_doc_id": "ops-office-021"
+    },
+    {
+      "id": "qa-0105",
+      "question": "会议室通过什么预约",
+      "expected_doc_id": "ops-office-021",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "ops-office-021"
+    },
+    {
+      "id": "qa-0106",
+      "question": "火警应拨打什么电话",
+      "expected_doc_id": "ops-emergency-022",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "ops-emergency-022"
+    },
+    {
+      "id": "qa-0107",
+      "question": "物业中控室内线",
+      "expected_doc_id": "ops-emergency-022",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.25,
+      "top_doc_id": "ops-emergency-022"
+    },
+    {
+      "id": "qa-0108",
+      "question": "公司医务室位置",
+      "expected_doc_id": "ops-emergency-022",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.25,
+      "top_doc_id": "ops-emergency-022"
+    },
+    {
+      "id": "qa-0109",
+      "question": "行政总监紧急手机",
+      "expected_doc_id": "ops-emergency-022",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.29,
+      "top_doc_id": "ops-emergency-022"
+    },
+    {
+      "id": "qa-0110",
+      "question": "保安室内线",
+      "expected_doc_id": "ops-emergency-022",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.23,
+      "top_doc_id": "ops-emergency-022"
+    },
+    {
+      "id": "qa-0111",
+      "question": "7层RAG包含哪些环节",
+      "expected_doc_id": "rag-tech-023",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "rag-tech-023"
+    },
+    {
+      "id": "qa-0112",
+      "question": "检索响应时间目标是多少毫秒",
+      "expected_doc_id": "rag-tech-023",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.36,
+      "top_doc_id": "rag-tech-023"
+    },
+    {
+      "id": "qa-0113",
+      "question": "标准测试集召回率目标",
+      "expected_doc_id": "rag-tech-023",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.3,
+      "top_doc_id": "rag-tech-023"
+    },
+    {
+      "id": "qa-0114",
+      "question": "支持哪些检索过滤维度",
+      "expected_doc_id": "rag-tech-023",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.41,
+      "top_doc_id": "rag-tech-023"
+    },
+    {
+      "id": "qa-0115",
+      "question": "双路检索指什么",
+      "expected_doc_id": "rag-tech-023",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.28,
+      "top_doc_id": "rag-tech-023"
+    },
+    {
+      "id": "qa-0116",
+      "question": "内置工具有哪些",
+      "expected_doc_id": "agent-tech-024",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.27,
+      "top_doc_id": "agent-tech-024"
+    },
+    {
+      "id": "qa-0117",
+      "question": "工具调用失败最多重试几次",
+      "expected_doc_id": "agent-tech-024",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.4,
+      "top_doc_id": "agent-tech-024"
+    },
+    {
+      "id": "qa-0118",
+      "question": "单工具调用超时多少秒",
+      "expected_doc_id": "agent-tech-024",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "agent-tech-024"
+    },
+    {
+      "id": "qa-0119",
+      "question": "支持哪些大模型厂商",
+      "expected_doc_id": "agent-tech-024",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.32,
+      "top_doc_id": "agent-tech-024"
+    },
+    {
+      "id": "qa-0120",
+      "question": "Agent可自主判断什么",
+      "expected_doc_id": "agent-tech-024",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.4,
+      "top_doc_id": "agent-tech-024"
+    },
+    {
+      "id": "qa-0121",
+      "question": "标准工作流包含哪五个Agent角色",
+      "expected_doc_id": "workflow-tech-025",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.52,
+      "top_doc_id": "workflow-tech-025"
+    },
+    {
+      "id": "qa-0122",
+      "question": "状态持久化到哪里",
+      "expected_doc_id": "workflow-tech-025",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.3,
+      "top_doc_id": "workflow-tech-025"
+    },
+    {
+      "id": "qa-0123",
+      "question": "支持哪些流程类型",
+      "expected_doc_id": "workflow-tech-025",
+      "recall_hit": true,
+      "accuracy_hit": false,
+      "latency_ms": 0.3,
+      "top_doc_id": "rag-tech-023"
+    },
+    {
+      "id": "qa-0124",
+      "question": "前端用什么展示工作流",
+      "expected_doc_id": "workflow-tech-025",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.35,
+      "top_doc_id": "workflow-tech-025"
+    },
+    {
+      "id": "qa-0125",
+      "question": "是否支持人工介入节点",
+      "expected_doc_id": "workflow-tech-025",
+      "recall_hit": true,
+      "accuracy_hit": true,
+      "latency_ms": 0.33,
+      "top_doc_id": "workflow-tech-025"
+    }
+  ]
+}

@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision: str = "009_agent_model_priorities"
-down_revision: Union[str, None] = "008_user_login_ip"
+revision: str = "009"
+down_revision: Union[str, None] = "008"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision: str = "011_workflow_versions_agent_share"
-down_revision: Union[str, None] = "010_custom_tools"
+revision: str = "011"
+down_revision: Union[str, None] = "010"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
