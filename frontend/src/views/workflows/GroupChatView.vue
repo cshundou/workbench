@@ -2,18 +2,20 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { ArrowLeft, ChatDotRound } from '@element-plus/icons-vue';
+import { ArrowLeft, ChatDotRound, Top } from '@element-plus/icons-vue';
 import MemberList from '@/components/group-chat/MemberList.vue';
 import MessageStream from '@/components/group-chat/MessageStream.vue';
 import TaskProgress from '@/components/group-chat/TaskProgress.vue';
 import ChatInput from '@/components/group-chat/ChatInput.vue';
 import TeamAdjustDialog from '@/components/group-chat/TeamAdjustDialog.vue';
+import ReportViewer from '@/components/group-chat/ReportViewer.vue';
 import type { TeamConfig } from '@/api/agentRoles';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
 import { useGroupChatStore } from '@/stores/groupChat';
 import { getGroupChatAuditLogs } from '@/api/groupChat';
 import { getKnowledgeBases } from '@/api/rag';
+import type { Deliverable } from '@/utils/deliverables';
 
 const route = useRoute();
 const router = useRouter();
@@ -38,6 +40,16 @@ const streamRef = ref<HTMLElement | null>(null);
 const showTeamAdjust = ref(false);
 const pendingTeamConfig = ref<TeamConfig | null>(null);
 const useClassicFive = ref(false);
+
+/** 滚动控制 */
+const isNearBottom = ref(true);
+const showNewMessageHint = ref(false);
+const showBackToTop = ref(false);
+const highlightMessageId = ref<string | null>(null);
+
+/** 报告查看器 */
+const reportVisible = ref(false);
+const activeDeliverable = ref<Deliverable | null>(null);
 
 const showStartForm = computed(() => !groupChatStore.currentSession);
 const sessionTitle = computed(() => groupChatStore.currentSession?.title || '虚拟项目群');
@@ -151,23 +163,94 @@ async function handleSendMessage(content: string): Promise<void> {
   }
 }
 
-function scrollToBottom(): void {
+function checkScrollPosition(): void {
+  const el = streamRef.value;
+  if (!el) return;
+  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+  isNearBottom.value = distanceFromBottom < 80;
+  showBackToTop.value = el.scrollTop > 300;
+  if (isNearBottom.value) {
+    showNewMessageHint.value = false;
+  }
+}
+
+function scrollToBottom(smooth = false): void {
   nextTick(() => {
     if (streamRef.value) {
-      streamRef.value.scrollTop = streamRef.value.scrollHeight;
+      streamRef.value.scrollTo({
+        top: streamRef.value.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto',
+      });
+      showNewMessageHint.value = false;
+      isNearBottom.value = true;
     }
   });
 }
 
+function scrollToTop(): void {
+  streamRef.value?.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function locateMessage(messageId: string): void {
+  highlightMessageId.value = messageId;
+  nextTick(() => {
+    const el = document.getElementById(`msg-${messageId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => {
+      highlightMessageId.value = null;
+    }, 2000);
+  });
+}
+
+function openReport(deliverable: Deliverable | (Partial<Deliverable> & { content: string; name: string })): void {
+  activeDeliverable.value = {
+    id: deliverable.id || deliverable.messageId || 'report',
+    messageId: deliverable.messageId || deliverable.id || '',
+    name: deliverable.name,
+    category: deliverable.category || 'intermediate',
+    type: deliverable.type || 'text',
+    fileType: deliverable.fileType || 'md',
+    content: deliverable.content,
+    createdBy: deliverable.createdBy || '',
+    createdAt: deliverable.createdAt || new Date().toISOString(),
+    size: deliverable.size || new Blob([deliverable.content]).size,
+    chartConfig: deliverable.chartConfig,
+  };
+  reportVisible.value = true;
+}
+
+/** 进度步骤点击跳转到对应阶段首条消息 */
+function jumpToPhase(stepKey: string): void {
+  const phaseMap: Record<string, string[]> = {
+    start: ['task_start'],
+    execute: ['task_assignment', 'progress_update', 'result_delivery', 'answer'],
+    review: ['review_request', 'review_result'],
+    complete: ['task_complete'],
+  };
+  const types = phaseMap[stepKey];
+  if (!types) return;
+  const msg = groupChatStore.messages.find((m) => types.includes(m.type));
+  if (msg) locateMessage(msg.id);
+}
+
 watch(
   () => groupChatStore.messages.length,
-  () => scrollToBottom(),
+  (newLen, oldLen) => {
+    if (newLen > oldLen) {
+      if (isNearBottom.value) {
+        scrollToBottom();
+      } else {
+        showNewMessageHint.value = true;
+      }
+    }
+  },
 );
 
 onMounted(async () => {
   await loadKbOptions();
   if (sessionIdParam.value) {
     await groupChatStore.loadSession(sessionIdParam.value);
+    scrollToBottom();
   }
 });
 
@@ -209,7 +292,7 @@ onUnmounted(() => {
       </SectionHeader>
     </div>
 
-    <ApiKeyHintBanner />
+    <ApiKeyHintBanner scene="workflow" />
 
     <!-- 启动表单 -->
     <div v-if="showStartForm" class="start-panel">
@@ -308,13 +391,38 @@ onUnmounted(() => {
             </div>
           </template>
         </el-alert>
-        <div ref="streamRef" class="stream-container">
+        <div ref="streamRef" class="stream-container" @scroll="checkScrollPosition">
           <MessageStream
             :messages="groupChatStore.messages"
             :typing-role="groupChatStore.typingRole"
             :filter-role="groupChatStore.selectedRole"
+            :highlight-message-id="highlightMessageId"
+            @view-report="openReport"
           />
         </div>
+
+        <!-- 滚动辅助按钮 -->
+        <Transition name="fade">
+          <button
+            v-if="showNewMessageHint"
+            type="button"
+            class="scroll-hint-btn"
+            @click="scrollToBottom(true)"
+          >
+            新消息 ↓
+          </button>
+        </Transition>
+        <Transition name="fade">
+          <button
+            v-if="showBackToTop"
+            type="button"
+            class="back-top-btn"
+            @click="scrollToTop"
+          >
+            <el-icon><Top /></el-icon>
+          </button>
+        </Transition>
+
         <ChatInput
           :disabled="groupChatStore.isCompleted"
           :loading="isSending"
@@ -325,9 +433,18 @@ onUnmounted(() => {
       <TaskProgress
         :progress="groupChatStore.progress"
         :steps="groupChatStore.progressSteps"
+        :messages="groupChatStore.messages"
         :deliverables="groupChatStore.currentSession?.deliverables || []"
+        @view-deliverable="openReport"
+        @locate-message="locateMessage"
+        @jump-phase="jumpToPhase"
       />
     </div>
+
+    <ReportViewer
+      v-model:visible="reportVisible"
+      :deliverable="activeDeliverable"
+    />
   </div>
 </template>
 
@@ -362,7 +479,6 @@ onUnmounted(() => {
   background: $bg-white;
   border: 1px solid $border-color;
   border-radius: 16px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
 
   h2 {
     margin: 16px 0 8px;
@@ -402,7 +518,7 @@ onUnmounted(() => {
 .chat-layout {
   flex: 1;
   display: grid;
-  grid-template-columns: 220px 1fr 240px;
+  grid-template-columns: 220px 1fr 260px;
   border: 1px solid $border-color;
   border-radius: 12px;
   overflow: hidden;
@@ -416,6 +532,7 @@ onUnmounted(() => {
   min-height: 0;
   border-left: 1px solid $border-color;
   border-right: 1px solid $border-color;
+  position: relative;
 }
 
 .stream-container {
@@ -433,5 +550,70 @@ onUnmounted(() => {
   margin-top: 8px;
   display: flex;
   gap: 8px;
+}
+
+.scroll-hint-btn {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  font-size: 13px;
+  color: $primary-color;
+  background: $bg-white;
+  border: 1px solid rgba($primary-color, 0.4);
+  border-radius: 20px;
+  cursor: pointer;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+  &:hover {
+    background: rgba($primary-color, 0.06);
+  }
+}
+
+.back-top-btn {
+  position: absolute;
+  bottom: 80px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $text-secondary;
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 10;
+
+  &:hover {
+    color: $primary-color;
+    border-color: rgba($primary-color, 0.4);
+  }
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+@media (max-width: 1024px) {
+  .chat-layout {
+    grid-template-columns: 180px 1fr 220px;
+  }
+}
+
+@media (max-width: 768px) {
+  .chat-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+  }
 }
 </style>
