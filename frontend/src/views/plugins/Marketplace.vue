@@ -23,11 +23,13 @@ const categories = ref<PluginCategory[]>([]);
 const activeCategory = ref('');
 const keyword = ref('');
 const total = ref(0);
+const featuredPlugins = ref<PluginInfo[]>([]);
+const showFeatured = ref(true);
 
 async function fetchData(): Promise<void> {
   loading.value = true;
   try {
-    const [cats, result] = await Promise.all([
+    const [cats, result, featured] = await Promise.all([
       listPluginCategories(),
       listMarketplace({
         category: activeCategory.value || undefined,
@@ -35,10 +37,12 @@ async function fetchData(): Promise<void> {
         page: 1,
         page_size: 24,
       }),
+      listMarketplace({ featured_only: true, page: 1, page_size: 8 }),
     ]);
     categories.value = cats;
     plugins.value = result.items;
     total.value = result.total;
+    featuredPlugins.value = featured.items;
   } finally {
     loading.value = false;
   }
@@ -92,6 +96,27 @@ onMounted(fetchData);
       <el-button @click="router.push({ name: 'PluginsInstalled' })">已安装</el-button>
       <el-button @click="router.push({ name: 'SkillsConfig' })">技能配置</el-button>
     </div>
+    <section v-if="showFeatured && featuredPlugins.length && !keyword && !activeCategory" class="featured">
+      <h2 class="section-title">官方推荐</h2>
+      <div class="featured-grid">
+        <div
+          v-for="plugin in featuredPlugins"
+          :key="plugin.plugin_id"
+          class="plugin-card featured-card"
+          @click="goDetail(plugin)"
+        >
+          <el-tag size="small" type="warning">推荐</el-tag>
+          <div class="card-header">
+            <span class="icon">{{ plugin.icon || '🔌' }}</span>
+            <div>
+              <h3>{{ plugin.name }}</h3>
+              <p class="author">⭐ {{ plugin.rating_avg.toFixed(1) }}</p>
+            </div>
+          </div>
+          <p class="desc">{{ plugin.description }}</p>
+        </div>
+      </div>
+    </section>
     <div class="layout">
       <aside class="sidebar">
         <button
