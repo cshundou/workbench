@@ -129,6 +129,12 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/workflows/GroupChatView.vue'),
             meta: { title: '群聊协同' },
           },
+          {
+            path: 'marketplace',
+            name: 'WorkflowMarketplace',
+            component: () => import('@/views/marketplace/Index.vue'),
+            meta: { title: '模板市场' },
+          },
         ],
       },
       {
@@ -140,6 +146,12 @@ const routes: RouteRecordRaw[] = [
           icon: 'DataAnalysis',
           accessLevel: 'public',
         },
+      },
+      {
+        path: 'monitor/traces',
+        name: 'MonitorTraces',
+        component: () => import('@/views/monitor/TraceDetail.vue'),
+        meta: { title: '链路追踪', accessLevel: 'public' },
       },
       {
         path: 'plugins',

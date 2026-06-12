@@ -26,7 +26,16 @@ const isExecuting = ref(false);
 const selectedNodeId = ref<string | null>(null);
 const selectedLog = ref<NodeExecutionLog | null>(null);
 const interventionComment = ref('');
+const rejectTarget = ref('scheduler');
 const viewMode = ref<'topology' | 'groupchat'>('topology');
+
+/** 可打回的节点选项（人工驳回时使用） */
+const rejectTargetOptions = computed(() =>
+  graphDefinition.value.nodes.map((node) => ({
+    id: node.id,
+    label: `${node.label || node.id} (${node.type})`,
+  })),
+);
 
 const graphDefinition = computed(
   () => graphStore.currentWorkflow?.graph_definition || { nodes: [], edges: [] },
@@ -143,8 +152,14 @@ async function handleTerminate(): Promise<void> {
 
 async function handleReject(): Promise<void> {
   if (!graphStore.currentExecution) return;
-  await graphStore.intervene(graphStore.currentExecution.id, false, interventionComment.value);
-  ElMessage.warning('已拒绝，工作流已终止');
+  await graphStore.intervene(
+    graphStore.currentExecution.id,
+    false,
+    interventionComment.value || undefined,
+    rejectTarget.value || 'scheduler',
+  );
+  graphStore.connectWebSocket(graphStore.currentExecution.id);
+  ElMessage.warning(`已驳回，工作流将打回至节点「${rejectTarget.value}」继续执行`);
   interventionComment.value = '';
 }
 
@@ -342,7 +357,7 @@ onUnmounted(() => {
           <template #header>
             <span class="intervention-title">⚠️ 等待人工确认</span>
           </template>
-          <p class="intervention-desc">工作流已暂停，请审核子任务结果后决定是否继续执行。</p>
+          <p class="intervention-desc">工作流已暂停，请审核子任务结果后批准继续，或驳回打回指定节点重新执行。</p>
           <el-input
             v-model="interventionComment"
             type="textarea"
@@ -350,9 +365,19 @@ onUnmounted(() => {
             placeholder="审批备注（可选）"
             class="mb-3"
           />
+          <el-form-item label="驳回打回目标节点" class="reject-target-item">
+            <el-select v-model="rejectTarget" filterable placeholder="选择打回节点" style="width: 100%">
+              <el-option
+                v-for="opt in rejectTargetOptions"
+                :key="opt.id"
+                :label="opt.label"
+                :value="opt.id"
+              />
+            </el-select>
+          </el-form-item>
           <div class="intervention-actions">
             <el-button type="success" :icon="Check" @click="handleApprove">批准继续</el-button>
-            <el-button type="danger" :icon="Close" @click="handleReject">拒绝终止</el-button>
+            <el-button type="danger" :icon="Close" @click="handleReject">驳回打回</el-button>
           </div>
         </el-card>
 

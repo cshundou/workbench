@@ -6,14 +6,16 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Optional
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver, Checkpoint
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.database import async_session_factory
+from app.core.config import settings
 from app.models.workflow_checkpoint import WorkflowCheckpoint
 
 logger = logging.getLogger(__name__)
@@ -42,21 +44,47 @@ class PostgresSaver(BaseCheckpointSaver):
 
     @staticmethod
     def _run_async(coro: Any) -> Any:
+        """在独立事件循环中执行协程，避免与 ARQ/FastAPI 主循环共享 asyncpg 连接。"""
         import asyncio
+        import concurrent.futures
+
+        def _run_in_fresh_loop() -> Any:
+            return asyncio.run(coro)
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    return pool.submit(asyncio.run, coro).result()
-            return asyncio.run(coro)
+            asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(coro)
+            return _run_in_fresh_loop()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_run_in_fresh_loop).result()
+
+    @staticmethod
+    @asynccontextmanager
+    async def _ephemeral_session() -> AsyncGenerator[AsyncSession, None]:
+        """为 checkpoint 读写创建独立引擎，防止跨 event loop 复用连接池。"""
+        engine = create_async_engine(
+            settings.database_url,
+            echo=False,
+            pool_pre_ping=True,
+            pool_size=1,
+            max_overflow=0,
+        )
+        session_factory = async_sessionmaker(
+            bind=engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autocommit=False,
+            autoflush=False,
+        )
+        try:
+            async with session_factory() as db:
+                yield db
+        finally:
+            await engine.dispose()
 
     async def _aget(self, thread_id: str) -> Optional[Checkpoint]:
-        async with async_session_factory() as db:
+        async with self._ephemeral_session() as db:
             row = (
                 await db.execute(
                     select(WorkflowCheckpoint).where(
@@ -69,7 +97,7 @@ class PostgresSaver(BaseCheckpointSaver):
             return row.checkpoint
 
     async def _aput(self, thread_id: str, checkpoint: Checkpoint) -> None:
-        async with async_session_factory() as db:
+        async with self._ephemeral_session() as db:
             stmt = insert(WorkflowCheckpoint).values(
                 thread_id=thread_id,
                 checkpoint=checkpoint,
@@ -83,7 +111,7 @@ class PostgresSaver(BaseCheckpointSaver):
             await db.commit()
 
     async def _adelete(self, thread_id: str) -> None:
-        async with async_session_factory() as db:
+        async with self._ephemeral_session() as db:
             row = (
                 await db.execute(
                     select(WorkflowCheckpoint).where(

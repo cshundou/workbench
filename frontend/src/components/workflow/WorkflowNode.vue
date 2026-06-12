@@ -24,6 +24,8 @@ const typeIcon = computed(() => {
     execution: '执',
     human: '人',
     reviewer: '审',
+    audit: '核',
+    skill: '技',
   };
   return icons[props.type] || '·';
 });

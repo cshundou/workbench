@@ -10,6 +10,7 @@ import ChatInput from '@/components/group-chat/ChatInput.vue';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
 import { useGroupChatStore } from '@/stores/groupChat';
+import { getGroupChatAuditLogs } from '@/api/groupChat';
 import { getKnowledgeBases } from '@/api/rag';
 
 const route = useRoute();
@@ -84,6 +85,10 @@ async function handleStart(): Promise<void> {
 const isHumanReview = computed(
   () => groupChatStore.sessionStatus === 'human_review',
 );
+const isFailed = computed(() => groupChatStore.sessionStatus === 'failed');
+const sessionError = computed(
+  () => groupChatStore.currentSession?.error_message || '协作执行失败，请查看后端日志或重试',
+);
 const canCancel = computed(() =>
   ['pending', 'running', 'reviewing'].includes(groupChatStore.sessionStatus),
 );
@@ -95,6 +100,24 @@ async function handleCancel(): Promise<void> {
   } catch (err) {
     console.error('[GroupChat] 取消失败', err);
     ElMessage.error('取消失败');
+  }
+}
+
+async function handleExportAuditLogs(): Promise<void> {
+  if (!groupChatStore.currentSession) return;
+  try {
+    const data = await getGroupChatAuditLogs(groupChatStore.currentSession.id);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `group-chat-audit-${groupChatStore.currentSession.id}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    ElMessage.success('审计日志已导出');
+  } catch (err) {
+    console.error('[GroupChat] 审计导出失败', err);
+    ElMessage.error('审计日志导出失败');
   }
 }
 
@@ -156,6 +179,14 @@ onUnmounted(() => {
           <el-tag v-if="groupChatStore.currentSession" :type="statusTagType">
             {{ groupChatStore.sessionStatus }}
           </el-tag>
+          <el-button
+            v-if="groupChatStore.currentSession"
+            plain
+            size="small"
+            @click="handleExportAuditLogs"
+          >
+            导出审计
+          </el-button>
           <el-button
             v-if="canCancel"
             type="danger"
@@ -225,6 +256,14 @@ onUnmounted(() => {
       />
 
       <main class="chat-main">
+        <el-alert
+          v-if="isFailed"
+          type="error"
+          title="协作执行失败"
+          :description="sessionError"
+          show-icon
+          class="human-review-banner"
+        />
         <el-alert
           v-if="isHumanReview"
           type="warning"

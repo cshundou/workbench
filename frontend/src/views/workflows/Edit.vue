@@ -42,6 +42,8 @@ const nodeTypes = [
   { type: 'human', label: '人工介入' },
   { type: 'supervisor', label: '监督节点' },
   { type: 'reviewer', label: '审核 Agent' },
+  { type: 'audit', label: '强制审核' },
+  { type: 'skill', label: 'Skill 调用' },
   { type: 'condition', label: '条件分支' },
   { type: 'custom_agent', label: '自定义 Agent' },
   { type: 'loop', label: '循环节点' },
@@ -93,7 +95,11 @@ function addNode(type: string, label: string): void {
           }
         : type === 'custom_agent'
           ? { agent_id: null }
-          : {};
+          : type === 'audit'
+            ? { max_review_retries: 3, reject_target: 'scheduler' }
+            : type === 'skill'
+              ? { skill_key: '', task: '' }
+              : {};
   nodes.value.push({
     id,
     type,

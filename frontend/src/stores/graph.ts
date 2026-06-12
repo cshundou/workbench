@@ -120,10 +120,12 @@ export const useGraphStore = defineStore('graph', () => {
     executionId: number,
     approved: boolean,
     comment?: string,
+    rejectTarget?: string,
   ): Promise<void> {
     const execution = await submitHumanIntervention(executionId, {
       approved,
       comment,
+      reject_target: rejectTarget,
     });
     currentExecution.value = execution;
     nodeStatuses.value = execution.node_statuses || {};

@@ -151,6 +151,15 @@ export function resolveGroupChatReview(
   }) as Promise<GroupChatSession>;
 }
 
+/** 导出群聊会话审计日志 */
+export function getGroupChatAuditLogs(
+  sessionId: number,
+): Promise<{ items: Record<string, unknown>[] }> {
+  return request.get(`/group-chat/sessions/${sessionId}/audit-logs`) as Promise<{
+    items: Record<string, unknown>[];
+  }>;
+}
+
 /** 构建群聊 WebSocket URL */
 export function buildGroupChatWsUrl(sessionId: number): string {
   const token = localStorage.getItem('token') || '';

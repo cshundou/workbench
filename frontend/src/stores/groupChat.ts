@@ -218,6 +218,7 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         ...currentSession.value,
         status: msg.status || currentSession.value.status,
         progress: msg.progress ?? currentSession.value.progress,
+        error_message: msg.error ?? currentSession.value.error_message,
       };
       if (msg.final_answer) {
         finalAnswer.value = msg.final_answer;

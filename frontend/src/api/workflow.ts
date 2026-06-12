@@ -114,6 +114,8 @@ export interface WorkflowExecution {
 export interface HumanInterventionParams {
   approved: boolean;
   comment?: string;
+  /** 驳回时打回的目标节点 id */
+  reject_target?: string;
 }
 
 /** WebSocket 消息 */

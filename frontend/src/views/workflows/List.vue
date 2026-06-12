@@ -162,6 +162,7 @@ onMounted(() => {
       description="LangGraph 多智能体协同工作流，支持任务拆解、并行执行与人工介入"
     >
       <template #actions>
+        <el-button round @click="router.push({ name: 'WorkflowMarketplace' })">模板市场</el-button>
         <el-button v-if="canWrite" round @click="loadTemplates">从模板创建</el-button>
         <el-button v-if="canWrite" type="primary" :icon="Plus" round @click="openCreateDialog">
           新建工作流
