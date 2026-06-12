@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from app.models.workflow import Workflow
     from app.models.user_api_key import UserApiKey
     from app.models.group_chat import GroupChatSession
+    from app.models.professional_role import ProfessionalRole, TeamTemplate
 
 
 class User(Base, TimestampMixin):
@@ -74,3 +75,7 @@ class User(Base, TimestampMixin):
     chat_histories: Mapped[list["ChatHistory"]] = relationship(back_populates="user")
     token_usages: Mapped[list["TokenUsage"]] = relationship(back_populates="user")
     api_keys: Mapped[list["UserApiKey"]] = relationship(back_populates="user")
+    created_professional_roles: Mapped[list["ProfessionalRole"]] = relationship(
+        back_populates="creator"
+    )
+    team_templates: Mapped[list["TeamTemplate"]] = relationship(back_populates="owner")

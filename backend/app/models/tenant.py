@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from app.models.workflow_execution import WorkflowExecution
     from app.models.group_chat import GroupChatSession
     from app.models.plugin import PluginInstallation
+    from app.models.professional_role import ProfessionalRole, TeamTemplate
 
 
 class Tenant(Base, TimestampMixin):
@@ -63,3 +64,7 @@ class Tenant(Base, TimestampMixin):
     plugin_installations: Mapped[List["PluginInstallation"]] = relationship(
         back_populates="tenant"
     )
+    professional_roles: Mapped[List["ProfessionalRole"]] = relationship(
+        back_populates="tenant"
+    )
+    team_templates: Mapped[List["TeamTemplate"]] = relationship(back_populates="tenant")

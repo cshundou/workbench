@@ -11,6 +11,8 @@ from app.api.v1.mcp import router as mcp_router
 from app.api.v1.plugins import router as plugins_router
 from app.api.v1.skills import router as skills_router
 from app.api.v1.group_chat import router as group_chat_router
+from app.api.v1.professional_roles import router as professional_roles_router
+from app.api.v1.professional_roles import team_router as team_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.config import router as config_router
 from app.api.v1.agents import router as agents_router
@@ -42,6 +44,8 @@ api_router.include_router(knowledge_bases_router)
 api_router.include_router(workflows_router)
 api_router.include_router(workflow_ws_router)
 api_router.include_router(group_chat_router)
+api_router.include_router(professional_roles_router)
+api_router.include_router(team_router)
 api_router.include_router(monitor_router)
 api_router.include_router(agents_router)
 api_router.include_router(user_api_keys_router)

@@ -14,6 +14,7 @@ from app.models.user import User
 from app.models.user_api_key import UserApiKey
 from app.models.mcp_server import McpServer, McpTool
 from app.models.group_chat import GroupChatMessage, GroupChatSession
+from app.models.professional_role import ProfessionalRole, TeamTemplate
 from app.models.workflow import Workflow
 from app.models.workflow_execution import WorkflowExecution
 from app.models.workflow_checkpoint import WorkflowCheckpoint
@@ -41,6 +42,8 @@ __all__ = [
     "WorkflowCheckpoint",
     "GroupChatSession",
     "GroupChatMessage",
+    "ProfessionalRole",
+    "TeamTemplate",
     "McpServer",
     "McpTool",
     "ChatHistory",
