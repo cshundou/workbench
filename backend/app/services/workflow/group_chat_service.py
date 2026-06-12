@@ -477,23 +477,32 @@ class GroupChatService:
 
             graph = engine.build_graph()
             initial_state: dict[str, Any] = {
+                "messages": [],
                 "task": task,
                 "kb_id": kb_id,
                 "subtasks": [],
                 "results": {},
                 "deliverables": [],
+                "current_step": "group_chat",
                 "status": "running",
+                "error": "",
+                "require_human_approval": False,
+                "human_approved": False,
+                "execution_logs": [],
+                "loop_counters": {},
                 "progress": 0.0,
-                "current_step": 0,
                 "current_subtask_index": 0,
                 "review_count": 0,
                 "review_result": None,
                 "user_supplements": [],
-                "error": "",
                 "final_answer": "",
-                "member_statuses": {},
+                "tenant_id": tenant_id,
+                "user_id": user_id,
             }
-            config = {"configurable": {"thread_id": thread_id}}
+            config = {
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": 50,
+            }
 
             if self.is_session_cancelled(session_id):
                 await self._mark_session_failed(session_id, "会话已被用户取消")

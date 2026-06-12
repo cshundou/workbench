@@ -22,7 +22,25 @@ from langgraph.graph import END, StateGraph
 from app.core.config import settings
 from app.core.exceptions import ValidationError
 from app.services.user_key_context import UserKeyContext, create_chat_llm
+from app.services.workflow.nodes.audit_node import (
+    DEFAULT_AUDIT_DIMENSIONS,
+    ForcedAuditRunner,
+)
+from app.services.workflow.nodes.constants import (
+    AGENT_ROLES,
+    MAX_REVIEW_RETRIES,
+    NODE_GROUP_CHAT_ROLE,
+    SUBTASK_ROLE_MAP,
+)
+from app.services.workflow.nodes.group_chat_subtasks import (
+    build_final_answer,
+    calc_group_chat_progress,
+    enrich_subtasks_with_roles,
+    get_pending_subtask,
+    mark_subtask_completed,
+)
 from app.services.workflow.redis_saver import RedisSaver
+from app.services.workflow.tool_manager import WorkflowToolManager
 from app.services.workflow.workflow_agent_runner import WorkflowAgentRunner
 
 logger = logging.getLogger(__name__)
@@ -122,6 +140,8 @@ VALID_NODE_TYPES = frozenset(
         "execution",
         "human",
         "reviewer",
+        "audit",
+        "skill",
         "loop",
         "condition",
         "custom_agent",
@@ -156,21 +176,25 @@ class AgentState(TypedDict):
     loop_conditions: NotRequired[dict[str, str]]
     tenant_id: NotRequired[int]
     user_id: NotRequired[int]
+    # 群聊协同扩展字段（统一引擎复用）
+    deliverables: NotRequired[list[dict[str, Any]]]
+    review_count: NotRequired[int]
+    review_result: NotRequired[Optional[dict[str, Any]]]
+    final_answer: NotRequired[str]
+    current_subtask_index: NotRequired[int]
+    user_supplements: NotRequired[list[str]]
+    progress: NotRequired[float]
+    human_reject_target: NotRequired[str]
+    human_rejected: NotRequired[bool]
+    human_intervention_records: NotRequired[list[dict[str, Any]]]
 
 
 StatusCallback = Callable[[str, str, dict[str, Any]], None]
 StreamCallback = Callable[[str, str], None]
 GroupChatCallback = Callable[[dict[str, Any]], None]
 
-# 工作流节点到群聊角色的映射（群聊视图可选展示）
-NODE_GROUP_CHAT_ROLE: dict[str, str] = {
-    "scheduler": "project_manager",
-    "knowledge_agent": "researcher",
-    "search_agent": "researcher",
-    "execution_agent": "engineer",
-    "reviewer": "auditor",
-    "supervisor": "project_manager",
-}
+# 向后兼容：从 nodes.constants 重导出
+__all_node_role_map__ = NODE_GROUP_CHAT_ROLE
 
 
 class WorkflowBuilder:
@@ -200,7 +224,10 @@ class WorkflowBuilder:
         self.execution_id: Optional[int] = None
         self._stream_callback: Optional[StreamCallback] = None
         self._group_chat_callback: Optional[GroupChatCallback] = None
+        self._member_status_callback: Optional[Callable[[str, str], None]] = None
+        self._supplement_loader: Optional[Callable[[], list[str]]] = None
         self._agent_runner: Optional[WorkflowAgentRunner] = None
+        self._tool_manager: Optional[WorkflowToolManager] = None
 
     def set_execution_context(
         self,
@@ -221,6 +248,16 @@ class WorkflowBuilder:
         """设置群聊消息回调，用于群聊视图实时展示工作流过程。"""
         self._group_chat_callback = callback
 
+    def set_member_status_callback(
+        self, callback: Callable[[str, str], None]
+    ) -> None:
+        """设置群聊成员状态回调。"""
+        self._member_status_callback = callback
+
+    def set_supplement_loader(self, loader: Callable[[], list[str]]) -> None:
+        """设置用户补充要求加载器。"""
+        self._supplement_loader = loader
+
     def _emit_group_chat(
         self,
         node_id: str,
@@ -233,7 +270,6 @@ class WorkflowBuilder:
         """向群聊视图推送标准化消息（WorkflowBuilder 节点钩子）。"""
         if not self._group_chat_callback:
             return
-        from app.services.workflow.group_chat_engine import AGENT_ROLES
 
         role = NODE_GROUP_CHAT_ROLE.get(node_id, "project_manager")
         role_info = AGENT_ROLES.get(role, AGENT_ROLES["project_manager"])
@@ -250,6 +286,43 @@ class WorkflowBuilder:
             "content": content,
             "attachments": attachments or [],
             "metadata": metadata or {"node_id": node_id},
+        }
+        self._group_chat_callback(payload)
+
+    def _set_member_status(self, role: str, status: str) -> None:
+        if self._member_status_callback:
+            self._member_status_callback(role, status)
+
+    def _emit_group_chat_role(
+        self,
+        role: str,
+        message_type: str,
+        content: str,
+        *,
+        attachments: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+        receiver: str | None = None,
+    ) -> None:
+        """按群聊角色推送消息。"""
+        if not self._group_chat_callback:
+            return
+        import uuid
+
+        role_info = AGENT_ROLES.get(role, AGENT_ROLES["project_manager"])
+        payload: dict[str, Any] = {
+            "id": str(uuid.uuid4()),
+            "timestamp": self._now_iso(),
+            "sender": {
+                "id": role_info["id"],
+                "name": role_info["name"],
+                "role": role,
+                "avatar": role_info["avatar"],
+            },
+            "receiver": receiver,
+            "type": message_type,
+            "content": content,
+            "attachments": attachments or [],
+            "metadata": metadata or {},
         }
         self._group_chat_callback(payload)
 
@@ -307,6 +380,22 @@ class WorkflowBuilder:
             user_ctx=self.user_ctx,
         )
         return self._agent_runner
+
+    def _get_tool_manager(self) -> Optional[WorkflowToolManager]:
+        """懒加载统一工具管理器。"""
+        runner = self._get_agent_runner()
+        if runner is None or self.tenant_id is None or self.user_id is None:
+            return None
+        if self.user_ctx is None:
+            return None
+        if self._tool_manager is None:
+            self._tool_manager = WorkflowToolManager(
+                tenant_id=self.tenant_id,
+                user_id=self.user_id,
+                user_ctx=self.user_ctx,
+                runner=runner,
+            )
+        return self._tool_manager
 
     def _get_node_config(self, state: AgentState, node_id: str) -> dict[str, Any]:
         """读取节点 config（优先 state 快照，其次图定义）。"""
@@ -423,9 +512,9 @@ class WorkflowBuilder:
         state: AgentState,
         node_id: str,
     ) -> dict[str, Any]:
-        """通过 WorkflowAgentRunner 执行角色 Agent。"""
-        runner = self._get_agent_runner()
-        if runner is None:
+        """通过 WorkflowToolManager 统一执行角色 Agent（内置 + Skill/MCP）。"""
+        tool_manager = self._get_tool_manager()
+        if tool_manager is None:
             raise RuntimeError("未配置执行上下文或 API 密钥，无法运行 Agent")
 
         config = self._get_node_config(state, node_id)
@@ -442,12 +531,17 @@ class WorkflowBuilder:
         if config.get("temperature") is not None:
             model_config["temperature"] = float(config["temperature"])
 
-        return runner.run_sync(
+        result = tool_manager.run_role_agent(
             role=role,
             task=task,
+            node_config=config,
             kb_id=kb_id,
             model_config=model_config or None,
+            max_iterations=int(config.get("max_iterations", 5)),
         )
+        if result.get("error"):
+            raise RuntimeError(result["error"])
+        return result
 
     def build_standard_workflow(self, require_human: bool = False):
         """
@@ -499,9 +593,10 @@ class WorkflowBuilder:
 
         workflow.add_conditional_edges(
             "human_intervention",
-            self.route_after_human_intervention,
+            self._build_human_intervention_router("supervisor", "scheduler"),
             {
                 "continue": "supervisor",
+                "reject": "scheduler",
                 "end": END,
             },
         )
@@ -871,6 +966,22 @@ class WorkflowBuilder:
                     return self.sub_workflow_node(state, _node_id, _cfg)
 
                 workflow.add_node(node_id, _sub_workflow_handler)
+            elif node_type == "audit":
+
+                def _audit_handler(
+                    state: AgentState, _node_id: str = node_id
+                ) -> AgentState:
+                    return self.forced_audit_node(state, _node_id)
+
+                workflow.add_node(node_id, _audit_handler)
+            elif node_type == "skill":
+
+                def _skill_handler(
+                    state: AgentState, _node_id: str = node_id
+                ) -> AgentState:
+                    return self.skill_call_node(state, _node_id)
+
+                workflow.add_node(node_id, _skill_handler)
             else:
                 handler = handler_map.get(node_type)
                 if handler is None:
@@ -989,11 +1100,15 @@ class WorkflowBuilder:
             )
 
         if human_id:
+            reject_target = scheduler_id
             workflow.add_conditional_edges(
                 human_id,
-                self.route_after_human_intervention,
+                self._build_human_intervention_router(
+                    reviewer_id or END, reject_target
+                ),
                 {
                     "continue": reviewer_id or END,
+                    "reject": reject_target,
                     "end": END,
                 },
             )
@@ -1002,6 +1117,365 @@ class WorkflowBuilder:
             workflow.add_edge(reviewer_id, END)
 
         return workflow.compile(checkpointer=self.checkpointer)
+
+    def build_group_chat_workflow(self):
+        """
+        构建群聊协同标准工作流（复用统一节点库，避免 PM↔角色递归）。
+
+        拓扑：初始化 → 子任务批处理 → 强制审核 →（打回则重跑子任务）→ 人工兜底。
+        图步数固定，不受子任务数量影响，彻底解决 recursion_limit 问题。
+        """
+        workflow = StateGraph(AgentState)
+        workflow.add_node("gc_init", self.group_chat_init_node)
+        workflow.add_node("gc_subtasks", self.group_chat_subtasks_node)
+        workflow.add_node("gc_audit", self.group_chat_audit_node)
+        workflow.add_node("gc_human", self.group_chat_human_node)
+
+        workflow.set_entry_point("gc_init")
+        workflow.add_edge("gc_init", "gc_subtasks")
+        workflow.add_edge("gc_subtasks", "gc_audit")
+        workflow.add_conditional_edges(
+            "gc_audit",
+            self.route_after_group_chat_audit,
+            {
+                "retry": "gc_subtasks",
+                "human": "gc_human",
+                "end": END,
+            },
+        )
+        workflow.add_edge("gc_human", END)
+        return workflow.compile(checkpointer=self.checkpointer)
+
+    def group_chat_init_node(self, state: AgentState) -> AgentState:
+        """群聊初始化：任务拆解并生成带角色的子任务列表。"""
+        state = dict(state)
+        state.setdefault("deliverables", [])
+        state.setdefault("results", {})
+        state.setdefault("review_count", 0)
+        state.setdefault("user_supplements", [])
+
+        if self._supplement_loader:
+            loaded = self._supplement_loader()
+            if loaded:
+                state["user_supplements"].extend(loaded)
+
+        supplements = state.get("user_supplements") or []
+        if supplements:
+            latest = supplements[-1]
+            self._emit_group_chat_role(
+                "project_manager",
+                "task_assignment",
+                f"收到用户补充要求，已转发给团队：{latest}",
+            )
+            state["user_supplements"] = []
+
+        self._set_member_status("project_manager", "thinking")
+
+        if not state.get("subtasks"):
+            self._emit_group_chat_role(
+                "project_manager",
+                "task_start",
+                f"收到任务！我来拆解并分配给团队成员：\n\n**{state['task']}**",
+            )
+            agent_state = self.scheduler_node(state)
+            if agent_state.get("status") == "failed":
+                state["status"] = "failed"
+                state["error"] = agent_state.get("error", "任务拆解失败")
+                self._emit_group_chat_role("project_manager", "error", state["error"])
+                self._set_member_status("project_manager", "idle")
+                return state
+
+            raw = agent_state.get("subtasks", [])
+            subtasks = enrich_subtasks_with_roles(raw, state["task"])
+            state["subtasks"] = subtasks
+            state["status"] = "running"
+            state["progress"] = 10.0
+            lines = [
+                f"{idx + 1}. {AGENT_ROLES[s['role']]['name']}：{s['task']}"
+                for idx, s in enumerate(subtasks)
+            ]
+            self._emit_group_chat_role(
+                "project_manager",
+                "task_assignment",
+                "任务拆解完成，分配如下：\n" + "\n".join(lines),
+                metadata={"subtasks": subtasks},
+            )
+
+        self._set_member_status("project_manager", "idle")
+        return state
+
+    def group_chat_subtasks_node(self, state: AgentState) -> AgentState:
+        """群聊子任务批处理：在单节点内顺序执行所有待办子任务（无图递归）。"""
+        state = dict(state)
+        state.setdefault("deliverables", [])
+        state.setdefault("results", {})
+
+        while True:
+            pending = get_pending_subtask(state.get("subtasks", []))
+            if pending is None:
+                state["status"] = "reviewing"
+                state["progress"] = calc_group_chat_progress(
+                    state.get("subtasks", []), "reviewing"
+                )
+                self._emit_group_chat_role(
+                    "project_manager",
+                    "review_request",
+                    "所有子任务已完成，提交审核员进行最终审核。",
+                    attachments=[
+                        {
+                            "type": "text",
+                            "name": "交付物汇总",
+                            "content": json.dumps(
+                                state.get("deliverables", []),
+                                ensure_ascii=False,
+                                indent=2,
+                            ),
+                        }
+                    ],
+                )
+                break
+
+            role = pending.get("role", "researcher")
+            agent_type = pending.get("agent", "search")
+            task_desc = pending.get("task", state["task"])
+            subtask_id = pending.get("id", "")
+
+            self._set_member_status(role, "working")
+            self._emit_group_chat_role(
+                role,
+                "progress_update",
+                f"收到，开始处理：{task_desc}",
+                metadata={"task_id": subtask_id},
+            )
+            started = time.monotonic()
+
+            try:
+                if role == "analyst":
+                    result = self._run_analyst_subtask(state, task_desc)
+                    result_key = "analysis"
+                elif agent_type == "knowledge":
+                    run_result = self._run_role_agent(
+                        "knowledge", task_desc, state, "knowledge_agent"
+                    )
+                    result = run_result.get("answer", "")
+                    result_key = "knowledge"
+                elif agent_type == "search":
+                    run_result = self._run_role_agent(
+                        "search", task_desc, state, "search_agent"
+                    )
+                    result = run_result.get("answer", "")
+                    result_key = "search"
+                else:
+                    run_result = self._run_role_agent(
+                        "execution", task_desc, state, "execution_agent"
+                    )
+                    result = run_result.get("answer", "")
+                    result_key = "execution"
+
+                duration_ms = int((time.monotonic() - started) * 1000)
+                attachments = self._build_subtask_attachments(result_key, result)
+                self._emit_group_chat_role(
+                    role,
+                    "result_delivery",
+                    f"任务完成！{task_desc[:50]}...",
+                    attachments=attachments,
+                    metadata={"task_id": subtask_id, "duration": duration_ms},
+                )
+                state.setdefault("results", {})[result_key] = result
+                state.setdefault("deliverables", []).append(
+                    {
+                        "role": role,
+                        "task_id": subtask_id,
+                        "content": result,
+                        "attachments": attachments,
+                    }
+                )
+                mark_subtask_completed(state["subtasks"], subtask_id)
+                self._emit_group_chat_role(
+                    role,
+                    "answer",
+                    f"【{AGENT_ROLES[role]['name']}】任务「{task_desc[:30]}」已完成，请查收。",
+                    receiver="project_manager",
+                )
+            except Exception as exc:
+                logger.exception("群聊子任务失败 role=%s: %s", role, exc)
+                mark_subtask_completed(state["subtasks"], subtask_id)
+                self._emit_group_chat_role(role, "error", f"任务执行失败：{exc}")
+
+            self._set_member_status(role, "idle")
+            state["progress"] = calc_group_chat_progress(
+                state.get("subtasks", []), state.get("status", "running")
+            )
+
+        return state
+
+    def _run_analyst_subtask(self, state: AgentState, task_desc: str) -> str:
+        """分析师子任务：基于已有结果生成报告。"""
+        results = state.get("results", {})
+        llm = self._create_llm()
+        analysis_prompt = f"""
+请基于以下资料完成数据分析与报告撰写：
+
+原始任务：{state['task']}
+分析要求：{task_desc}
+
+已有资料：
+{json.dumps(results, ensure_ascii=False, default=str)}
+
+请输出结构化的分析报告，包含关键发现、数据摘要和建议。
+"""
+        if llm is not None:
+            response = llm.invoke(analysis_prompt)
+            content = response.content
+            return content if isinstance(content, str) else str(content)
+        return (
+            f"【分析报告】\n\n任务：{task_desc}\n\n"
+            f"数据摘要：\n{json.dumps(results, ensure_ascii=False, indent=2)}"
+        )
+
+    @staticmethod
+    def _build_subtask_attachments(
+        result_key: str, result: str
+    ) -> list[dict[str, Any]]:
+        """构造子任务交付附件。"""
+        if result_key == "execution" and result:
+            return [
+                {
+                    "type": "code",
+                    "name": "执行结果",
+                    "content": result,
+                    "language": "python",
+                }
+            ]
+        if result_key in ("knowledge", "search") and result:
+            return [{"type": "text", "name": "检索结果", "content": result}]
+        if result_key == "analysis" and result:
+            return [
+                {
+                    "type": "chart",
+                    "name": "分析图表",
+                    "content": {"type": "bar", "summary": result[:200]},
+                },
+                {"type": "text", "name": "分析报告", "content": result},
+            ]
+        return []
+
+    def group_chat_audit_node(self, state: AgentState) -> AgentState:
+        """群聊强制审核节点（复用通用审核能力）。"""
+        state = dict(state)
+        review_count = int(state.get("review_count") or 0)
+        self._set_member_status("auditor", "working")
+        self._emit_group_chat_role(
+            "auditor",
+            "progress_update",
+            "开始审核最终成果，将从完整性、数据准确性、逻辑合理性、合规性四个维度评估...",
+        )
+
+        llm = self._create_llm()
+
+        def _invoke(prompt: str) -> str:
+            if llm is None:
+                return ""
+            response = llm.invoke(prompt)
+            content = response.content
+            return content if isinstance(content, str) else str(content)
+
+        audit_runner = ForcedAuditRunner(llm_invoke=_invoke if llm else None)
+        review_result = audit_runner.run(
+            task=state["task"],
+            deliverables=state.get("deliverables", []),
+            results=state.get("results", {}),
+        )
+        state["review_result"] = review_result
+
+        if review_result.get("passed"):
+            final_answer = build_final_answer(
+                state["task"],
+                state.get("deliverables", []),
+                review_result,
+            )
+            state["final_answer"] = final_answer
+            state["status"] = "completed"
+            state["progress"] = 100.0
+            self._emit_group_chat_role(
+                "auditor",
+                "review_result",
+                f"✅ 审核通过！{review_result.get('summary', '')}",
+                metadata={"review": review_result},
+            )
+            self._emit_group_chat_role(
+                "project_manager",
+                "task_complete",
+                "🎉 所有审核通过，任务完成！最终交付物如下：",
+                attachments=[{"type": "text", "name": "最终报告", "content": final_answer}],
+            )
+            self._set_member_status("auditor", "idle")
+            return state
+
+        review_count += 1
+        state["review_count"] = review_count
+        issues = review_result.get("issues") or ["成果未达标准"]
+        issue_text = "\n".join(f"{idx + 1}. {item}" for idx, item in enumerate(issues))
+        max_retries = MAX_REVIEW_RETRIES
+
+        if review_count >= max_retries:
+            state["status"] = "human_review"
+            state["error"] = f"审核员连续{max_retries}次审核不通过，已转人工审核"
+            self._emit_group_chat_role(
+                "auditor",
+                "review_result",
+                f"❌ 第{review_count}次审核不通过，已达最大打回次数。\n{issue_text}\n\n已提交人工审核。",
+                metadata={"review": review_result, "human_review": True},
+            )
+            self._set_member_status("auditor", "idle")
+            return state
+
+        assignee = review_result.get("assignee", "analyst")
+        if assignee not in AGENT_ROLES:
+            assignee = "analyst"
+        for subtask in state.get("subtasks", []):
+            if subtask.get("role") == assignee:
+                subtask["status"] = "pending"
+                subtask["task"] = (
+                    f"【修改】{'; '.join(issues[:2])} — {subtask.get('task', '')}"
+                )
+                break
+        state["status"] = "running"
+        state["_gc_audit_retry"] = True
+        self._emit_group_chat_role(
+            "auditor",
+            "review_result",
+            f"❌ 审核不通过（第{review_count}次），请修改后重新提交：\n{issue_text}",
+            metadata={"review": review_result, "assignee": assignee, "retry": review_count},
+        )
+        self._set_member_status("auditor", "idle")
+        return state
+
+    def route_after_group_chat_audit(self, state: AgentState) -> str:
+        """群聊审核后路由。"""
+        if state.get("status") == "completed":
+            return "end"
+        if state.get("status") == "human_review":
+            return "human"
+        if state.get("status") == "failed":
+            return "end"
+        if state.get("_gc_audit_retry"):
+            state.pop("_gc_audit_retry", None)
+            return "retry"
+        return "end"
+
+    def group_chat_human_node(self, state: AgentState) -> AgentState:
+        """群聊人工审核等待节点。"""
+        state = dict(state)
+        state["status"] = "human_review"
+        state["require_human_approval"] = True
+        self._append_log(
+            state,
+            "gc_human",
+            "waiting",
+            output_data={"message": "等待人工审核"},
+        )
+        return state
 
     def build_workflow(
         self,
@@ -1725,7 +2199,7 @@ class WorkflowBuilder:
         """
         人工介入节点（文档 5.3.3）。
 
-        将工作流状态设置为等待人工确认，暂停后续审核流程。
+        将工作流状态设置为等待人工确认；支持 approve 续跑与 reject 打回指定节点。
         """
         node_id = "human_intervention"
         state = dict(state)
@@ -1733,14 +2207,46 @@ class WorkflowBuilder:
         if not state.get("require_human_approval"):
             return state
 
+        # 已批准或已驳回打回：透传状态，由路由决定下一节点
+        if state.get("human_approved"):
+            state["status"] = "running"
+            state["human_rejected"] = False
+            self._append_log(
+                state,
+                node_id,
+                "completed",
+                output_data={"message": "人工审核已通过，继续执行"},
+            )
+            return state
+        if state.get("human_rejected"):
+            state["status"] = "running"
+            state["human_approved"] = False
+            self._append_log(
+                state,
+                node_id,
+                "completed",
+                output_data={
+                    "message": "人工审核已驳回，打回重做",
+                    "reject_target": state.get("human_reject_target"),
+                },
+            )
+            return state
+
         state["status"] = "waiting_for_human"
         state["current_step"] = "human_intervention"
+        config = self._get_node_config(state, node_id)
+        state["human_reject_target"] = str(
+            config.get("reject_target", config.get("reject_target_node", "scheduler"))
+        )
         self._append_log(
             state,
             node_id,
             "waiting",
             input_data={"results": state.get("results")},
-            output_data={"message": "等待人工确认是否继续执行"},
+            output_data={
+                "message": "等待人工确认是否继续执行",
+                "reject_target": state.get("human_reject_target"),
+            },
         )
         return state
 
@@ -1953,9 +2459,186 @@ class WorkflowBuilder:
         return merged
 
     def route_after_human_intervention(self, state: AgentState) -> str:
-        """人工介入后的路由：未启用人工介入或已批准则继续审核，否则暂停。"""
+        """人工介入后的路由：未启用/已批准继续；打回则跳转；否则暂停。"""
         if not state.get("require_human_approval"):
             return "continue"
         if state.get("human_approved"):
             return "continue"
+        if state.get("human_rejected"):
+            return "reject"
         return "end"
+
+    def _build_human_intervention_router(
+        self,
+        continue_target: str,
+        default_reject_target: str,
+    ) -> Callable[[AgentState], str]:
+        """构建人工介入条件路由（支持打回指定节点）。"""
+
+        def _router(state: AgentState) -> str:
+            route = self.route_after_human_intervention(state)
+            if route == "continue":
+                return "continue"
+            if route == "reject":
+                return "reject"
+            return "end"
+
+        return _router
+
+    def forced_audit_node(
+        self,
+        state: AgentState,
+        node_id: str = "forced_audit",
+    ) -> AgentState:
+        """通用强制审核节点：四维度审核、结构化存储、打回与人工兜底。"""
+        state = dict(state)
+        config = self._get_node_config(state, node_id)
+        max_retries = int(config.get("max_review_retries", MAX_REVIEW_RETRIES))
+        review_count = int(state.get("review_count") or 0)
+
+        self._append_log(
+            state,
+            node_id,
+            "running",
+            input_data={"deliverables": state.get("deliverables", [])},
+        )
+
+        llm = self._create_llm()
+
+        def _invoke(prompt: str) -> str:
+            if llm is None:
+                return ""
+            response = llm.invoke(prompt)
+            content = response.content
+            return content if isinstance(content, str) else str(content)
+
+        deliverables = state.get("deliverables") or [
+            {"role": k, "content": v}
+            for k, v in (state.get("results") or {}).items()
+        ]
+        audit_runner = ForcedAuditRunner(llm_invoke=_invoke if llm else None)
+        review_result = audit_runner.run(
+            task=state["task"],
+            deliverables=deliverables,
+            results=state.get("results", {}),
+            config=config,
+        )
+        state["review_result"] = review_result
+        state.setdefault("human_intervention_records", []).append(
+            {
+                "type": "audit",
+                "node_id": node_id,
+                "review": review_result,
+                "review_count": review_count + (0 if review_result.get("passed") else 1),
+            }
+        )
+
+        if review_result.get("passed"):
+            final_answer = build_final_answer(
+                state["task"],
+                deliverables,
+                review_result,
+            )
+            state.setdefault("results", {})["final"] = final_answer
+            state["final_answer"] = final_answer
+            state["status"] = "completed"
+            self._append_log(
+                state,
+                node_id,
+                "completed",
+                output_data={"review": review_result, "final": final_answer},
+            )
+            self._emit_group_chat(
+                node_id,
+                "review_result",
+                f"✅ 审核通过！{review_result.get('summary', '')}",
+                metadata={"review": review_result},
+            )
+            return state
+
+        review_count += 1
+        state["review_count"] = review_count
+        reject_target = str(
+            config.get("reject_target", config.get("reject_target_node", "scheduler"))
+        )
+        state["human_reject_target"] = reject_target
+        state["_audit_reject_target"] = reject_target
+
+        if review_count >= max_retries:
+            state["status"] = "waiting_for_human"
+            state["require_human_approval"] = True
+            state["error"] = f"审核连续{max_retries}次不通过，转人工介入"
+            self._append_log(
+                state,
+                node_id,
+                "waiting",
+                output_data={"review": review_result, "human_review": True},
+            )
+            return state
+
+        state["status"] = "audit_rejected"
+        state["_audit_retry"] = True
+        self._append_log(
+            state,
+            node_id,
+            "completed",
+            output_data={
+                "review": review_result,
+                "retry": review_count,
+                "reject_target": reject_target,
+            },
+        )
+        return state
+
+    def route_after_forced_audit(
+        self,
+        state: AgentState,
+        reject_target: str = "scheduler",
+    ) -> str:
+        """强制审核节点路由。"""
+        if state.get("status") == "completed":
+            return "end"
+        if state.get("status") == "waiting_for_human":
+            return "human"
+        if state.get("_audit_retry"):
+            state.pop("_audit_retry", None)
+            return "retry"
+        return "end"
+
+    def skill_call_node(self, state: AgentState, node_id: str) -> AgentState:
+        """Skill 调用节点：在工作流中直接执行指定 Skill。"""
+        state = dict(state)
+        config = self._get_node_config(state, node_id)
+        skill_key = str(config.get("skill_key", "")).strip()
+        if not skill_key:
+            self._append_log(state, node_id, "failed", error="未配置 skill_key")
+            return state
+
+        task = str(config.get("task") or state.get("task", ""))
+        self._append_log(
+            state,
+            node_id,
+            "running",
+            input_data={"skill_key": skill_key, "task": task},
+        )
+
+        tool_manager = self._get_tool_manager()
+        if tool_manager is None:
+            self._append_log(state, node_id, "failed", error="未配置执行上下文")
+            return state
+
+        run_result = tool_manager.run_skill(skill_key, task, node_config=config)
+        if run_result.get("error"):
+            self._append_log(state, node_id, "failed", error=run_result["error"])
+            return state
+
+        answer = run_result.get("answer", "")
+        state.setdefault("results", {})[f"skill_{skill_key}"] = answer
+        state.setdefault("tool_calls", []).extend(run_result.get("tool_calls", []))
+        self._append_log(
+            state,
+            node_id,
+            "completed",
+            output_data={"skill_key": skill_key, "result": answer},
+        )
+        return state
