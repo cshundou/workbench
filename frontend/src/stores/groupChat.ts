@@ -22,6 +22,9 @@ export const useGroupChatStore = defineStore('groupChat', () => {
   const members = ref<GroupChatMember[]>([]);
   const progressSteps = ref<ProgressStep[]>([]);
   const typingRole = ref<string | null>(null);
+  const selectedRole = ref<string | null>(null);
+  const teamConfig = ref<Record<string, unknown> | null>(null);
+  const isFormingTeam = ref(false);
   const isLoading = ref(false);
   const finalAnswer = ref('');
 
@@ -46,6 +49,8 @@ export const useGroupChatStore = defineStore('groupChat', () => {
       currentSession.value = session;
       members.value = session.members;
       progressSteps.value = session.progress_steps;
+      teamConfig.value = session.team_config || null;
+      isFormingTeam.value = true;
       messages.value = [];
       connectWebSocket(session.id);
       return session;
@@ -202,13 +207,28 @@ export const useGroupChatStore = defineStore('groupChat', () => {
       }
     }
 
+    if (msg.type === 'team_formation' && msg.team_config) {
+      teamConfig.value = msg.team_config;
+      isFormingTeam.value = true;
+    }
+
+    if (msg.type === 'team_adjusted') {
+      if (msg.team_config) teamConfig.value = msg.team_config;
+      if (msg.members) members.value = msg.members;
+    }
+
     if (msg.type === 'member_status') {
       if (msg.members) {
         members.value = msg.members;
+        isFormingTeam.value = false;
       }
-      if (msg.role && msg.status === 'working') {
+      if (msg.role && (msg.status === 'working' || msg.status === 'thinking')) {
         typingRole.value = msg.role;
-      } else if (msg.role && msg.status === 'idle' && typingRole.value === msg.role) {
+      } else if (
+        msg.role &&
+        ['completed', 'pending', 'idle'].includes(msg.status || '') &&
+        typingRole.value === msg.role
+      ) {
         typingRole.value = null;
       }
     }
@@ -243,7 +263,14 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     members.value = [];
     progressSteps.value = [];
     typingRole.value = null;
+    selectedRole.value = null;
+    teamConfig.value = null;
+    isFormingTeam.value = false;
     finalAnswer.value = '';
+  }
+
+  function selectMember(role: string): void {
+    selectedRole.value = selectedRole.value === role ? null : role;
   }
 
   return {
@@ -252,6 +279,9 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     members,
     progressSteps,
     typingRole,
+    selectedRole,
+    teamConfig,
+    isFormingTeam,
     isLoading,
     finalAnswer,
     sessionStatus,
@@ -264,6 +294,7 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     disconnectWebSocket,
     cancelSession,
     resolveReview,
+    selectMember,
     reset,
   };
 });
