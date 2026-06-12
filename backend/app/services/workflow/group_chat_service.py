@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.task_queue import enqueue_task
+from app.models.audit_log import AuditLog
 from app.models.group_chat import GroupChatMessage, GroupChatSession
 from app.models.user import User
 from app.models.workflow import Workflow
@@ -30,6 +31,8 @@ from app.schemas.group_chat import (
     GroupChatUserMessage,
 )
 from app.core.guardrails import guardrails_service
+from app.services.audit_service import audit_service
+from app.services.monitor_service import monitor_service
 from app.services.user_key_context import user_key_resolver
 from app.services.workflow.group_chat_engine import GroupChatEngine
 from app.services.workflow.group_chat_ws_manager import group_chat_ws_manager
@@ -111,6 +114,16 @@ class GroupChatService:
         session.extra_params = {"thread_id": thread_id, "task_id": task_id}
         await db.flush()
 
+        await audit_service.record_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="group_chat.session_create",
+            resource_type="group_chat_session",
+            resource_id=session.id,
+            detail={"task": data.task[:200], "workflow_id": workflow_id},
+        )
+        await monitor_service.record_group_chat_event("created")
         logger.info("群聊会话已创建 session_id=%s task_id=%s", session.id, task_id)
         return await self._build_session_response(db, session)
 
@@ -183,6 +196,15 @@ class GroupChatService:
         msg = await self._persist_message(
             db, session, "user", "question", data.content, message_payload
         )
+        await audit_service.record_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=session.user_id,
+            action="group_chat.user_message",
+            resource_type="group_chat_session",
+            resource_id=session_id,
+            detail={"content_length": len(data.content)},
+        )
 
         supplements = list(session.extra_params.get("user_supplements") or [])
         supplements.append(data.content)
@@ -238,6 +260,15 @@ class GroupChatService:
         session.completed_at = datetime.now(timezone.utc)
         await db.flush()
 
+        await audit_service.record_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=session.user_id,
+            action="group_chat.session_cancel",
+            resource_type="group_chat_session",
+            resource_id=session_id,
+        )
+        await monitor_service.record_group_chat_event("cancelled")
         await group_chat_ws_manager.broadcast(
             session_id,
             {
@@ -322,6 +353,15 @@ class GroupChatService:
         session.completed_at = datetime.now(timezone.utc)
         await db.flush()
 
+        await audit_service.record_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=session.user_id,
+            action=f"group_chat.human_{action}",
+            resource_type="group_chat_session",
+            resource_id=session_id,
+            detail={"comment": comment},
+        )
         await group_chat_ws_manager.broadcast(
             session_id,
             {
@@ -333,6 +373,34 @@ class GroupChatService:
             },
         )
         return await self._build_session_response(db, session)
+
+    async def export_session_audit_logs(
+        self,
+        db: AsyncSession,
+        session_id: int,
+        tenant_id: int,
+    ) -> list[dict[str, Any]]:
+        """导出群聊会话相关审计日志。"""
+        stmt = (
+            select(AuditLog)
+            .where(
+                AuditLog.tenant_id == tenant_id,
+                AuditLog.resource_type == "group_chat_session",
+                AuditLog.resource_id == session_id,
+            )
+            .order_by(AuditLog.id)
+        )
+        rows = (await db.execute(stmt)).scalars().all()
+        return [
+            {
+                "id": row.id,
+                "action": row.action,
+                "user_id": row.user_id,
+                "detail": row.detail,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
 
     async def _build_session_response(
         self, db: AsyncSession, session: GroupChatSession
@@ -554,9 +622,11 @@ class GroupChatService:
         """持久化最终会话状态。"""
         from app.core.database import async_session_factory
 
+        started_at: Optional[datetime] = None
         async with async_session_factory() as db:
             stmt = select(GroupChatSession).where(GroupChatSession.id == session_id)
             session = (await db.execute(stmt)).scalar_one()
+            started_at = session.created_at
             session.status = final_state.get("status", "completed")
             session.progress = float(final_state.get("progress", 100.0))
             session.subtasks = final_state.get("subtasks", [])
@@ -566,6 +636,36 @@ class GroupChatService:
             session.error_message = final_state.get("error") or None
             if session.status in ("completed", "failed", "human_review"):
                 session.completed_at = datetime.now(timezone.utc)
+            duration_ms = None
+            if started_at and session.completed_at:
+                duration_ms = (
+                    session.completed_at - started_at
+                ).total_seconds() * 1000
+            status = session.status
+            review_passed = None
+            if status == "completed":
+                review_passed = True
+            elif status == "failed":
+                review_passed = False
+            event = status if status in ("completed", "failed", "human_review") else "completed"
+            await monitor_service.record_group_chat_event(
+                event,
+                duration_ms=duration_ms,
+                review_passed=review_passed,
+                review_retries=int(final_state.get("review_count") or 0),
+            )
+            await audit_service.record_action(
+                db=db,
+                tenant_id=session.tenant_id,
+                user_id=session.user_id,
+                action=f"group_chat.session_{event}",
+                resource_type="group_chat_session",
+                resource_id=session_id,
+                detail={
+                    "review_count": final_state.get("review_count"),
+                    "progress": float(session.progress),
+                },
+            )
             await db.commit()
 
         await group_chat_ws_manager.broadcast(

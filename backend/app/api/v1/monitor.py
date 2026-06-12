@@ -90,6 +90,16 @@ async def get_workflow_stats(
     return success_response(data=result)
 
 
+@router.get("/group-chat-stats", summary="群聊协同专项统计")
+async def get_group_chat_stats(
+    _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],
+    days: int = Query(default=7, ge=1, le=30, description="统计最近天数"),
+) -> dict[str, Any]:
+    """查询群聊会话数、平均完成时长、审核通过率与打回次数。"""
+    result = await monitor_service.get_group_chat_stats(days=days)
+    return success_response(data=result)
+
+
 @router.get("/quota-summary", summary="多维度配额用量")
 async def get_quota_summary(
     _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],

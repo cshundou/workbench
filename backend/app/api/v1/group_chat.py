@@ -119,6 +119,18 @@ async def resolve_group_chat_review(
     return success_response(data=result.model_dump(), message="审核处理完成")
 
 
+@router.get("/sessions/{session_id}/audit-logs", summary="导出群聊操作审计日志")
+async def export_group_chat_audit_logs(
+    session_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """查询并导出群聊会话全场景审计埋点。"""
+    logs = await group_chat_service.export_session_audit_logs(db, session_id, tenant_id)
+    return success_response(data={"items": logs, "total": len(logs)})
+
+
 @router.websocket("/ws/{session_id}")
 async def group_chat_ws(
     websocket: WebSocket,

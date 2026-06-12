@@ -43,6 +43,8 @@ TOOL_STATS_PREFIX = "monitor:tool:stats:"
 TOOL_DAILY_PREFIX = "monitor:tool:daily:"
 WORKFLOW_STATS_KEY = "monitor:workflow:stats"
 WORKFLOW_DAILY_PREFIX = "monitor:workflow:daily:"
+GROUP_CHAT_STATS_KEY = "monitor:group_chat:stats"
+GROUP_CHAT_DAILY_PREFIX = "monitor:group_chat:daily:"
 
 
 class MonitorService:
@@ -213,6 +215,98 @@ class MonitorService:
                 "failed_count": 0,
                 "avg_duration_ms": 0,
                 "failure_rate": 0,
+                "daily": [],
+            }
+
+    async def record_group_chat_event(
+        self,
+        event: str,
+        *,
+        duration_ms: Optional[float] = None,
+        review_passed: Optional[bool] = None,
+        review_retries: int = 0,
+    ) -> None:
+        """
+        记录群聊协同指标。
+
+        event: created | completed | failed | cancelled | human_review
+        """
+        try:
+            redis = await get_redis()
+            pipe = redis.pipeline()
+            pipe.hincrby(GROUP_CHAT_STATS_KEY, "session_count", 1)
+            pipe.hincrby(GROUP_CHAT_STATS_KEY, f"event_{event}", 1)
+            if duration_ms is not None:
+                pipe.hincrbyfloat(GROUP_CHAT_STATS_KEY, "total_duration_ms", duration_ms)
+                pipe.hincrby(GROUP_CHAT_STATS_KEY, "completed_with_duration", 1)
+            if review_passed is True:
+                pipe.hincrby(GROUP_CHAT_STATS_KEY, "review_pass_count", 1)
+            elif review_passed is False:
+                pipe.hincrby(GROUP_CHAT_STATS_KEY, "review_reject_count", 1)
+            if review_retries > 0:
+                pipe.hincrby(GROUP_CHAT_STATS_KEY, "total_review_retries", review_retries)
+
+            day_key = f"{GROUP_CHAT_DAILY_PREFIX}{date.today().isoformat()}"
+            pipe.hincrby(day_key, "count", 1)
+            pipe.hincrby(day_key, f"event_{event}", 1)
+            if duration_ms is not None:
+                pipe.hincrbyfloat(day_key, "total_duration_ms", duration_ms)
+            pipe.expire(day_key, 60 * 60 * 24 * 30)
+            await pipe.execute()
+        except Exception as exc:
+            logger.error("记录群聊监控指标失败 event=%s: %s", event, exc)
+
+    async def get_group_chat_stats(self, days: int = 7) -> dict[str, Any]:
+        """获取群聊专项监控：会话数、平均时长、审核通过率、打回次数。"""
+        try:
+            redis = await get_redis()
+            raw = await redis.hgetall(GROUP_CHAT_STATS_KEY)
+            session_count = int(raw.get("session_count", 0) or 0)
+            completed = int(raw.get("completed_with_duration", 0) or 0)
+            total_ms = float(raw.get("total_duration_ms", 0) or 0)
+            pass_count = int(raw.get("review_pass_count", 0) or 0)
+            reject_count = int(raw.get("review_reject_count", 0) or 0)
+            review_total = pass_count + reject_count
+            retries = int(raw.get("total_review_retries", 0) or 0)
+
+            daily: list[dict[str, Any]] = []
+            for offset in range(days):
+                day = (date.today() - timedelta(days=offset)).isoformat()
+                day_raw = await redis.hgetall(f"{GROUP_CHAT_DAILY_PREFIX}{day}")
+                if not day_raw:
+                    continue
+                day_count = int(day_raw.get("count", 0) or 0)
+                day_ms = float(day_raw.get("total_duration_ms", 0) or 0)
+                daily.append(
+                    {
+                        "date": day,
+                        "count": day_count,
+                        "avg_duration_ms": day_ms / day_count if day_count else 0,
+                    }
+                )
+
+            return {
+                "session_count": session_count,
+                "avg_duration_ms": round(total_ms / completed, 2) if completed else 0,
+                "review_pass_rate": round(pass_count / review_total, 4) if review_total else 0,
+                "total_review_retries": retries,
+                "events": {
+                    "created": int(raw.get("event_created", 0) or 0),
+                    "completed": int(raw.get("event_completed", 0) or 0),
+                    "failed": int(raw.get("event_failed", 0) or 0),
+                    "cancelled": int(raw.get("event_cancelled", 0) or 0),
+                    "human_review": int(raw.get("event_human_review", 0) or 0),
+                },
+                "daily": daily,
+            }
+        except Exception as exc:
+            logger.error("获取群聊统计失败: %s", exc)
+            return {
+                "session_count": 0,
+                "avg_duration_ms": 0,
+                "review_pass_rate": 0,
+                "total_review_retries": 0,
+                "events": {},
                 "daily": [],
             }
 
