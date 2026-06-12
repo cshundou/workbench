@@ -2,9 +2,10 @@
 租户模型。
 """
 
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Any, List
 
 from sqlalchemy import CheckConstraint, Integer, SmallInteger, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -35,6 +36,15 @@ class Tenant(Base, TimestampMixin):
     domain: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     status: Mapped[int] = mapped_column(SmallInteger, default=1, nullable=False)
     monthly_token_limit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    isolation_tier: Mapped[str] = mapped_column(
+        String(20), default="logical", nullable=False
+    )
+    feature_flags: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, default=dict, nullable=False
+    )
+    quota_config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, default=dict, nullable=False
+    )
 
     roles: Mapped[List["Role"]] = relationship(back_populates="tenant")
     users: Mapped[List["User"]] = relationship(back_populates="tenant")

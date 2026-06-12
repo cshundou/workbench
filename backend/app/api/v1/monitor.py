@@ -90,6 +90,19 @@ async def get_workflow_stats(
     return success_response(data=result)
 
 
+@router.get("/quota-summary", summary="多维度配额用量")
+async def get_quota_summary(
+    _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """查询 Token、工作流、工具调用等多维度配额使用情况。"""
+    from app.services.quota_extended_service import quota_extended_service
+
+    summary = await quota_extended_service.get_usage_summary(db, tenant_id)
+    return success_response(data=summary)
+
+
 @router.get("/tool-stats", summary="工具调用成功率统计")
 async def get_tool_stats(
     _current_user: Annotated[CurrentUser, Depends(require_permission(MONITOR_READ))],

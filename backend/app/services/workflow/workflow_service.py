@@ -38,10 +38,13 @@ from app.services.workflow.graph_builder import (
 from app.services.user_key_context import user_key_resolver
 from app.services.workflow.ws_manager import workflow_ws_manager
 from app.services.workflow.runtime_state_store import runtime_state_store
-from app.services.workflow.workflow_templates import (
-    get_workflow_template,
-    list_workflow_templates,
+from app.services.workflow.workflow_templates import get_workflow_template
+from app.services.workflow.template_catalog import (
+    get_catalog_template,
+    list_catalog_templates,
 )
+from app.services.quota_extended_service import quota_extended_service
+from app.services.trace.trace_service import trace_service
 from app.services.audit_service import audit_service
 from app.services.token_quota_service import token_quota_service
 from app.services.monitor_service import monitor_service
@@ -690,6 +693,18 @@ class WorkflowService:
 
         await guardrails_service.validate_user_input(data.task)
         await token_quota_service.check_tenant_quota(db, tenant_id)
+        await quota_extended_service.check_dimension(
+            db, tenant_id, "workflow_executions"
+        )
+
+        trace = await trace_service.start_trace(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            resource_type="workflow",
+            resource_id=workflow_id,
+            metadata={"task": data.task[:200]},
+        )
 
         input_params = {
             "task": data.task,
@@ -713,6 +728,10 @@ class WorkflowService:
         self._init_runtime_state(
             execution.id, thread_id, workflow.graph_definition
         )
+        runtime = self._load_runtime_state(execution.id)
+        runtime["trace_id"] = trace.trace_id
+        self._save_runtime_state(execution.id, runtime)
+        await quota_extended_service.increment(tenant_id, "workflow_executions")
 
         task_id = await enqueue_task(
             "execute_workflow_task",
@@ -1230,8 +1249,8 @@ class WorkflowService:
 
 
     async def list_builtin_templates(self) -> list[dict[str, Any]]:
-        """返回内置工作流模板列表。"""
-        return list_workflow_templates()
+        """返回内置工作流模板列表（含 50+ 官方模板市场）。"""
+        return list_catalog_templates()
 
     async def create_workflow_from_template(
         self,
@@ -1242,7 +1261,7 @@ class WorkflowService:
         name: Optional[str] = None,
     ) -> WorkflowResponse:
         """从内置模板创建工作流（仅复制拓扑）。"""
-        template = get_workflow_template(template_id)
+        template = get_catalog_template(template_id) or get_workflow_template(template_id)
         if template is None:
             raise NotFoundError(message="工作流模板不存在")
 

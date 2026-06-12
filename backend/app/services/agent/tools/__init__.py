@@ -6,6 +6,7 @@ from app.services.agent.tools.knowledge_base import KnowledgeBaseTool
 from app.services.agent.tools.python_repl import PythonReplTool
 from app.services.agent.tools.sql_query import SqlQueryTool
 from app.services.agent.tools.tavily_search import TavilySearchTool
+from app.services.agent.tools.ui_automation import UiAutomationTool
 
 # 内置工具名称常量
 TOOL_KNOWLEDGE_BASE = "knowledge_base_search"
@@ -13,6 +14,7 @@ TOOL_TAVILY_SEARCH = "tavily_search"
 TOOL_PYTHON_REPL = "python_repl"
 TOOL_SQL_QUERY = "sql_query"
 TOOL_CALCULATOR = "calculator"
+TOOL_UI_AUTOMATION = "ui_automation"
 
 AVAILABLE_TOOL_DEFINITIONS: list[dict[str, str]] = [
     {
@@ -40,6 +42,11 @@ AVAILABLE_TOOL_DEFINITIONS: list[dict[str, str]] = [
         "label": "计算器",
         "description": "执行数学表达式计算",
     },
+    {
+        "name": TOOL_UI_AUTOMATION,
+        "label": "UI 自动化",
+        "description": "网页抓取与 RPA 轻量自动化（无 API 系统对接）",
+    },
 ]
 
 __all__ = [
@@ -56,4 +63,6 @@ __all__ = [
     "TOOL_PYTHON_REPL",
     "TOOL_SQL_QUERY",
     "TOOL_TAVILY_SEARCH",
+    "TOOL_UI_AUTOMATION",
+    "UiAutomationTool",
 ]

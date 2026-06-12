@@ -54,6 +54,13 @@ _INJECTION_KEYWORDS: list[str] = [
 ]
 
 # 敏感内容关键词（本地快速过滤，可配合 moderation API）
+# PII 脱敏正则
+_PII_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"1[3-9]\d{9}"), "[手机号已脱敏]"),
+    (re.compile(r"\d{17}[\dXx]"), "[身份证号已脱敏]"),
+    (re.compile(r"\d{16,19}"), "[银行卡号已脱敏]"),
+]
+
 _SENSITIVE_KEYWORDS: list[str] = [
     "制作炸弹",
     "制造毒品",
@@ -118,6 +125,15 @@ class GuardrailsService:
                 logger.warning("检测到敏感输入 keyword=%s", keyword)
                 raise ValidationError(message="输入内容涉及敏感话题，无法处理")
 
+    def desensitize_pii(self, text: str) -> str:
+        """脱敏手机号、身份证号、银行卡号等 PII 信息。"""
+        if not text or not settings.guardrails_enabled:
+            return text
+        result = text
+        for pattern, replacement in _PII_PATTERNS:
+            result = pattern.sub(replacement, result)
+        return result
+
     def filter_output(self, text: str) -> str:
         """
         过滤模型输出中的敏感内容。
@@ -177,7 +193,7 @@ class GuardrailsService:
 
     async def sanitize_output(self, text: str) -> str:
         """对模型输出执行完整过滤。"""
-        filtered = self.filter_output(text)
+        filtered = self.desensitize_pii(self.filter_output(text))
         moderation_reason = await self.moderate_with_api(filtered)
         if moderation_reason:
             return "抱歉，该回答未通过内容安全审核，无法展示。"

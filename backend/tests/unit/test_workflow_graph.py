@@ -170,3 +170,37 @@ class TestBuildFromDefinition:
         )
         text = builder._format_execution_result("sql", result)
         assert "SELECT 1" in text
+
+
+class TestParallelBranchMerge:
+    """并行分支合并（阶段一：单分支失败不影响其他分支）。"""
+
+    @pytest.fixture
+    def builder(self) -> WorkflowBuilder:
+        return WorkflowBuilder(redis_url="redis://localhost:6379/15")
+
+    def test_partial_failure_keeps_success_results(self, builder: WorkflowBuilder) -> None:
+        base: dict = {"task": "测试", "results": {}, "status": "running"}
+        success_branch = {
+            "results": {"knowledge": "ok"},
+            "execution_logs": [{"node_id": "knowledge_agent", "status": "completed"}],
+        }
+        failed_branch = {
+            "status": "failed",
+            "parallel_branch_errors": {"search_agent": "timeout"},
+            "results": {"search": "查询失败"},
+            "execution_logs": [{"node_id": "search_agent", "status": "failed"}],
+        }
+        merged = builder.merge_parallel_states(base, [success_branch, failed_branch])
+        assert merged["results"]["knowledge"] == "ok"
+        assert merged["results"]["search"] == "查询失败"
+        assert merged["status"] == "running"
+        assert merged["parallel_branch_errors"]["search_agent"] == "timeout"
+
+    def test_all_branches_failed_marks_workflow_failed(self, builder: WorkflowBuilder) -> None:
+        base: dict = {"task": "测试", "results": {}, "status": "running"}
+        failed_a = {"status": "failed", "parallel_branch_errors": {"a": "err1"}}
+        failed_b = {"status": "failed", "parallel_branch_errors": {"b": "err2"}}
+        merged = builder.merge_parallel_states(base, [failed_a, failed_b])
+        assert merged["status"] == "failed"
+        assert "所有并行分支均执行失败" in merged.get("error", "")

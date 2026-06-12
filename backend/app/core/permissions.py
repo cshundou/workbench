@@ -54,6 +54,7 @@ TOOL_SEARCH_USE = "tool:search:use"
 TOOL_CODE_USE = "tool:code:use"
 TOOL_SQL_USE = "tool:sql:use"
 TOOL_CALCULATOR_USE = "tool:calculator:use"
+TOOL_UI_AUTOMATION_USE = "tool:ui_automation:use"
 
 # 全部工具权限
 ALL_TOOL_PERMISSIONS: list[str] = [
@@ -62,6 +63,7 @@ ALL_TOOL_PERMISSIONS: list[str] = [
     TOOL_CODE_USE,
     TOOL_SQL_USE,
     TOOL_CALCULATOR_USE,
+    TOOL_UI_AUTOMATION_USE,
 ]
 
 # 内置工具名称 -> 权限码映射
@@ -71,6 +73,7 @@ TOOL_PERMISSION_MAP: dict[str, str] = {
     "python_repl": TOOL_CODE_USE,
     "sql_query": TOOL_SQL_USE,
     "calculator": TOOL_CALCULATOR_USE,
+    "ui_automation": TOOL_UI_AUTOMATION_USE,
 }
 
 # 工具权限 -> 友好名称
@@ -80,6 +83,7 @@ TOOL_PERMISSION_LABELS: dict[str, str] = {
     TOOL_CODE_USE: "Python代码执行工具",
     TOOL_SQL_USE: "SQL查询工具",
     TOOL_CALCULATOR_USE: "计算器工具",
+    TOOL_UI_AUTOMATION_USE: "UI自动化工具",
 }
 
 # 默认管理员拥有的全部权限标识

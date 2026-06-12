@@ -218,10 +218,17 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """请求日志中间件，记录请求基本信息。"""
+    """请求日志中间件，注入 TraceID 并记录请求基本信息。"""
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """记录请求方法与路径（不读取请求体，避免消费 stream）。"""
+        """记录请求方法与路径，透传 X-Trace-ID。"""
+        from app.services.trace.trace_service import trace_service
+
+        trace_id = request.headers.get("X-Trace-ID") or trace_service.generate_trace_id()
+        request.state.trace_id = trace_id
+        trace_service.set_trace_context(trace_id)
         if settings.debug:
-            logger.debug("%s %s", request.method, request.url.path)
-        return await call_next(request)
+            logger.debug("%s %s trace=%s", request.method, request.url.path, trace_id)
+        response = await call_next(request)
+        response.headers["X-Trace-ID"] = trace_id
+        return response

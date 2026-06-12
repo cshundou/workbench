@@ -29,6 +29,7 @@ from app.services.agent.tools import (
     TOOL_PYTHON_REPL,
     TOOL_SQL_QUERY,
     TOOL_TAVILY_SEARCH,
+    TOOL_UI_AUTOMATION,
 )
 from app.services.agent.tools.base import BaseTool, ToolResult
 from app.services.agent.tools.knowledge_base import KnowledgeBaseTool
@@ -36,6 +37,7 @@ from app.services.agent.tools.calculator import CalculatorTool
 from app.services.agent.tools.python_repl import PythonReplTool
 from app.services.agent.tools.sql_query import SqlQueryTool
 from app.services.agent.tools.tavily_search import TavilySearchTool
+from app.services.agent.tools.ui_automation import UiAutomationTool
 from app.core.deps import get_user_permissions
 from app.core.guardrails import guardrails_service
 from app.services.token_quota_service import token_quota_service
@@ -58,6 +60,7 @@ class AgentService:
             TOOL_PYTHON_REPL: PythonReplTool,
             TOOL_SQL_QUERY: SqlQueryTool,
             TOOL_CALCULATOR: CalculatorTool,
+            TOOL_UI_AUTOMATION: UiAutomationTool,
         }
 
     async def _resolve_custom_tool(

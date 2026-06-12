@@ -27,6 +27,7 @@ export const PERMISSION_OPTIONS = [
   { label: 'Python代码执行工具', value: 'tool:code:use' },
   { label: 'SQL查询工具', value: 'tool:sql:use' },
   { label: '计算器工具', value: 'tool:calculator:use' },
+  { label: 'UI自动化工具', value: 'tool:ui_automation:use' },
 ] as const;
 
 /** 路由权限映射 */

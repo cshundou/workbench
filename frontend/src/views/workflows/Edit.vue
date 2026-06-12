@@ -45,7 +45,29 @@ const nodeTypes = [
   { type: 'condition', label: '条件分支' },
   { type: 'custom_agent', label: '自定义 Agent' },
   { type: 'loop', label: '循环节点' },
+  { type: 'sub_workflow', label: '子流程' },
 ];
+
+/** 从面板拖拽到画布 */
+function onDragStart(event: DragEvent, type: string, label: string): void {
+  event.dataTransfer?.setData('application/vueflow', JSON.stringify({ type, label }));
+}
+
+function onDrop(event: DragEvent): void {
+  event.preventDefault();
+  const raw = event.dataTransfer?.getData('application/vueflow');
+  if (!raw) return;
+  try {
+    const { type, label } = JSON.parse(raw) as { type: string; label: string };
+    addNode(type, label);
+  } catch {
+    /* ignore */
+  }
+}
+
+function onDragOver(event: DragEvent): void {
+  event.preventDefault();
+}
 
 const configDrawerVisible = ref(false);
 const editingNode = ref<WorkflowNodeDef | null>(null);
@@ -215,18 +237,24 @@ onMounted(() => {
         </el-scrollbar>
       </div>
       <div class="palette">
-        <h4>添加节点</h4>
-        <el-button
+        <h4>拖拽添加节点</h4>
+        <div
           v-for="item in nodeTypes"
           :key="item.type"
-          class="palette-btn"
-          :icon="Plus"
+          class="palette-drag-item"
+          draggable="true"
+          @dragstart="onDragStart($event, item.type, item.label)"
           @click="addNode(item.type, item.label)"
         >
+          <el-icon><Plus /></el-icon>
           {{ item.label }}
-        </el-button>
+        </div>
       </div>
-      <div class="canvas-wrap">
+      <div
+        class="canvas-wrap"
+        @drop="onDrop"
+        @dragover="onDragOver"
+      >
         <VueFlow
           :nodes="flowNodes"
           :edges="flowEdges"
@@ -322,6 +350,24 @@ onMounted(() => {
   width: 100%;
   margin-bottom: 8px;
   justify-content: flex-start;
+}
+
+.palette-drag-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 6px;
+  cursor: grab;
+  font-size: 13px;
+  background: var(--el-fill-color-blank);
+
+  &:hover {
+    border-color: var(--el-color-primary);
+    color: var(--el-color-primary);
+  }
 }
 
 .canvas-wrap {
