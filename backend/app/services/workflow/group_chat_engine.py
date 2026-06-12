@@ -78,6 +78,7 @@ PROGRESS_STEPS: list[dict[str, str]] = [
 
 MessageCallback = Callable[[dict[str, Any]], None]
 MemberStatusCallback = Callable[[str, str], None]
+SupplementLoader = Callable[[], list[str]]
 
 
 class GroupChatState(TypedDict):
@@ -113,6 +114,7 @@ class GroupChatEngine:
         self._builder = WorkflowBuilder(redis_url=redis_url, user_ctx=user_ctx)
         self._message_callback: Optional[MessageCallback] = None
         self._member_status_callback: Optional[MemberStatusCallback] = None
+        self._supplement_loader: Optional[SupplementLoader] = None
         self.session_id: Optional[int] = None
         self.tenant_id: Optional[int] = None
         self.user_id: Optional[int] = None
@@ -137,6 +139,10 @@ class GroupChatEngine:
     def set_member_status_callback(self, callback: MemberStatusCallback) -> None:
         """设置成员状态回调。"""
         self._member_status_callback = callback
+
+    def set_supplement_loader(self, loader: SupplementLoader) -> None:
+        """设置用户补充要求加载器（从 DB/队列拉取运行中发言）。"""
+        self._supplement_loader = loader
 
     def _now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -260,9 +266,16 @@ class GroupChatEngine:
 
         self._set_member_status("project_manager", "thinking")
 
+        # 从外部加载运行中用户补充
+        if self._supplement_loader:
+            loaded = self._supplement_loader()
+            if loaded:
+                state.setdefault("user_supplements", [])
+                state["user_supplements"].extend(loaded)
+
         # 用户补充要求处理
         supplements = state.get("user_supplements") or []
-        if supplements and state.get("status") == "running":
+        if supplements:
             latest = supplements[-1]
             self._emit_message(
                 "project_manager",

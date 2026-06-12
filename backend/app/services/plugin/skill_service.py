@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.mcp_server import McpTool
-from app.models.plugin import Skill, SkillConfig
+from app.models.plugin import PluginInstallation, Skill, SkillConfig
 from app.models.user import User
 from app.services.agent.tools import AVAILABLE_TOOL_DEFINITIONS
 from app.services.plugin.native_skills import build_native_skill_defs
@@ -103,6 +103,73 @@ class SkillService:
         await db.flush()
         return synced
 
+    async def _installation_map(
+        self, db: AsyncSession, tenant_id: int
+    ) -> dict[int, PluginInstallation]:
+        """获取租户插件安装状态映射（plugin_id -> installation）。"""
+        rows = (
+            await db.execute(
+                select(PluginInstallation).where(
+                    PluginInstallation.tenant_id == tenant_id,
+                    PluginInstallation.status != "uninstalled",
+                )
+            )
+        ).scalars().all()
+        return {row.plugin_id: row for row in rows}
+
+    async def _is_skill_accessible(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        skill: Skill,
+        installations: dict[int, PluginInstallation],
+    ) -> bool:
+        """判断 Skill 对租户是否可用（含安装门控）。"""
+        if skill.source_type == "native":
+            return True
+        if skill.source_type == "mcp":
+            return skill.tenant_id == tenant_id
+        if skill.source_type == "plugin":
+            if skill.plugin_id is None:
+                return False
+            inst = installations.get(skill.plugin_id)
+            return inst is not None and inst.status == "enabled"
+        return skill.tenant_id == tenant_id
+
+    async def _get_plugin_config_for_skill(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        skill: Skill,
+    ) -> dict[str, Any]:
+        """获取插件 Skill 关联的租户插件配置。"""
+        if skill.plugin_id is None:
+            return {}
+        inst = (
+            await db.execute(
+                select(PluginInstallation).where(
+                    PluginInstallation.tenant_id == tenant_id,
+                    PluginInstallation.plugin_id == skill.plugin_id,
+                    PluginInstallation.status != "uninstalled",
+                )
+            )
+        ).scalar_one_or_none()
+        return dict(inst.config) if inst else {}
+
+    async def _skill_to_tenant_dict(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        skill: Skill,
+    ) -> dict[str, Any]:
+        """Skill 字典（合并租户配置与启用状态）。"""
+        data = self._skill_to_dict(skill)
+        config = await self.get_skill_config(db, tenant_id, skill.id)
+        if config is not None:
+            data["is_enabled"] = config.is_enabled
+            data["tenant_config"] = config.config
+        return data
+
     async def list_skills(
         self,
         db: AsyncSession,
@@ -110,15 +177,49 @@ class SkillService:
         *,
         enabled_only: bool = False,
     ) -> list[dict[str, Any]]:
-        """列出可用 Skill（全局原生 + 租户级）。"""
+        """列出可用 Skill（原生 + 已安装插件 + 租户 MCP）。"""
         await self.ensure_native_skills(db)
+        installations = await self._installation_map(db, tenant_id)
         stmt = select(Skill).where(
             or_(Skill.tenant_id == tenant_id, Skill.tenant_id.is_(None))
         )
-        if enabled_only:
-            stmt = stmt.where(Skill.is_enabled.is_(True))
         skills = list((await db.execute(stmt.order_by(Skill.skill_key))).scalars().all())
-        return [self._skill_to_dict(s) for s in skills]
+
+        result: list[dict[str, Any]] = []
+        for skill in skills:
+            if not await self._is_skill_accessible(db, tenant_id, skill, installations):
+                continue
+            item = await self._skill_to_tenant_dict(db, tenant_id, skill)
+            if enabled_only and not item.get("is_enabled"):
+                continue
+            result.append(item)
+        return result
+
+    async def list_tools_for_agent(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        user_permissions: list[str],
+    ) -> list[dict[str, str]]:
+        """返回 Agent 配置可选的工具/Skill 列表。"""
+        from app.core.permissions import check_tool_permission
+
+        skills = await self.list_skills(db, tenant_id, enabled_only=True)
+        tools: list[dict[str, str]] = []
+        for item in skills:
+            key = item["skill_key"]
+            source = item["source_type"]
+            if source == "native" and not check_tool_permission(key, user_permissions):
+                continue
+            tools.append(
+                {
+                    "name": key,
+                    "label": item["name"],
+                    "description": item["description"],
+                    "source": source,
+                }
+            )
+        return tools
 
     async def get_skill(
         self, db: AsyncSession, tenant_id: int, skill_key: str
@@ -211,9 +312,13 @@ class SkillService:
     ) -> dict[str, Any]:
         """测试执行 Skill。"""
         skill = await self.get_skill(db, tenant_id, skill_key)
+        installations = await self._installation_map(db, tenant_id)
+        if not await self._is_skill_accessible(db, tenant_id, skill, installations):
+            raise ValidationError(message="Skill 不可用（插件未安装或已禁用）")
         config = await self.get_skill_config(db, tenant_id, skill.id)
         if config and not config.is_enabled:
             raise ValidationError(message="Skill 已禁用")
+        plugin_config = await self._get_plugin_config_for_skill(db, tenant_id, skill)
 
         native_tool = None
         if skill.source_type == "native":
@@ -241,36 +346,15 @@ class SkillService:
             user=user,
             user_ctx=user_ctx,
             native_tool=native_tool,
+            plugin_config=plugin_config,
         )
 
     async def get_enabled_skill_keys(
         self, db: AsyncSession, tenant_id: int
     ) -> list[str]:
         """获取租户启用的 Skill key 列表（含原生）。"""
-        await self.ensure_native_skills(db)
-        skills = (
-            await db.execute(
-                select(Skill).where(
-                    or_(Skill.tenant_id == tenant_id, Skill.tenant_id.is_(None))
-                )
-            )
-        ).scalars().all()
-        configs = (
-            await db.execute(
-                select(SkillConfig).where(SkillConfig.tenant_id == tenant_id)
-            )
-        ).scalars().all()
-        config_map = {c.skill_id: c for c in configs}
-
-        enabled: list[str] = []
-        for skill in skills:
-            cfg = config_map.get(skill.id)
-            if cfg is not None:
-                if cfg.is_enabled:
-                    enabled.append(skill.skill_key)
-            elif skill.is_enabled:
-                enabled.append(skill.skill_key)
-        return enabled
+        items = await self.list_skills(db, tenant_id, enabled_only=True)
+        return [item["skill_key"] for item in items]
 
     @staticmethod
     def _skill_to_dict(skill: Skill) -> dict[str, Any]:

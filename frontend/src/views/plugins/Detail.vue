@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
+import InstallConfirmDialog from '@/components/plugins/InstallConfirmDialog.vue';
 import {
   addPluginReview,
   getPluginDetail,
@@ -16,6 +17,8 @@ const loading = ref(false);
 const plugin = ref<(PluginInfo & { skills: { skill_key: string; name: string; description: string }[]; reviews: { rating: number; comment?: string; created_at: string }[] }) | null>(null);
 const reviewRating = ref(5);
 const reviewComment = ref('');
+const installDialogVisible = ref(false);
+const installing = ref(false);
 
 const pluginId = route.params.pluginId as string;
 
@@ -28,10 +31,20 @@ async function fetchDetail(): Promise<void> {
   }
 }
 
-async function handleInstall(): Promise<void> {
-  await installPlugin(pluginId);
-  ElMessage.success('安装成功');
-  fetchDetail();
+function handleInstall(): void {
+  installDialogVisible.value = true;
+}
+
+async function confirmInstall(): Promise<void> {
+  installing.value = true;
+  try {
+    await installPlugin(pluginId);
+    ElMessage.success('安装成功');
+    installDialogVisible.value = false;
+    fetchDetail();
+  } finally {
+    installing.value = false;
+  }
 }
 
 async function submitReview(): Promise<void> {
@@ -91,6 +104,15 @@ onMounted(fetchDetail);
         </div>
       </el-card>
     </div>
+
+    <InstallConfirmDialog
+      v-if="plugin"
+      v-model:visible="installDialogVisible"
+      :plugin-name="plugin.name"
+      :permissions="plugin.permissions"
+      :loading="installing"
+      @confirm="confirmInstall"
+    />
   </div>
 </template>
 

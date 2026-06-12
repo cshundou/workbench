@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -36,6 +37,26 @@ from app.services.workflow.group_chat_ws_manager import group_chat_ws_manager
 logger = logging.getLogger(__name__)
 
 _cancelled_sessions: set[int] = set()
+
+
+class _SupplementBridge:
+    """跨线程传递用户补充要求（API 写入 DB，Worker 轮询消费）。"""
+
+    def __init__(self) -> None:
+        self._pending: list[str] = []
+        self._lock = threading.Lock()
+
+    def push(self, items: list[str]) -> None:
+        if not items:
+            return
+        with self._lock:
+            self._pending.extend(items)
+
+    def drain(self) -> list[str]:
+        with self._lock:
+            items = list(self._pending)
+            self._pending.clear()
+            return items
 
 
 class GroupChatService:
@@ -91,7 +112,7 @@ class GroupChatService:
         await db.flush()
 
         logger.info("群聊会话已创建 session_id=%s task_id=%s", session.id, task_id)
-        return self._to_session_response(session)
+        return await self._build_session_response(db, session)
 
     async def get_session(
         self,
@@ -102,14 +123,16 @@ class GroupChatService:
         include_messages: bool = False,
     ) -> GroupChatSessionDetailResponse | GroupChatSessionResponse:
         """获取群聊会话详情。"""
-        session = await self._get_session_or_raise(db, session_id, tenant_id)
+        stmt = select(GroupChatSession).where(
+            GroupChatSession.id == session_id,
+            GroupChatSession.tenant_id == tenant_id,
+        )
         if include_messages:
-            stmt = (
-                select(GroupChatSession)
-                .where(GroupChatSession.id == session_id)
-                .options(selectinload(GroupChatSession.messages))
-            )
-            session = (await db.execute(stmt)).scalar_one()
+            stmt = stmt.options(selectinload(GroupChatSession.messages))
+        session = (await db.execute(stmt)).scalar_one_or_none()
+        if session is None:
+            raise NotFoundError(message="群聊会话不存在")
+        if include_messages:
             return self._to_session_detail_response(session)
         return self._to_session_response(session)
 
@@ -179,8 +202,156 @@ class GroupChatService:
         return GroupChatMessageResponse.model_validate(msg)
 
     def is_session_cancelled(self, session_id: int) -> bool:
-        """检查会话是否已取消。"""
+        """检查会话是否已取消（进程内标记）。"""
         return session_id in _cancelled_sessions
+
+    async def is_session_cancelled_db(
+        self, db: AsyncSession, session_id: int
+    ) -> bool:
+        """检查会话是否已取消（含 DB 持久化标记）。"""
+        if session_id in _cancelled_sessions:
+            return True
+        stmt = select(GroupChatSession).where(GroupChatSession.id == session_id)
+        session = (await db.execute(stmt)).scalar_one_or_none()
+        if session is None:
+            return True
+        extra = session.extra_params or {}
+        return bool(extra.get("cancelled")) or session.status == "cancelled"
+
+    async def cancel_session(
+        self,
+        db: AsyncSession,
+        session_id: int,
+        tenant_id: int,
+    ) -> GroupChatSessionResponse:
+        """取消正在运行的群聊会话。"""
+        session = await self._get_session_or_raise(db, session_id, tenant_id)
+        if session.status in ("completed", "failed", "cancelled"):
+            raise ValidationError(message="会话已结束，无法取消")
+
+        _cancelled_sessions.add(session_id)
+        extra = dict(session.extra_params or {})
+        extra["cancelled"] = True
+        session.extra_params = extra
+        session.status = "cancelled"
+        session.error_message = "用户已取消协作"
+        session.completed_at = datetime.now(timezone.utc)
+        await db.flush()
+
+        await group_chat_ws_manager.broadcast(
+            session_id,
+            {
+                "type": "session_update",
+                "status": "cancelled",
+                "error": session.error_message,
+            },
+        )
+        logger.info("群聊会话已取消 session_id=%s", session_id)
+        return await self._build_session_response(db, session)
+
+    async def resolve_human_review(
+        self,
+        db: AsyncSession,
+        session_id: int,
+        tenant_id: int,
+        action: str,
+        comment: Optional[str] = None,
+    ) -> GroupChatSessionResponse:
+        """处理人工审核（批准或驳回）。"""
+        session = await self._get_session_or_raise(db, session_id, tenant_id)
+        if session.status != "human_review":
+            raise ValidationError(message="当前会话不在人工审核状态")
+
+        if action == "approve":
+            session.status = "completed"
+            session.progress = 100.0
+            session.error_message = None
+            final_answer = self._build_summary_from_session(session)
+            extra = dict(session.extra_params or {})
+            extra["human_review_comment"] = comment
+            extra["final_answer"] = final_answer
+            session.extra_params = extra
+            await self._persist_message(
+                db,
+                session,
+                "auditor",
+                "review_result",
+                f"✅ 人工审核通过。{comment or ''}".strip(),
+                {
+                    "id": f"human-approve-{session_id}",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "sender": {
+                        "id": "auditor",
+                        "name": "审核员",
+                        "role": "auditor",
+                        "avatar": "✅",
+                    },
+                    "type": "review_result",
+                    "content": f"人工审核通过。{comment or ''}".strip(),
+                    "attachments": [],
+                    "metadata": {"human_review": True, "action": "approve"},
+                },
+            )
+        elif action == "reject":
+            session.status = "failed"
+            session.error_message = comment or "人工审核驳回"
+            await self._persist_message(
+                db,
+                session,
+                "auditor",
+                "review_result",
+                f"❌ 人工审核驳回。{session.error_message}",
+                {
+                    "id": f"human-reject-{session_id}",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "sender": {
+                        "id": "auditor",
+                        "name": "审核员",
+                        "role": "auditor",
+                        "avatar": "✅",
+                    },
+                    "type": "review_result",
+                    "content": session.error_message,
+                    "attachments": [],
+                    "metadata": {"human_review": True, "action": "reject"},
+                },
+            )
+        else:
+            raise ValidationError(message="action 必须为 approve 或 reject")
+
+        session.completed_at = datetime.now(timezone.utc)
+        await db.flush()
+
+        await group_chat_ws_manager.broadcast(
+            session_id,
+            {
+                "type": "session_update",
+                "status": session.status,
+                "progress": float(session.progress),
+                "final_answer": (session.extra_params or {}).get("final_answer"),
+                "error": session.error_message,
+            },
+        )
+        return await self._build_session_response(db, session)
+
+    async def _build_session_response(
+        self, db: AsyncSession, session: GroupChatSession
+    ) -> GroupChatSessionResponse:
+        """刷新 ORM 字段后构建响应，避免 async 下惰性加载 updated_at 报错。"""
+        await db.refresh(session)
+        return self._to_session_response(session)
+
+    @staticmethod
+    def _build_summary_from_session(session: GroupChatSession) -> str:
+        """从会话交付物生成最终摘要。"""
+        parts = [f"# {session.title}\n\n{session.task_description}\n"]
+        for item in session.deliverables or []:
+            role = item.get("role", "成员")
+            parts.append(f"\n## {role}\n{item.get('content', '')}")
+        review = session.review_result or {}
+        if review:
+            parts.append(f"\n\n**审核说明**：{review.get('summary', '')}")
+        return "\n".join(parts)
 
     async def run_group_chat_task(
         self,
@@ -259,6 +430,51 @@ class GroupChatService:
             engine.set_message_callback(message_callback)
             engine.set_member_status_callback(member_status_callback)
 
+            supplement_bridge = _SupplementBridge()
+            async with async_session_factory() as db:
+                stmt = select(GroupChatSession).where(GroupChatSession.id == session_id)
+                boot_session = (await db.execute(stmt)).scalar_one()
+                boot_sups = list(
+                    (boot_session.extra_params or {}).get("user_supplements") or []
+                )
+            supplement_bridge.push(boot_sups)
+            engine.set_supplement_loader(supplement_bridge.drain)
+
+            stop_poll = asyncio.Event()
+            last_supplement_count = len(boot_sups)
+
+            async def poll_user_supplements() -> None:
+                nonlocal last_supplement_count
+                from app.core.database import async_session_factory as session_factory
+
+                while not stop_poll.is_set():
+                    try:
+                        async with session_factory() as db:
+                            if await self.is_session_cancelled_db(db, session_id):
+                                _cancelled_sessions.add(session_id)
+                                break
+                            stmt = select(GroupChatSession).where(
+                                GroupChatSession.id == session_id
+                            )
+                            row = (await db.execute(stmt)).scalar_one_or_none()
+                            if row is None:
+                                break
+                            sups = list(
+                                (row.extra_params or {}).get("user_supplements") or []
+                            )
+                            if len(sups) > last_supplement_count:
+                                supplement_bridge.push(sups[last_supplement_count:])
+                                last_supplement_count = len(sups)
+                    except Exception as poll_exc:
+                        logger.warning(
+                            "群聊补充轮询异常 session_id=%s: %s",
+                            session_id,
+                            poll_exc,
+                        )
+                    await asyncio.sleep(1)
+
+            poll_task = asyncio.create_task(poll_user_supplements())
+
             graph = engine.build_graph()
             initial_state: dict[str, Any] = {
                 "task": task,
@@ -266,7 +482,7 @@ class GroupChatService:
                 "subtasks": [],
                 "results": {},
                 "deliverables": [],
-                "status": "pending",
+                "status": "running",
                 "progress": 0.0,
                 "current_step": 0,
                 "current_subtask_index": 0,
@@ -281,17 +497,37 @@ class GroupChatService:
 
             if self.is_session_cancelled(session_id):
                 await self._mark_session_failed(session_id, "会话已被用户取消")
+                stop_poll.set()
+                await poll_task
                 return
 
             loop = asyncio.get_event_loop()
+            final_state = dict(initial_state)
 
-            def _invoke() -> dict[str, Any]:
-                return graph.invoke(initial_state, config)
+            def _stream_graph() -> dict[str, Any]:
+                state = dict(initial_state)
+                for chunk in graph.stream(state, config):
+                    if session_id in _cancelled_sessions:
+                        state["status"] = "cancelled"
+                        state["error"] = "用户已取消协作"
+                        break
+                    for _, node_state in chunk.items():
+                        if isinstance(node_state, dict):
+                            state.update(node_state)
+                return state
 
-            final_state = await asyncio.wait_for(
-                loop.run_in_executor(None, _invoke),
-                timeout=settings.workflow_execution_timeout_seconds,
-            )
+            try:
+                final_state = await asyncio.wait_for(
+                    loop.run_in_executor(None, _stream_graph),
+                    timeout=settings.workflow_execution_timeout_seconds,
+                )
+            finally:
+                stop_poll.set()
+                await poll_task
+
+            if self.is_session_cancelled(session_id) or final_state.get("status") == "cancelled":
+                await self._mark_session_failed(session_id, "用户已取消协作")
+                return
 
             await self._finalize_session(session_id, final_state)
         except asyncio.TimeoutError:
@@ -431,7 +667,16 @@ class GroupChatService:
         """转换为含消息的会话详情响应。"""
         base = self._to_session_response(session)
         messages = [
-            GroupChatMessageResponse.model_validate(m) for m in (session.messages or [])
+            GroupChatMessageResponse(
+                id=msg.id,
+                message_id=msg.message_id,
+                sender_role=msg.sender_role,
+                message_type=msg.message_type,
+                content=msg.content,
+                payload=msg.payload or {},
+                created_at=msg.created_at,
+            )
+            for msg in (session.messages or [])
         ]
         return GroupChatSessionDetailResponse(**base.model_dump(), messages=messages)
 

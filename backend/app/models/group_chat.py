@@ -25,7 +25,7 @@ class GroupChatSession(Base, TimestampMixin):
     __tablename__ = "group_chat_sessions"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending', 'running', 'reviewing', 'completed', 'failed', 'human_review')",
+            "status IN ('pending', 'running', 'reviewing', 'completed', 'failed', 'human_review', 'cancelled')",
             name="ck_group_chat_sessions_status",
         ),
     )

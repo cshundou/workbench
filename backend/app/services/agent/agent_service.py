@@ -122,6 +122,7 @@ class AgentService:
 
         from app.models.plugin import Skill, SkillConfig
         from app.services.plugin.skill_engine import McpSkillTool, PluginSkillTool
+        from app.services.plugin.skill_service import skill_service
 
         skill = (
             await db.execute(
@@ -132,6 +133,13 @@ class AgentService:
             )
         ).scalar_one_or_none()
         if skill is None:
+            return None
+
+        installations = await skill_service._installation_map(db, tenant_id)
+        if not await skill_service._is_skill_accessible(
+            db, tenant_id, skill, installations
+        ):
+            logger.warning("Skill 不可用或未安装: %s", name)
             return None
 
         config = (
@@ -159,6 +167,9 @@ class AgentService:
             )
 
         if skill.source_type == "plugin":
+            plugin_config = await skill_service._get_plugin_config_for_skill(
+                db, tenant_id, skill
+            )
             return PluginSkillTool(
                 skill.skill_key,
                 skill.description,
@@ -168,6 +179,7 @@ class AgentService:
                 tenant_id,
                 user,
                 user_ctx,
+                plugin_config,
             )
 
         return None

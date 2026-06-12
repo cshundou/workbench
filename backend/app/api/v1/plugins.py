@@ -56,6 +56,7 @@ async def list_plugin_categories(
 @router.get("/marketplace", summary="插件市场列表")
 async def list_marketplace(
     _: Annotated[CurrentUser, Depends(require_permission(AGENT_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
     category: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None),
@@ -66,6 +67,7 @@ async def list_marketplace(
     """插件市场：分类筛选与搜索。"""
     data = await plugin_service.list_marketplace(
         db,
+        tenant_id=tenant_id,
         category=category,
         keyword=keyword,
         featured_only=featured_only,
@@ -162,6 +164,27 @@ async def update_plugin_config(
     )
     await db.commit()
     return success_response(data={"config": installation.config})
+
+
+@router.post("/{plugin_id}/update", summary="更新已安装插件")
+async def update_installed_plugin(
+    plugin_id: str,
+    _: Annotated[CurrentUser, Depends(require_permission(AGENT_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """将已安装插件更新到市场最新版本。"""
+    installation = await plugin_service.update_installed_plugin(
+        db, tenant_id, plugin_id
+    )
+    await db.commit()
+    return success_response(
+        data={
+            "installed_version": installation.installed_version,
+            "status": installation.status,
+        },
+        message="插件已更新",
+    )
 
 
 @router.post("/{plugin_id}/reviews", summary="提交插件评论")

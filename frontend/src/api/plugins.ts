@@ -16,6 +16,8 @@ export interface PluginInfo {
   download_count: number;
   rating_avg: number;
   rating_count: number;
+  installation_status?: string | null;
+  is_installed?: boolean;
   installation?: {
     id: number;
     status: string;
@@ -78,6 +80,15 @@ export function getPluginDetail(pluginId: string): Promise<PluginInfo & { skills
 
 export function listInstalledPlugins(): Promise<PluginInfo[]> {
   return request.get('/plugins/installed') as Promise<PluginInfo[]>;
+}
+
+export function updateInstalledPlugin(
+  pluginId: string,
+): Promise<{ installed_version: string; status: string }> {
+  return request.post(`/plugins/${pluginId}/update`) as Promise<{
+    installed_version: string;
+    status: string;
+  }>;
 }
 
 export function installPlugin(pluginId: string): Promise<{ installation_id: number; status: string }> {

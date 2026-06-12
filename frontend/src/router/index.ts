@@ -123,6 +123,12 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/workflows/History.vue'),
             meta: { title: '执行历史' },
           },
+          {
+            path: ':id/group-chat',
+            name: 'WorkflowGroupChat',
+            component: () => import('@/views/workflows/GroupChatView.vue'),
+            meta: { title: '群聊协同' },
+          },
         ],
       },
       {

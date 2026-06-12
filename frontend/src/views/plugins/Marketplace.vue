@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Search } from '@element-plus/icons-vue';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
+import InstallConfirmDialog from '@/components/plugins/InstallConfirmDialog.vue';
 import {
   installPlugin,
   listMarketplace,
@@ -14,6 +15,9 @@ import {
 
 const router = useRouter();
 const loading = ref(false);
+const installDialogVisible = ref(false);
+const installing = ref(false);
+const pendingPlugin = ref<PluginInfo | null>(null);
 const plugins = ref<PluginInfo[]>([]);
 const categories = ref<PluginCategory[]>([]);
 const activeCategory = ref('');
@@ -40,10 +44,26 @@ async function fetchData(): Promise<void> {
   }
 }
 
-async function handleInstall(plugin: PluginInfo): Promise<void> {
-  await installPlugin(plugin.plugin_id);
-  ElMessage.success(`${plugin.name} 安装成功`);
-  fetchData();
+function openInstall(plugin: PluginInfo): void {
+  if (plugin.is_installed) {
+    ElMessage.info('插件已安装');
+    return;
+  }
+  pendingPlugin.value = plugin;
+  installDialogVisible.value = true;
+}
+
+async function confirmInstall(): Promise<void> {
+  if (!pendingPlugin.value) return;
+  installing.value = true;
+  try {
+    await installPlugin(pendingPlugin.value.plugin_id);
+    ElMessage.success(`${pendingPlugin.value.name} 安装成功`);
+    installDialogVisible.value = false;
+    fetchData();
+  } finally {
+    installing.value = false;
+  }
 }
 
 function goDetail(plugin: PluginInfo): void {
@@ -112,17 +132,28 @@ onMounted(fetchData);
             <el-tag v-if="plugin.is_official" size="small" type="success">官方</el-tag>
           </div>
           <el-button
+            v-if="!plugin.is_installed"
             type="primary"
             size="small"
             class="install-btn"
-            @click.stop="handleInstall(plugin)"
+            @click.stop="openInstall(plugin)"
           >
             安装
           </el-button>
+          <el-tag v-else size="small" type="success">已安装</el-tag>
         </div>
       </div>
     </div>
     <p v-if="!loading && plugins.length === 0" class="empty">暂无插件</p>
+
+    <InstallConfirmDialog
+      v-if="pendingPlugin"
+      v-model:visible="installDialogVisible"
+      :plugin-name="pendingPlugin.name"
+      :permissions="pendingPlugin.permissions"
+      :loading="installing"
+      @confirm="confirmInstall"
+    />
   </div>
 </template>
 

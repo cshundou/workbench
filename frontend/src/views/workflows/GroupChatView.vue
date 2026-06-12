@@ -81,6 +81,32 @@ async function handleStart(): Promise<void> {
   }
 }
 
+const isHumanReview = computed(
+  () => groupChatStore.sessionStatus === 'human_review',
+);
+const canCancel = computed(() =>
+  ['pending', 'running', 'reviewing'].includes(groupChatStore.sessionStatus),
+);
+
+async function handleCancel(): Promise<void> {
+  try {
+    await groupChatStore.cancelSession();
+    ElMessage.success('协作已取消');
+  } catch (err) {
+    console.error('[GroupChat] 取消失败', err);
+    ElMessage.error('取消失败');
+  }
+}
+
+async function handleResolve(action: 'approve' | 'reject'): Promise<void> {
+  try {
+    await groupChatStore.resolveReview(action);
+    ElMessage.success(action === 'approve' ? '已批准交付' : '已驳回');
+  } catch (err) {
+    ElMessage.error('审核处理失败');
+  }
+}
+
 async function handleSendMessage(content: string): Promise<void> {
   isSending.value = true;
   try {
@@ -130,6 +156,15 @@ onUnmounted(() => {
           <el-tag v-if="groupChatStore.currentSession" :type="statusTagType">
             {{ groupChatStore.sessionStatus }}
           </el-tag>
+          <el-button
+            v-if="canCancel"
+            type="danger"
+            plain
+            size="small"
+            @click="handleCancel"
+          >
+            停止协作
+          </el-button>
         </template>
       </SectionHeader>
     </div>
@@ -190,6 +225,25 @@ onUnmounted(() => {
       />
 
       <main class="chat-main">
+        <el-alert
+          v-if="isHumanReview"
+          type="warning"
+          title="需要人工审核"
+          description="审核员已连续 3 次驳回，请批准或驳回本次交付。"
+          show-icon
+          class="human-review-banner"
+        >
+          <template #default>
+            <div class="review-actions">
+              <el-button type="success" size="small" @click="handleResolve('approve')">
+                批准交付
+              </el-button>
+              <el-button type="danger" size="small" @click="handleResolve('reject')">
+                驳回
+              </el-button>
+            </div>
+          </template>
+        </el-alert>
         <div ref="streamRef" class="stream-container">
           <MessageStream
             :messages="groupChatStore.messages"
@@ -291,5 +345,16 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+}
+
+.human-review-banner {
+  margin: 12px 12px 0;
+  flex-shrink: 0;
+}
+
+.review-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
 }
 </style>

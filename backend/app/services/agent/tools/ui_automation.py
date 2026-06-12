@@ -24,6 +24,21 @@ class UiAutomationTool(BaseTool):
         "抓取网页内容并提取文本结构，用于无 API 系统的页面信息读取。"
         "参数 url：目标页面地址；action：fetch（默认）或 extract_links。"
     )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "目标页面 http/https 地址",
+            },
+            "action": {
+                "type": "string",
+                "description": "fetch：抓取正文；extract_links：提取链接列表",
+                "enum": ["fetch", "extract_links"],
+            },
+        },
+        "required": ["url"],
+    }
 
     async def execute(self, parameters: Dict[str, Any]) -> ToolResult:
         """执行页面抓取或链接提取。"""

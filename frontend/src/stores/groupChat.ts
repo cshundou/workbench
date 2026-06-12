@@ -2,8 +2,11 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import {
   buildGroupChatWsUrl,
+  cancelGroupChatSession,
   createGroupChatSession,
+  getGroupChatMessages,
   getGroupChatSession,
+  resolveGroupChatReview,
   sendGroupChatMessage,
   type AgentMessage,
   type CreateGroupChatParams,
@@ -24,6 +27,10 @@ export const useGroupChatStore = defineStore('groupChat', () => {
 
   let ws: WebSocket | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempts = 0;
+  const MAX_RECONNECT = 3;
+  let activeSessionId: number | null = null;
 
   const sessionStatus = computed(() => currentSession.value?.status || 'idle');
   const progress = computed(() => currentSession.value?.progress ?? 0);
@@ -69,13 +76,28 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     messages.value.push(record.payload);
   }
 
+  /** 同步消息列表（断线重连后） */
+  async function syncMessages(sessionId: number): Promise<void> {
+    const records = await getGroupChatMessages(sessionId);
+    messages.value = records.map((m) => m.payload);
+  }
+
   /** 连接 WebSocket */
   function connectWebSocket(sessionId: number): void {
-    disconnectWebSocket();
+    disconnectWebSocket(false);
+    activeSessionId = sessionId;
+    reconnectAttempts = 0;
     startPolling(sessionId);
+    openWebSocket(sessionId);
+  }
 
+  function openWebSocket(sessionId: number): void {
     const url = buildGroupChatWsUrl(sessionId);
     ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      reconnectAttempts = 0;
+    };
 
     ws.onmessage = (event: MessageEvent) => {
       try {
@@ -92,15 +114,60 @@ export const useGroupChatStore = defineStore('groupChat', () => {
 
     ws.onclose = () => {
       ws = null;
+      if (
+        activeSessionId === sessionId &&
+        !['completed', 'failed', 'cancelled', 'human_review'].includes(sessionStatus.value)
+      ) {
+        scheduleReconnect(sessionId);
+      }
     };
   }
 
-  function disconnectWebSocket(): void {
+  function scheduleReconnect(sessionId: number): void {
+    if (reconnectAttempts >= MAX_RECONNECT) return;
+    const delay = 1000 * 2 ** reconnectAttempts;
+    reconnectAttempts += 1;
+    reconnectTimer = setTimeout(async () => {
+      try {
+        await syncMessages(sessionId);
+        openWebSocket(sessionId);
+      } catch (err) {
+        console.error('[GroupChat WS] 重连失败', err);
+        scheduleReconnect(sessionId);
+      }
+    }, delay);
+  }
+
+  function disconnectWebSocket(clearSession = true): void {
     stopPolling();
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (clearSession) {
+      activeSessionId = null;
+    }
     if (ws) {
       ws.close();
       ws = null;
     }
+  }
+
+  async function cancelSession(): Promise<void> {
+    if (!currentSession.value) return;
+    await cancelGroupChatSession(currentSession.value.id);
+    currentSession.value = {
+      ...currentSession.value,
+      status: 'cancelled',
+    };
+    stopPolling();
+  }
+
+  async function resolveReview(action: 'approve' | 'reject', comment?: string): Promise<void> {
+    if (!currentSession.value) return;
+    const session = await resolveGroupChatReview(currentSession.value.id, action, comment);
+    currentSession.value = session;
+    stopPolling();
   }
 
   function startPolling(sessionId: number): void {
@@ -194,6 +261,8 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     sendUserMessage,
     connectWebSocket,
     disconnectWebSocket,
+    cancelSession,
+    resolveReview,
     reset,
   };
 });

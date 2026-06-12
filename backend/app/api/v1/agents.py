@@ -32,6 +32,7 @@ from app.schemas.agent import (
 from app.services.agent.agent_crud_service import agent_crud_service
 from app.services.agent.agent_service import agent_service
 from app.services.custom_tool_service import custom_tool_service
+from app.services.plugin.skill_service import skill_service
 
 router = APIRouter(prefix="/agents", tags=["智能体管理"])
 
@@ -72,12 +73,17 @@ async def list_available_tools(
 ) -> dict[str, Any]:
     """返回当前用户有权限使用的 Agent 工具定义。"""
     user_permissions = get_user_permissions(current_user)
-    tools = agent_service.list_available_tools(user_permissions)
+    native_tools = agent_service.list_available_tools(user_permissions)
+    skill_tools = await skill_service.list_tools_for_agent(
+        db, tenant_id, user_permissions
+    )
+    native_names = {t["name"] for t in native_tools}
+    merged_skills = [t for t in skill_tools if t["name"] not in native_names]
     custom_tools = await custom_tool_service.get_tool_definitions(
         db=db,
         tenant_id=tenant_id,
     )
-    return success_response(data=[*tools, *custom_tools])
+    return success_response(data=[*native_tools, *merged_skills, *custom_tools])
 
 
 @router.get("/models", summary="获取支持的大模型列表")

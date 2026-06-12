@@ -3,16 +3,20 @@ import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
+import PluginConfigDialog from '@/components/plugins/PluginConfigDialog.vue';
 import {
   listInstalledPlugins,
   setPluginStatus,
   uninstallPlugin,
+  updateInstalledPlugin,
   type PluginInfo,
 } from '@/api/plugins';
 
 const router = useRouter();
 const loading = ref(false);
 const plugins = ref<PluginInfo[]>([]);
+const configVisible = ref(false);
+const configPlugin = ref<PluginInfo | null>(null);
 
 async function fetchData(): Promise<void> {
   loading.value = true;
@@ -27,6 +31,17 @@ async function toggleStatus(plugin: PluginInfo): Promise<void> {
   const enabled = plugin.installation?.status !== 'enabled';
   await setPluginStatus(plugin.plugin_id, enabled);
   ElMessage.success(enabled ? '已启用' : '已禁用');
+  fetchData();
+}
+
+function openConfig(plugin: PluginInfo): void {
+  configPlugin.value = plugin;
+  configVisible.value = true;
+}
+
+async function handleUpdate(plugin: PluginInfo): Promise<void> {
+  await updateInstalledPlugin(plugin.plugin_id);
+  ElMessage.success('插件已更新');
   fetchData();
 }
 
@@ -66,6 +81,15 @@ onMounted(fetchData);
             <p class="meta">版本 v{{ plugin.installation?.installed_version }}</p>
           </div>
           <div class="actions">
+            <el-button size="small" @click="openConfig(plugin)">配置</el-button>
+            <el-button
+              v-if="plugin.installation?.has_update"
+              size="small"
+              type="warning"
+              @click="handleUpdate(plugin)"
+            >
+              更新
+            </el-button>
             <el-button
               size="small"
               @click="toggleStatus(plugin)"
@@ -80,6 +104,15 @@ onMounted(fetchData);
       </el-card>
       <p v-if="!loading && plugins.length === 0" class="empty">暂无已安装插件</p>
     </div>
+
+    <PluginConfigDialog
+      v-if="configPlugin"
+      v-model:visible="configVisible"
+      :plugin-id="configPlugin.plugin_id"
+      :plugin-name="configPlugin.name"
+      :initial-config="(configPlugin.installation?.config as Record<string, unknown>) || {}"
+      @saved="fetchData"
+    />
   </div>
 </template>
 

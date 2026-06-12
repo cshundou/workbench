@@ -3,9 +3,10 @@
 """
 
 import logging
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
@@ -24,6 +25,13 @@ from app.services.workflow.group_chat_ws_manager import group_chat_ws_manager
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/group-chat", tags=["群聊协同"])
+
+
+class GroupChatResolveRequest(BaseModel):
+    """人工审核处理请求。"""
+
+    action: Literal["approve", "reject"]
+    comment: Optional[str] = Field(default=None, max_length=2000)
 
 
 @router.post("/sessions", summary="创建群聊协同会话")
@@ -80,6 +88,35 @@ async def send_group_chat_message(
     )
     await db.commit()
     return success_response(data=result.model_dump(), message="发言成功")
+
+
+@router.post("/sessions/{session_id}/cancel", summary="取消群聊会话")
+async def cancel_group_chat_session(
+    session_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """取消正在运行的群聊协同任务。"""
+    result = await group_chat_service.cancel_session(db, session_id, tenant_id)
+    await db.commit()
+    return success_response(data=result.model_dump(), message="会话已取消")
+
+
+@router.post("/sessions/{session_id}/resolve", summary="人工审核处理")
+async def resolve_group_chat_review(
+    session_id: int,
+    body: GroupChatResolveRequest,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """批准或驳回处于人工审核状态的群聊会话。"""
+    result = await group_chat_service.resolve_human_review(
+        db, session_id, tenant_id, body.action, body.comment
+    )
+    await db.commit()
+    return success_response(data=result.model_dump(), message="审核处理完成")
 
 
 @router.websocket("/ws/{session_id}")

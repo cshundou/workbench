@@ -134,6 +134,23 @@ export function sendGroupChatMessage(
   return request.post(`/group-chat/sessions/${sessionId}/messages`, { content });
 }
 
+/** 取消群聊会话 */
+export function cancelGroupChatSession(sessionId: number): Promise<void> {
+  return request.post(`/group-chat/sessions/${sessionId}/cancel`) as Promise<void>;
+}
+
+/** 人工审核处理 */
+export function resolveGroupChatReview(
+  sessionId: number,
+  action: 'approve' | 'reject',
+  comment?: string,
+): Promise<GroupChatSession> {
+  return request.post(`/group-chat/sessions/${sessionId}/resolve`, {
+    action,
+    comment,
+  }) as Promise<GroupChatSession>;
+}
+
 /** 构建群聊 WebSocket URL */
 export function buildGroupChatWsUrl(sessionId: number): string {
   const token = localStorage.getItem('token') || '';

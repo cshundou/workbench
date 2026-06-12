@@ -86,6 +86,7 @@ class PluginService:
         self,
         db: AsyncSession,
         *,
+        tenant_id: Optional[int] = None,
         category: Optional[str] = None,
         keyword: Optional[str] = None,
         featured_only: bool = False,
@@ -113,12 +114,67 @@ class PluginService:
         stmt = stmt.order_by(Plugin.download_count.desc(), Plugin.rating_avg.desc())
         stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         items = list((await db.execute(stmt)).scalars().all())
+        install_map: dict[int, PluginInstallation] = {}
+        if tenant_id is not None:
+            install_rows = (
+                await db.execute(
+                    select(PluginInstallation).where(
+                        PluginInstallation.tenant_id == tenant_id,
+                        PluginInstallation.status != "uninstalled",
+                    )
+                )
+            ).scalars().all()
+            install_map = {row.plugin_id: row for row in install_rows}
+
+        result_items: list[dict[str, Any]] = []
+        for plugin in items:
+            data = self._plugin_to_dict(plugin)
+            inst = install_map.get(plugin.id)
+            data["installation_status"] = inst.status if inst else None
+            data["is_installed"] = inst is not None
+            result_items.append(data)
+
         return {
-            "items": [self._plugin_to_dict(p) for p in items],
+            "items": result_items,
             "total": total,
             "page": page,
             "page_size": page_size,
         }
+
+    async def update_installed_plugin(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        plugin_id: str,
+    ) -> PluginInstallation:
+        """将已安装插件更新到市场最新版本。"""
+        plugin = (
+            await db.execute(select(Plugin).where(Plugin.plugin_id == plugin_id))
+        ).scalar_one_or_none()
+        if plugin is None:
+            raise NotFoundError(message="插件不存在")
+
+        installation = (
+            await db.execute(
+                select(PluginInstallation).where(
+                    PluginInstallation.tenant_id == tenant_id,
+                    PluginInstallation.plugin_id == plugin.id,
+                    PluginInstallation.status != "uninstalled",
+                )
+            )
+        ).scalar_one_or_none()
+        if installation is None:
+            raise NotFoundError(message="插件未安装")
+
+        installation.installed_version = plugin.version
+        await db.flush()
+        logger.info(
+            "插件已更新 tenant=%s plugin=%s version=%s",
+            tenant_id,
+            plugin_id,
+            plugin.version,
+        )
+        return installation
 
     async def get_plugin_detail(
         self, db: AsyncSession, plugin_id: str

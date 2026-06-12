@@ -82,6 +82,7 @@ class PluginSkillTool(BaseTool):
         tenant_id: int,
         user: Optional[User] = None,
         user_ctx: Optional[UserKeyContext] = None,
+        plugin_config: Optional[dict[str, Any]] = None,
     ) -> None:
         self.name = skill_key
         self.description = description
@@ -91,6 +92,7 @@ class PluginSkillTool(BaseTool):
         self._tenant_id = tenant_id
         self._user = user
         self._user_ctx = user_ctx
+        self._plugin_config = plugin_config or {}
 
     async def execute(self, parameters: dict[str, Any]) -> ToolResult:
         try:
@@ -101,6 +103,7 @@ class PluginSkillTool(BaseTool):
                 tenant_id=self._tenant_id,
                 user=self._user,
                 user_ctx=self._user_ctx,
+                plugin_config=self._plugin_config,
             )
             if not result.get("success"):
                 return ToolResult(
@@ -127,6 +130,7 @@ class SkillExecutionEngine:
         user: Optional[User] = None,
         user_ctx: Optional[UserKeyContext] = None,
         native_tool: Optional[BaseTool] = None,
+        plugin_config: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """执行 Skill 并记录审计日志。"""
         started = time.monotonic()
@@ -165,7 +169,9 @@ class SkillExecutionEngine:
                 return result.content
 
             if skill.source_type == "plugin":
-                return await self._execute_plugin_skill(skill, params)
+                return await self._execute_plugin_skill(
+                    skill, params, plugin_config or {}
+                )
 
             if skill.source_type == "remote":
                 return await self._execute_remote_skill(skill, params)
@@ -211,15 +217,19 @@ class SkillExecutionEngine:
         }
 
     async def _execute_plugin_skill(
-        self, skill: Skill, parameters: dict[str, Any]
+        self,
+        skill: Skill,
+        parameters: dict[str, Any],
+        plugin_config: dict[str, Any] | None = None,
     ) -> Any:
-        """插件 Skill 模拟执行（返回结构化占位，Phase 2 加载真实 handler）。"""
-        handler = skill.handler or skill.skill_key
-        return {
-            "handler": handler,
-            "message": f"插件 Skill [{skill.name}] 已执行",
-            "parameters": parameters,
-        }
+        """插件 Skill 执行（通过 plugin_handlers 注册表）。"""
+        from app.services.plugin.plugin_handlers import execute_plugin_handler
+
+        return await execute_plugin_handler(
+            skill.skill_key,
+            parameters,
+            plugin_config or {},
+        )
 
     async def _execute_remote_skill(
         self, skill: Skill, parameters: dict[str, Any]
