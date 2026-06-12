@@ -16,6 +16,14 @@ from app.models.mcp_server import McpServer, McpTool
 from app.models.group_chat import GroupChatMessage, GroupChatSession
 from app.models.workflow import Workflow
 from app.models.workflow_execution import WorkflowExecution
+from app.models.plugin import (
+    Plugin,
+    PluginInstallation,
+    PluginReview,
+    Skill,
+    SkillConfig,
+    SkillExecutionLog,
+)
 
 __all__ = [
     "Base",
@@ -36,4 +44,10 @@ __all__ = [
     "ChatHistory",
     "TokenUsage",
     "UserApiKey",
+    "Plugin",
+    "PluginInstallation",
+    "PluginReview",
+    "Skill",
+    "SkillConfig",
+    "SkillExecutionLog",
 ]

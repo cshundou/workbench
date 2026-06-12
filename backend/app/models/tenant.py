@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from app.models.workflow import Workflow
     from app.models.workflow_execution import WorkflowExecution
     from app.models.group_chat import GroupChatSession
+    from app.models.plugin import PluginInstallation
 
 
 class Tenant(Base, TimestampMixin):
@@ -59,3 +60,6 @@ class Tenant(Base, TimestampMixin):
     )
     chat_histories: Mapped[List["ChatHistory"]] = relationship(back_populates="tenant")
     token_usages: Mapped[List["TokenUsage"]] = relationship(back_populates="tenant")
+    plugin_installations: Mapped[List["PluginInstallation"]] = relationship(
+        back_populates="tenant"
+    )
