@@ -111,11 +111,14 @@ async def sync_mcp_tools(
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
-    """通过 MCP tools/list 同步工具到本地缓存。"""
+    """通过 MCP tools/list 同步工具到本地缓存，并同步为 Skill。"""
     server = await mcp_service.get_server_or_raise(db, server_id, tenant_id)
     count = await mcp_service.sync_tools(db, server)
+    from app.services.plugin.skill_service import skill_service
+
+    skill_count = await skill_service.sync_mcp_skills(db, tenant_id, server_id)
     await db.commit()
-    return success_response(data={"synced_count": count})
+    return success_response(data={"synced_count": count, "skill_count": skill_count})
 
 
 @router.get("/servers/{server_id}/tools", summary="已同步 MCP 工具")

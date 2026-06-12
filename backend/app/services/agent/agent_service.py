@@ -109,6 +109,69 @@ class AgentService:
             if check_tool_permission(item["name"], user_permissions)
         ]
 
+    async def _resolve_skill_tool(
+        self,
+        db: AsyncSession,
+        tenant_id: int,
+        user: User,
+        user_ctx: UserKeyContext,
+        name: str,
+    ) -> Optional[BaseTool]:
+        """按 skill_key 解析 Skill 工具实例。"""
+        from sqlalchemy import or_, select
+
+        from app.models.plugin import Skill, SkillConfig
+        from app.services.plugin.skill_engine import McpSkillTool, PluginSkillTool
+
+        skill = (
+            await db.execute(
+                select(Skill).where(
+                    Skill.skill_key == name,
+                    or_(Skill.tenant_id == tenant_id, Skill.tenant_id.is_(None)),
+                )
+            )
+        ).scalar_one_or_none()
+        if skill is None:
+            return None
+
+        config = (
+            await db.execute(
+                select(SkillConfig).where(
+                    SkillConfig.tenant_id == tenant_id,
+                    SkillConfig.skill_id == skill.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if config is not None and not config.is_enabled:
+            return None
+        if config is None and not skill.is_enabled:
+            return None
+
+        if skill.source_type == "mcp" and skill.mcp_server_id and skill.mcp_tool_name:
+            return McpSkillTool(
+                skill.skill_key,
+                skill.description,
+                skill.parameters,
+                db,
+                tenant_id,
+                skill.mcp_server_id,
+                skill.mcp_tool_name,
+            )
+
+        if skill.source_type == "plugin":
+            return PluginSkillTool(
+                skill.skill_key,
+                skill.description,
+                skill.parameters or {"type": "object", "properties": {}},
+                db,
+                skill,
+                tenant_id,
+                user,
+                user_ctx,
+            )
+
+        return None
+
     async def _build_tool_instances(
         self,
         tool_names: list[str],
@@ -126,6 +189,14 @@ class AgentService:
                 if custom_tool is not None:
                     instances.append(custom_tool)
                 continue
+
+            skill_tool = await self._resolve_skill_tool(
+                db, tenant_id, user, user_ctx, name
+            )
+            if skill_tool is not None:
+                instances.append(skill_tool)
+                continue
+
             if name not in self.tool_registry:
                 logger.warning("未知工具名称，已跳过: %s", name)
                 continue

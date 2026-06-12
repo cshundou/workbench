@@ -8,6 +8,8 @@ from typing import Any
 from fastapi import APIRouter
 
 from app.api.v1.mcp import router as mcp_router
+from app.api.v1.plugins import router as plugins_router
+from app.api.v1.skills import router as skills_router
 from app.api.v1.group_chat import router as group_chat_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.config import router as config_router
@@ -48,6 +50,8 @@ api_router.include_router(tenants_router)
 api_router.include_router(tasks_router)
 api_router.include_router(tools_router)
 api_router.include_router(mcp_router)
+api_router.include_router(plugins_router)
+api_router.include_router(skills_router)
 
 
 @api_router.get("/health", summary="健康检查", tags=["系统"])
