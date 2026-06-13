@@ -125,6 +125,9 @@ class GroupChatService:
         )
 
         thread_id = f"group_chat_{session.id}"
+        await db.commit()
+        await db.refresh(session)
+
         task_id = await enqueue_task(
             "execute_group_chat_task",
             session.id,
@@ -369,6 +372,8 @@ class GroupChatService:
         session.subtasks = subtasks
         session.extra_params = extra
         await db.flush()
+        await db.commit()
+        await db.refresh(session)
 
         thread_id = extra.get("thread_id") or f"group_chat_{session.id}"
         task_id = await enqueue_task(

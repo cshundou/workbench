@@ -864,6 +864,10 @@ class WorkflowService:
         self._save_runtime_state(execution.id, runtime)
         await quota_extended_service.increment(tenant_id, "workflow_executions")
 
+        # 先提交 execution / trace，避免 Worker 抢跑时读不到记录
+        await db.commit()
+        await db.refresh(execution)
+
         task_id = await enqueue_task(
             "execute_workflow_task",
             execution.id,
@@ -999,6 +1003,11 @@ class WorkflowService:
                     "reject_target": reject_target,
                 },
             )
+            execution.status = "running"
+            await db.flush()
+            await db.commit()
+            await db.refresh(execution)
+
             task_id = await enqueue_task(
                 "resume_workflow_task",
                 execution_id,
@@ -1012,8 +1021,6 @@ class WorkflowService:
             runtime["task_id"] = task_id
             runtime["human_reject_target"] = reject_target
             self._save_runtime_state(execution_id, runtime)
-            execution.status = "running"
-            await db.flush()
             return self._to_execution_response(execution)
 
         await audit_service.record_action(
@@ -1025,6 +1032,11 @@ class WorkflowService:
             resource_id=execution_id,
             detail={"comment": data.comment},
         )
+        execution.status = "running"
+        await db.flush()
+        await db.commit()
+        await db.refresh(execution)
+
         task_id = await enqueue_task(
             "resume_workflow_task",
             execution_id,
@@ -1036,8 +1048,6 @@ class WorkflowService:
         )
         runtime["task_id"] = task_id
         self._save_runtime_state(execution_id, runtime)
-        execution.status = "running"
-        await db.flush()
         return self._to_execution_response(execution)
 
     def _build_node_configs(
@@ -1123,14 +1133,26 @@ class WorkflowService:
             graph_definition: dict[str, Any] | None = None
             async with async_session_factory() as db:
                 stmt = select(WorkflowExecution).where(
-                    WorkflowExecution.id == execution_id
+                    WorkflowExecution.id == execution_id,
+                    WorkflowExecution.tenant_id == tenant_id,
                 )
                 result = await db.execute(stmt)
-                execution = result.scalar_one()
+                execution = result.scalar_one_or_none()
+                if execution is None:
+                    raise RuntimeError(
+                        f"执行记录不存在 execution_id={execution_id} tenant_id={tenant_id}"
+                    )
                 execution.status = "running"
 
-                wf_stmt = select(Workflow).where(Workflow.id == workflow_id)
-                workflow = (await db.execute(wf_stmt)).scalar_one()
+                wf_stmt = select(Workflow).where(
+                    Workflow.id == workflow_id,
+                    Workflow.tenant_id == tenant_id,
+                )
+                workflow = (await db.execute(wf_stmt)).scalar_one_or_none()
+                if workflow is None:
+                    raise RuntimeError(
+                        f"工作流不存在 workflow_id={workflow_id} tenant_id={tenant_id}"
+                    )
                 graph_definition = workflow.graph_definition
 
                 user_ctx = await user_key_resolver.load_context(
@@ -1464,7 +1486,12 @@ class WorkflowService:
                 WorkflowExecution.id == execution_id
             )
             result = await db.execute(stmt)
-            execution = result.scalar_one()
+            execution = result.scalar_one_or_none()
+            if execution is None:
+                logger.warning(
+                    "标记失败时未找到执行记录 execution_id=%s", execution_id
+                )
+                return
             facing = translate_error_message(
                 error_message,
                 context=self._build_error_context(execution, failed_node),

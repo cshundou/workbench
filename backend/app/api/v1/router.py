@@ -23,6 +23,7 @@ from app.api.v1.monitor import router as monitor_router
 from app.api.v1.roles import router as roles_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.tools import router as tools_router
+from app.api.v1.traces import router as traces_router
 from app.api.v1.tenants import router as tenants_router
 from app.api.v1.users import router as users_router
 from app.api.v1.user_api_keys import router as user_api_keys_router
@@ -51,6 +52,7 @@ api_router.include_router(group_chat_router)
 api_router.include_router(professional_roles_router)
 api_router.include_router(team_router)
 api_router.include_router(monitor_router)
+api_router.include_router(traces_router)
 api_router.include_router(agents_router)
 api_router.include_router(user_api_keys_router)
 api_router.include_router(model_providers_router)
