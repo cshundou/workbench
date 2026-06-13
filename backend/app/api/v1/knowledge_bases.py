@@ -216,6 +216,25 @@ async def get_parse_progress(
     return success_response(data=result.model_dump())
 
 
+@router.post(
+    "/{kb_id}/documents/{doc_id}/reparse",
+    summary="重新解析文档",
+)
+async def reparse_document(
+    kb_id: int,
+    doc_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(KB_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """重新调度单文档向量化解析（需有效 Embedding 密钥）。"""
+    result = await knowledge_base_service.reparse_document(
+        db, kb_id, doc_id, tenant_id, current_user
+    )
+    await db.commit()
+    return success_response(data=result.model_dump(), message="已重新启动解析")
+
+
 @router.post("/{kb_id}/rebuild-vectors", summary="全量重建向量库")
 async def rebuild_knowledge_base_vectors(
     kb_id: int,

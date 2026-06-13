@@ -7,6 +7,7 @@ import DocumentUploader from '@/components/knowledge/DocumentUploader.vue';
 import UrlImporter from '@/components/knowledge/UrlImporter.vue';
 import DocumentList from '@/components/knowledge/DocumentList.vue';
 import DocumentPreview from '@/components/knowledge/DocumentPreview.vue';
+import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
 import {
   deleteDocument,
   downloadDocument,
@@ -14,6 +15,7 @@ import {
   getOptimizationHints,
   getSearchStats,
   rebuildKnowledgeBaseVectors,
+  reparseDocument,
 } from '@/api/rag';
 import type { DocumentInfo, OptimizationHint, SearchStats } from '@/api/rag';
 import { useRagStore } from '@/stores/rag';
@@ -37,7 +39,21 @@ const optimizationHints = ref<OptimizationHint[]>([]);
 const rebuildLoading = ref(false);
 /** 文档解析进度映射 */
 const progressMap = ref<Record<number, number>>({});
+/** 文档解析失败原因 */
+const errorMap = ref<Record<number, string>>({});
 let progressTimer: ReturnType<typeof setInterval> | null = null;
+
+const hasFailedDocs = computed(() =>
+  ragStore.documents.some((doc) => doc.status === 2),
+);
+
+const firstFailedMessage = computed(() => {
+  const failed = ragStore.documents.find((doc) => doc.status === 2);
+  if (!failed) {
+    return '';
+  }
+  return errorMap.value[failed.id] || '文档解析失败，请检查 API 密钥配置';
+});
 
 async function loadSearchAnalysis(): Promise<void> {
   try {
@@ -66,25 +82,35 @@ async function refreshProgress(): Promise<void> {
   if (!Array.isArray(ragStore.documents)) {
     return;
   }
-  const pendingDocs = ragStore.documents.filter((doc) => doc.status === 0);
-  if (pendingDocs.length === 0) {
+  const targetDocs = ragStore.documents.filter((doc) => doc.status === 0 || doc.status === 2);
+  if (targetDocs.length === 0) {
     return;
   }
 
   await Promise.all(
-    pendingDocs.map(async (doc) => {
+    targetDocs.map(async (doc) => {
       try {
         const progress = await getDocumentProgress(kbId.value, doc.id);
         progressMap.value[doc.id] = progress.progress;
-        if (progress.status !== 0) {
-          doc.status = progress.status;
+        if (progress.message) {
+          errorMap.value[doc.id] = progress.message;
+        }
+        if (progress.parse_status === 'failed' || progress.status === 2) {
+          doc.status = 2;
+        } else if (progress.parse_status === 'completed' || progress.status === 1) {
+          doc.status = 1;
           doc.total_chunks = progress.total_chunks ?? doc.total_chunks;
+        } else if (progress.status !== 0) {
+          doc.status = progress.status;
         }
       } catch (error) {
         console.error(`[Progress Error] doc ${doc.id}`, error);
       }
     }),
   );
+  if (!ragStore.documents.some((doc) => doc.status === 0)) {
+    stopProgressPolling();
+  }
 }
 
 /** 启动进度轮询 */
@@ -151,6 +177,24 @@ async function handleDownload(doc: DocumentInfo): Promise<void> {
   } catch (error) {
     console.error('[Download Document Error]', error);
   }
+}
+
+/** 重新解析失败文档 */
+async function handleReparse(doc: DocumentInfo): Promise<void> {
+  try {
+    await reparseDocument(kbId.value, doc.id);
+    doc.status = 0;
+    progressMap.value[doc.id] = 0;
+    delete errorMap.value[doc.id];
+    ElMessage.success('已重新启动解析');
+    startProgressPolling();
+  } catch (error) {
+    console.error('[Reparse Document Error]', error);
+  }
+}
+
+function goToApiKeys(): void {
+  router.push('/settings/api-keys');
 }
 
 function goBack(): void {
@@ -231,6 +275,17 @@ onUnmounted(() => {
 
     <el-tabs v-model="activeTab">
       <el-tab-pane label="文档管理" name="documents">
+        <ApiKeyHintBanner scene="rag" class="kb-key-banner" />
+        <el-alert
+          v-if="hasFailedDocs"
+          type="error"
+          title="部分文档解析失败"
+          :description="firstFailedMessage"
+          show-icon
+          class="parse-fail-alert"
+        >
+          <el-button type="primary" link @click="goToApiKeys">前往配置 API 密钥</el-button>
+        </el-alert>
         <el-card shadow="never" class="upload-card">
           <template #header>
             <div class="upload-header">
@@ -259,6 +314,7 @@ onUnmounted(() => {
           <DocumentList
             :documents="ragStore.documents"
             :progress-map="progressMap"
+            :error-map="errorMap"
             :loading="ragStore.documentsLoading"
             :total="ragStore.documentsTotal"
             :can-write="canWrite"
@@ -266,6 +322,7 @@ onUnmounted(() => {
             @download="handleDownload"
             @preview="handlePreview"
             @refresh="refreshProgress"
+            @reparse="handleReparse"
           />
         </el-card>
       </el-tab-pane>
@@ -333,6 +390,14 @@ onUnmounted(() => {
 }
 
 .doc-error-alert {
+  margin-bottom: 12px;
+}
+
+.kb-key-banner {
+  margin-bottom: 12px;
+}
+
+.parse-fail-alert {
   margin-bottom: 12px;
 }
 </style>

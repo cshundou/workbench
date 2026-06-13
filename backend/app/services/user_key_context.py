@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 import httpx
 from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,8 +29,15 @@ LLM_PROVIDERS: list[str] = ["openai", "tongyi", "doubao", "minimax"]
 # 工具提供商
 TOOL_PROVIDERS: list[str] = ["tavily", "cohere", "pinecone"]
 
+# 重排序偏好存储（非真实 API 密钥，仅存 model_name 作为模式）
+RERANK_PREFERENCE_PROVIDER = "rerank"
+RERANK_MODE_AUTO = "auto"
+RERANK_MODE_COHERE = "cohere"
+RERANK_MODE_OFF = "off"
+RERANK_MODES: list[str] = [RERANK_MODE_AUTO, RERANK_MODE_COHERE, RERANK_MODE_OFF, *LLM_PROVIDERS]
+
 # 所有支持的提供商
-ALL_PROVIDERS: list[str] = LLM_PROVIDERS + TOOL_PROVIDERS
+ALL_PROVIDERS: list[str] = LLM_PROVIDERS + TOOL_PROVIDERS + [RERANK_PREFERENCE_PROVIDER]
 
 # 各提供商默认 API 地址与模型
 PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
@@ -81,6 +89,68 @@ def infer_llm_provider_from_model(model_name: Optional[str]) -> Optional[str]:
     if name in SUPPORTED_LLM_MODEL_NAMES:
         return LLM_MODEL_MAP[name]["provider"]
     return None
+
+
+def _looks_like_embedding_model(model_name: str) -> bool:
+    """判断模型名称是否像 Embedding 模型而非对话模型。"""
+    name = model_name.lower()
+    return "embedding" in name or name.startswith("embo") or "ada-002" in name
+
+
+def resolve_embedding_model(
+    provider: str,
+    requested_model: Optional[str] = None,
+    config_model_name: Optional[str] = None,
+) -> str:
+    """
+    解析与提供商匹配的 Embedding 模型名称。
+
+    当知识库配置的模型属于其他提供商，或用户保存的是对话模型时，
+    自动降级为该提供商默认 Embedding 模型。
+    """
+    defaults = PROVIDER_DEFAULTS.get(provider, {})
+    default_embedding = defaults.get("embedding_model", "text-embedding-3-small")
+
+    for candidate in (requested_model, config_model_name):
+        if not candidate:
+            continue
+        if infer_llm_provider_from_model(candidate) != provider:
+            continue
+        if _looks_like_embedding_model(candidate):
+            return candidate
+
+    logger.info(
+        "Embedding 模型与提供商 %s 不匹配，使用默认模型 %s",
+        provider,
+        default_embedding,
+    )
+    return default_embedding
+
+
+def resolve_minimax_group_id(base_url: Optional[str]) -> Optional[str]:
+    """从 base_url 字段解析 MiniMax Group ID（非 URL 时视为 Group ID）。"""
+    if not base_url:
+        return None
+    value = base_url.strip()
+    if not value or value.startswith(("http://", "https://")):
+        return None
+    return value
+
+
+def _build_openai_compatible_embeddings(
+    provider: str,
+    api_key: str,
+    resolved_model: str,
+    base_url: Optional[str],
+) -> OpenAIEmbeddings:
+    """创建 OpenAI 兼容 Embedding 客户端。"""
+    kwargs: dict[str, Any] = {
+        "model": resolved_model,
+        "api_key": api_key,
+    }
+    if base_url:
+        kwargs["base_url"] = base_url
+    return OpenAIEmbeddings(**kwargs)
 
 
 def format_llm_error_message(exc: Exception) -> str:
@@ -240,8 +310,23 @@ class UserKeyContext:
 
     @property
     def configured_providers(self) -> list[str]:
-        """已配置的提供商列表。"""
-        return list(self.keys.keys())
+        """已配置的提供商列表（不含重排序偏好项）。"""
+        return [provider for provider in self.keys.keys() if provider != RERANK_PREFERENCE_PROVIDER]
+
+    def get_rerank_mode(self) -> str:
+        """获取用户配置的 RAG 重排序模式，默认 auto。"""
+        config = self.keys.get(RERANK_PREFERENCE_PROVIDER)
+        if config and config.model_name in RERANK_MODES:
+            return config.model_name
+        return RERANK_MODE_AUTO
+
+    def get_available_rerank_llm_providers(self) -> list[str]:
+        """返回当前已配置且可用于 Embedding 重排序的大模型提供商。"""
+        return [
+            provider
+            for provider in LLM_PROVIDERS
+            if (config := self.keys.get(provider)) is not None and bool(config.api_key)
+        ]
 
     @property
     def has_llm_key(self) -> bool:
@@ -372,7 +457,7 @@ def create_chat_llm(
 def create_embeddings(
     user_ctx: UserKeyContext,
     model_name: Optional[str] = None,
-) -> OpenAIEmbeddings:
+) -> Embeddings:
     """
     基于用户密钥创建 Embeddings 实例。
 
@@ -381,23 +466,86 @@ def create_embeddings(
         model_name: 嵌入模型名称。
 
     Returns:
-        OpenAIEmbeddings 实例。
+        Embeddings 实例。
     """
     config = user_ctx.get_embedding_provider()
-    defaults = PROVIDER_DEFAULTS.get(config.provider, {})
-    resolved_model = model_name or config.model_name or defaults.get(
-        "embedding_model", "text-embedding-3-small"
+    return _create_embeddings_from_config(
+        provider=config.provider,
+        api_key=config.api_key,
+        base_url=config.base_url,
+        config_model_name=config.model_name,
+        requested_model=model_name,
     )
-    base_url = config.base_url or defaults.get("base_url")
 
-    kwargs: dict[str, Any] = {
-        "model": resolved_model,
-        "api_key": config.api_key,
-    }
-    if base_url:
-        kwargs["base_url"] = base_url
 
-    return OpenAIEmbeddings(**kwargs)
+def create_embeddings_for_provider(
+    user_ctx: UserKeyContext,
+    provider: str,
+    model_name: Optional[str] = None,
+) -> Embeddings:
+    """
+    基于指定大模型提供商创建 Embeddings 实例。
+
+    Args:
+        user_ctx: 用户密钥上下文。
+        provider: 大模型提供商标识。
+        model_name: 嵌入模型名称。
+
+    Returns:
+        Embeddings 实例。
+
+    Raises:
+        ApiKeyMissingError: 未配置该提供商密钥。
+    """
+    if provider not in LLM_PROVIDERS:
+        raise ValidationError(message=f"不支持的大模型提供商: {provider}")
+
+    config = user_ctx.get_provider(provider)
+    if config is None or not config.api_key:
+        raise ApiKeyMissingError(
+            provider=provider,
+            message=f"请先在「设置 > API 密钥管理」中配置 {provider} 的 API 密钥",
+        )
+
+    return _create_embeddings_from_config(
+        provider=provider,
+        api_key=config.api_key,
+        base_url=config.base_url,
+        config_model_name=config.model_name,
+        requested_model=model_name,
+    )
+
+
+def _create_embeddings_from_config(
+    provider: str,
+    api_key: str,
+    base_url: Optional[str],
+    config_model_name: Optional[str],
+    requested_model: Optional[str],
+) -> Embeddings:
+    """按提供商创建合适的 Embedding 客户端。"""
+    from app.services.rag.minimax_embeddings import MiniMaxEmbeddingsClient
+
+    defaults = PROVIDER_DEFAULTS.get(provider, {})
+    resolved_model = resolve_embedding_model(
+        provider,
+        requested_model=requested_model,
+        config_model_name=config_model_name,
+    )
+
+    if provider == "minimax":
+        return MiniMaxEmbeddingsClient(
+            api_key=api_key,
+            model=resolved_model,
+            group_id=resolve_minimax_group_id(base_url),
+        )
+
+    return _build_openai_compatible_embeddings(
+        provider=provider,
+        api_key=api_key,
+        resolved_model=resolved_model,
+        base_url=base_url or defaults.get("base_url"),
+    )
 
 
 async def validate_provider_key(
@@ -427,6 +575,19 @@ async def validate_provider_key(
 
         if provider in ("tongyi", "doubao", "minimax"):
             defaults = PROVIDER_DEFAULTS[provider]
+            if provider == "minimax":
+                try:
+                    embeddings = _create_embeddings_from_config(
+                        provider=provider,
+                        api_key=api_key,
+                        base_url=base_url,
+                        config_model_name=None,
+                        requested_model=None,
+                    )
+                    embeddings.embed_query("ping")
+                    return True, f"{provider} Embedding 连接成功"
+                except Exception as exc:
+                    return False, f"{provider} Embedding 验证失败: {exc}"
             url = (base_url or defaults["base_url"]).rstrip("/") + "/models"
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})

@@ -16,6 +16,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.services.rag.parse_error_translator import translate_parse_error
 from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -408,6 +409,21 @@ class RAGService:
             "file_type": document.file_type,
         }
 
+    @staticmethod
+    def _sanitize_chroma_metadata(metadata: dict[str, Any]) -> dict[str, str | int | float | bool]:
+        """将分块元数据转换为 Chroma 支持的基础类型。"""
+        sanitized: dict[str, str | int | float | bool] = {}
+        for key, value in metadata.items():
+            if value is None:
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                sanitized[key] = value
+            elif isinstance(value, list):
+                sanitized[key] = ",".join(str(item) for item in value)
+            else:
+                sanitized[key] = str(value)
+        return sanitized
+
     async def parse_document(
         self,
         db: AsyncSession,
@@ -506,12 +522,14 @@ class RAGService:
                 if "." not in chunk_index_str:
                     parent_db_ids[int(chunk_index_str)] = db_chunk.id
 
-                chroma_metadata = {
-                    **enriched_metadata,
-                    "vector_id": vector_id,
-                    "parent_chunk_db_id": parent_db_id,
-                    "chunk_db_id": db_chunk.id,
-                }
+                chroma_metadata = self._sanitize_chroma_metadata(
+                    {
+                        **enriched_metadata,
+                        "vector_id": vector_id,
+                        "parent_chunk_db_id": parent_db_id if parent_db_id is not None else -1,
+                        "chunk_db_id": db_chunk.id,
+                    }
+                )
                 vector_store.add_texts(
                     texts=[raw_chunk["content"]],
                     metadatas=[chroma_metadata],
@@ -536,14 +554,20 @@ class RAGService:
                 kb.id,
             )
         except Exception as exc:
+            user_message = translate_parse_error(exc)
             document.status = 2
+            await db.flush()
             await self.set_parse_progress(
                 document_id,
                 0,
-                f"解析失败: {exc}",
+                user_message,
                 status="failed",
             )
-            logger.error("文档解析失败 document_id=%s error=%s", document_id, exc)
+            logger.error(
+                "文档解析失败 document_id=%s error=%s",
+                document_id,
+                exc,
+            )
             raise
 
     async def _delete_document_vectors(
@@ -758,8 +782,14 @@ class RAGService:
 
         cohere_key = user_ctx.get_provider("cohere")
         reranker = Reranker(
-            cohere_api_key=cohere_key.api_key if cohere_key else None,
+            user_ctx=user_ctx,
+            mode=user_ctx.get_rerank_mode(),
             top_n=top_k,
+            cohere_api_key=cohere_key.api_key if cohere_key else None,
+            cohere_model=(
+                cohere_key.model_name if cohere_key and cohere_key.model_name else "rerank-multilingual-v3.0"
+            ),
+            embedding_model=kb.embedding_model,
         )
         final_docs = reranker.rerank(query, doc_dicts)[:top_k]
         latency_ms = (time.perf_counter() - started) * 1000
@@ -1041,7 +1071,8 @@ class RAGService:
                         await db.commit()
                         return
                     except Exception as exc:
-                        await db.rollback()
+                        # 保留 parse_document 已写入的失败状态（status=2），勿 rollback
+                        await db.commit()
                         logger.error(
                             "后台解析任务失败 document_id=%s: %s",
                             document_id,

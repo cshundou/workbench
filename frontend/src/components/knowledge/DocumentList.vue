@@ -6,6 +6,7 @@ import type { DocumentInfo } from '@/api/rag';
 const props = defineProps<{
   documents: DocumentInfo[];
   progressMap: Record<number, number>;
+  errorMap?: Record<number, string>;
   loading?: boolean;
   total?: number;
   canWrite?: boolean;
@@ -18,6 +19,7 @@ const emit = defineEmits<{
   download: [doc: DocumentInfo];
   preview: [doc: DocumentInfo];
   refresh: [];
+  reparse: [doc: DocumentInfo];
 }>();
 
 /** 文档状态映射 */
@@ -69,9 +71,22 @@ const hasPendingDocs = computed(() => props.documents.some((doc) => doc.status =
           {{ formatFileSize(row.file_size) }}
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="100">
+      <el-table-column label="状态" width="120">
         <template #default="{ row }">
-          <el-tag :type="statusMap[row.status]?.type || 'info'" size="small">
+          <el-tooltip
+            v-if="row.status === 2"
+            :content="errorMap?.[row.id] || '解析失败'"
+            placement="top"
+          >
+            <el-tag :type="statusMap[row.status]?.type || 'info'" size="small">
+              {{ statusMap[row.status]?.label || '未知' }}
+            </el-tag>
+          </el-tooltip>
+          <el-tag
+            v-else
+            :type="statusMap[row.status]?.type || 'info'"
+            size="small"
+          >
             {{ statusMap[row.status]?.label || '未知' }}
           </el-tag>
         </template>
@@ -86,8 +101,16 @@ const hasPendingDocs = computed(() => props.documents.some((doc) => doc.status =
         </template>
       </el-table-column>
       <el-table-column prop="total_chunks" label="分块数" width="80" />
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
+          <el-button
+            v-if="canWrite && row.status === 2"
+            text
+            type="warning"
+            @click="emit('reparse', row)"
+          >
+            重新解析
+          </el-button>
           <el-button
             text
             type="primary"

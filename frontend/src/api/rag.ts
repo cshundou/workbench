@@ -57,6 +57,7 @@ export interface DocumentProgress {
   status: number;
   progress: number;
   message?: string;
+  parse_status?: 'pending' | 'processing' | 'completed' | 'failed' | string;
   total_chunks?: number;
 }
 
@@ -219,6 +220,13 @@ export function getDocumentProgress(kbId: number, docId: number): Promise<Docume
   return request.get(
     `/knowledge-bases/${kbId}/documents/${docId}/parse-progress`,
   ) as Promise<DocumentProgress>;
+}
+
+/** 重新解析单文档 */
+export function reparseDocument(kbId: number, docId: number): Promise<DocumentInfo> {
+  return request.post(
+    `/knowledge-bases/${kbId}/documents/${docId}/reparse`,
+  ) as Promise<DocumentInfo>;
 }
 
 /** 下载文档 */

@@ -46,3 +46,16 @@ class TestParseProgressRedis:
     @pytest.mark.asyncio
     async def test_missing_progress_returns_none(self, patch_get_redis) -> None:
         assert await RAGService.get_parse_progress(999) is None
+
+    @pytest.mark.asyncio
+    async def test_failed_progress_status(self, patch_get_redis) -> None:
+        await RAGService.set_parse_progress(
+            404,
+            0,
+            "Embedding API 密钥无效",
+            status="failed",
+        )
+        info = await RAGService.get_parse_progress(404)
+        assert info is not None
+        assert info["status"] == "failed"
+        assert "密钥" in info["message"]

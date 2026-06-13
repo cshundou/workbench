@@ -122,6 +122,29 @@ class KnowledgeBaseService:
             updated_at=document.updated_at,
         )
 
+    @staticmethod
+    def _resolve_status_from_parse(parse_status: str, document_status: int) -> int:
+        """将 Redis parse_status 映射为 documents.status。"""
+        if parse_status == "failed":
+            return DOCUMENT_STATUS_FAILED
+        if parse_status == "completed":
+            return DOCUMENT_STATUS_DONE
+        if parse_status in ("pending", "processing"):
+            return DOCUMENT_STATUS_PENDING
+        return document_status
+
+    async def _ensure_embedding_key(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        tenant_id: int,
+    ) -> None:
+        """上传/解析前校验 Embedding 密钥是否可用。"""
+        from app.services.user_key_context import user_key_resolver
+
+        user_ctx = await user_key_resolver.load_context(db, user_id, tenant_id)
+        user_ctx.get_embedding_provider()
+
     async def list_knowledge_bases(
         self,
         db: AsyncSession,
@@ -398,6 +421,7 @@ class KnowledgeBaseService:
         """
         kb = await self._get_kb_or_raise(db, kb_id, tenant_id)
         await self._check_kb_access(kb, user)
+        await self._ensure_embedding_key(db, user.id, tenant_id)
 
         if not file.filename:
             raise ValidationError(message="文件名不能为空")
@@ -473,17 +497,19 @@ class KnowledgeBaseService:
         )
         return self._to_document_response(document, parse_task_id=parse_task_id)
 
-    async def get_document(
+    async def _get_document_entity(
         self,
         db: AsyncSession,
         kb_id: int,
         doc_id: int,
         tenant_id: int,
         user: User,
-    ) -> DocumentResponse:
-        """获取文档详情。"""
+        *,
+        require_owner: bool = False,
+    ) -> Document:
+        """获取文档 ORM 实体并校验访问权限。"""
         kb = await self._get_kb_or_raise(db, kb_id, tenant_id)
-        await self._check_kb_access(kb, user)
+        await self._check_kb_access(kb, user, require_owner=require_owner)
 
         stmt = select(Document).where(
             Document.id == doc_id,
@@ -493,6 +519,18 @@ class KnowledgeBaseService:
         document = (await db.execute(stmt)).scalar_one_or_none()
         if document is None:
             raise NotFoundError(message="文档不存在")
+        return document
+
+    async def get_document(
+        self,
+        db: AsyncSession,
+        kb_id: int,
+        doc_id: int,
+        tenant_id: int,
+        user: User,
+    ) -> DocumentResponse:
+        """获取文档详情。"""
+        document = await self._get_document_entity(db, kb_id, doc_id, tenant_id, user)
         return self._to_document_response(document)
 
     async def get_document_file_path(
@@ -504,12 +542,10 @@ class KnowledgeBaseService:
         user: User,
     ) -> tuple[str, str]:
         """获取文档下载路径与原始文件名。"""
-        document_response = await self.get_document(db, kb_id, doc_id, tenant_id, user)
-        stmt = select(Document).where(Document.id == doc_id)
-        document = (await db.execute(stmt)).scalar_one()
+        document = await self._get_document_entity(db, kb_id, doc_id, tenant_id, user)
         if not os.path.isfile(document.file_path):
             raise NotFoundError(message="文档文件不存在")
-        return document.file_path, document_response.name
+        return document.file_path, document.name
 
     async def delete_document(
         self,
@@ -565,16 +601,27 @@ class KnowledgeBaseService:
         user: User,
     ) -> ParseProgressResponse:
         """查询文档解析进度。"""
-        document = await self.get_document(db, kb_id, doc_id, tenant_id, user)
+        document = await self._get_document_entity(db, kb_id, doc_id, tenant_id, user)
         progress_info = await rag_service.get_parse_progress(doc_id)
 
         if progress_info:
+            parse_status = str(progress_info.get("status", "pending"))
+            message = progress_info.get("message", "")
+            progress = int(progress_info.get("progress", 0))
+            doc_status = self._resolve_status_from_parse(parse_status, document.status)
+
+            # 修正 Redis failed 但 DB 仍为 pending 的历史脏数据
+            if doc_status != document.status:
+                document.status = doc_status
+                await db.flush()
+                await db.commit()
+
             return ParseProgressResponse(
                 document_id=doc_id,
-                status=document.status,
-                progress=progress_info.get("progress", 0),
-                message=progress_info.get("message", ""),
-                parse_status=progress_info.get("status", "pending"),
+                status=doc_status,
+                progress=progress,
+                message=message,
+                parse_status=parse_status,
             )
 
         status_map = {
@@ -594,6 +641,50 @@ class KnowledgeBaseService:
             parse_status=parse_status,
         )
 
+    async def reparse_document(
+        self,
+        db: AsyncSession,
+        kb_id: int,
+        doc_id: int,
+        tenant_id: int,
+        user: User,
+    ) -> DocumentResponse:
+        """重新调度单文档解析任务。"""
+        kb = await self._get_kb_or_raise(db, kb_id, tenant_id)
+        await self._check_kb_access(kb, user, require_owner=False)
+        await self._ensure_embedding_key(db, user.id, tenant_id)
+
+        document = await self._get_document_entity(db, kb_id, doc_id, tenant_id, user)
+        if not Path(document.file_path).is_file():
+            raise ValidationError(message="文档文件不存在，请重新上传")
+
+        from app.services.user_key_context import user_key_resolver
+
+        user_ctx = await user_key_resolver.load_context(db, user.id, tenant_id)
+        await rag_service.delete_document_vectors(db, document, user_ctx)
+
+        document.status = DOCUMENT_STATUS_PENDING
+        document.total_chunks = 0
+        await rag_service.clear_parse_progress(doc_id)
+        await rag_service.set_parse_progress(doc_id, 0, "等待解析", status="pending")
+
+        parse_task_id = await rag_service.schedule_parse_document(
+            doc_id,
+            user.id,
+            tenant_id,
+        )
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            action="document.reparse",
+            resource_type="document",
+            resource_id=doc_id,
+            detail={"kb_id": kb_id, "task_id": parse_task_id},
+        )
+        logger.info("重新解析文档 document_id=%s kb_id=%s", doc_id, kb_id)
+        return self._to_document_response(document, parse_task_id=parse_task_id)
+
     async def import_url(
         self,
         db: AsyncSession,
@@ -605,6 +696,7 @@ class KnowledgeBaseService:
         """从 URL 抓取网页正文并入库。"""
         kb = await self._get_kb_or_raise(db, kb_id, tenant_id)
         await self._check_kb_access(kb, user, require_owner=True)
+        await self._ensure_embedding_key(db, user.id, tenant_id)
 
         fetcher = UrlFetcher()
         page_title, content = await fetcher.fetch(data.url)
