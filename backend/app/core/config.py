@@ -84,6 +84,10 @@ class Settings(BaseSettings):
         description="Pinecone 索引名称（VECTOR_STORE=pinecone 时必填）",
     )
     upload_dir: str = Field(default="data/uploads", description="文档上传存储目录")
+    deliverables_dir: str = Field(
+        default="data/deliverables",
+        description="群聊协同交付物（PPT 等）存储目录",
+    )
     max_upload_size_mb: int = Field(default=100, description="单文件最大上传大小（MB）")
 
     # LangSmith 追踪（可选）

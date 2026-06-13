@@ -236,6 +236,25 @@ export function buildGroupChatWsUrl(sessionId: number): string {
   return `${host}/api/v1/group-chat/ws/${sessionId}?token=${encodeURIComponent(token)}`;
 }
 
+/** 下载群聊交付物文件（PPTX 等） */
+export async function downloadGroupChatDeliverable(
+  sessionId: number,
+  filename: string,
+): Promise<Blob> {
+  const token = localStorage.getItem('token');
+  const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+  const response = await fetch(
+    `${baseURL}/group-chat/sessions/${sessionId}/deliverables/${encodeURIComponent(filename)}`,
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    },
+  );
+  if (!response.ok) {
+    throw new Error('下载失败');
+  }
+  return response.blob();
+}
+
 /** 角色气泡颜色 */
 export const ROLE_BUBBLE_COLORS: Record<string, string> = {
   project_manager: '#1677FF',

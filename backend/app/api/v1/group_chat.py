@@ -6,6 +6,7 @@ import logging
 from typing import Annotated, Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -195,6 +196,30 @@ async def resolve_group_chat_review(
     )
     await db.commit()
     return success_response(data=result.model_dump(), message="审核处理完成")
+
+
+@router.get("/sessions/{session_id}/deliverables/{filename}", summary="下载群聊交付物")
+async def download_group_chat_deliverable(
+    session_id: int,
+    filename: str,
+    _: Annotated[CurrentUser, Depends(require_permission(WF_READ))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> FileResponse:
+    """下载群聊协同生成的交付物文件（如 PPTX）。"""
+    file_path, safe_name = await group_chat_service.get_deliverable_file(
+        db, session_id, tenant_id, filename
+    )
+    media_type = (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        if safe_name.lower().endswith(".pptx")
+        else "application/octet-stream"
+    )
+    return FileResponse(
+        path=file_path,
+        filename=safe_name,
+        media_type=media_type,
+    )
 
 
 @router.get("/sessions/{session_id}/audit-logs", summary="导出群聊操作审计日志")

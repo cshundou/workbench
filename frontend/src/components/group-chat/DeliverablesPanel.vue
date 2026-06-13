@@ -11,10 +11,12 @@ import {
   groupDeliverablesByCategory,
 } from '@/utils/deliverables';
 import type { AgentMessage } from '@/api/groupChat';
+import { downloadGroupChatDeliverable } from '@/api/groupChat';
 
 const props = defineProps<{
   messages: AgentMessage[];
   sessionDeliverables: Record<string, unknown>[];
+  sessionId?: number;
 }>();
 
 const emit = defineEmits<{
@@ -63,15 +65,31 @@ function handleLocate(d: Deliverable): void {
 }
 
 async function handleDownload(d: Deliverable): Promise<void> {
-  const ext = d.fileType === 'md' ? 'md' : d.fileType === 'code' ? 'txt' : 'txt';
-  const blob = new Blob([d.content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${d.name.replace(/[/\\?%*:|"<>]/g, '_')}.${ext}`;
-  link.click();
-  URL.revokeObjectURL(url);
-  ElMessage.success('文件已下载');
+  try {
+    if (d.fileType === 'pptx' && d.downloadUrl && props.sessionId) {
+      const filename = d.name.toLowerCase().endsWith('.pptx') ? d.name : `${d.name}.pptx`;
+      const blob = await downloadGroupChatDeliverable(props.sessionId, filename);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      ElMessage.success('PPT 已下载');
+      return;
+    }
+    const ext = d.fileType === 'md' ? 'md' : d.fileType === 'code' ? 'txt' : 'txt';
+    const blob = new Blob([d.content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${d.name.replace(/[/\\?%*:|"<>]/g, '_')}.${ext}`;
+    link.click();
+    URL.revokeObjectURL(url);
+    ElMessage.success('文件已下载');
+  } catch {
+    ElMessage.error('下载失败');
+  }
 }
 
 async function handleCopyLink(d: Deliverable): Promise<void> {

@@ -19,10 +19,24 @@ from app.services.workflow.team_template_catalog import (
     get_official_template,
 )
 
+from app.services.delivery.task_intent import detect_delivery_format
+
 logger = logging.getLogger(__name__)
 
 # 领域关键词映射
 DOMAIN_KEYWORDS: dict[str, list[str]] = {
+    "presentation": [
+        "ppt",
+        "pptx",
+        "幻灯片",
+        "演示文稿",
+        "演示材料",
+        "汇报材料",
+        "路演",
+        "课件",
+        "powerpoint",
+        "presentation",
+    ],
     "tech": ["代码", "开发", "编程", "api", "系统", "架构", "bug", "python", "java"],
     "finance": ["财务", "roi", "成本", "预算", "核算", "利润", "收入", "投资"],
     "marketing": ["营销", "广告", "投放", "推广", "品牌", "竞品", "市场"],
@@ -81,6 +95,9 @@ class TeamBuilder:
             return config
 
         domain = self.identify_domain(task)
+        delivery_format = detect_delivery_format(task)
+        if delivery_format == "ppt":
+            domain = "presentation"
         complexity = self.assess_complexity(task)
         team_size = self.determine_team_size(complexity)
         members = self.match_roles(task, domain, team_size)
@@ -99,6 +116,7 @@ class TeamBuilder:
             "domain": domain,
             "complexity": complexity,
             "template_id": "dynamic",
+            "delivery_format": delivery_format,
         }
         logger.info(
             "团队组建完成 domain=%s complexity=%s size=%d",
@@ -128,6 +146,7 @@ class TeamBuilder:
                 }
             )
         members = self.plan_work_distribution(task, members)
+        delivery_format = detect_delivery_format(task)
         return {
             "team_id": f"team_{uuid.uuid4().hex[:12]}",
             "task_description": task,
@@ -136,9 +155,10 @@ class TeamBuilder:
             "workflow": "project_manager → researcher → engineer → analyst → auditor",
             "workflow_phases": self.build_workflow_phases(members),
             "max_review_rounds": 3,
-            "domain": "general",
+            "domain": "presentation" if delivery_format == "ppt" else "general",
             "complexity": "medium",
             "template_id": "classic_five",
+            "delivery_format": delivery_format,
         }
 
     @staticmethod
@@ -218,6 +238,13 @@ class TeamBuilder:
                 "researcher",
                 "info_researcher",
                 "analyst",
+                "auditor",
+            ],
+            "presentation": [
+                "project_manager",
+                "researcher",
+                "copywriter",
+                "data_visualizer",
                 "auditor",
             ],
             "general": [
@@ -353,9 +380,14 @@ class TeamBuilder:
             "copywriter": ["报告撰写与润色"],
             "content_editor": ["内容校验与格式统一"],
             "compliance_officer": ["合规性检查"],
-            "data_visualizer": ["图表生成与视觉优化"],
+            "data_visualizer": ["幻灯片结构优化", "视觉层次与排版方案"],
             "auditor": ["完整性审核", "准确性审核", "合规性审核"],
         }
+        if detect_delivery_format(task) == "ppt":
+            subtask_map["copywriter"] = ["撰写演示文稿大纲与每页要点"]
+            subtask_map["data_visualizer"] = ["优化幻灯片结构与视觉呈现"]
+            subtask_map["researcher"] = ["检索演示主题相关资料"]
+            subtask_map["analyst"] = ["汇总资料并补充幻灯片数据要点"]
         defaults = subtask_map.get(role_id, [f"处理任务：{task[:50]}"])
         return defaults
 

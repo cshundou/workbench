@@ -16,6 +16,8 @@ export interface Deliverable {
   createdAt: string;
   size: number;
   chartConfig?: Record<string, unknown>;
+  /** PPTX 等二进制文件的 API 下载路径 */
+  downloadUrl?: string;
 }
 
 const CATEGORY_ORDER: DeliverableCategory[] = ['final', 'chart', 'intermediate', 'reference'];
@@ -36,7 +38,10 @@ export function getCategoryOrder(): DeliverableCategory[] {
 }
 
 function inferCategory(msg: AgentMessage, att?: MessageAttachment): DeliverableCategory {
-  if (msg.type === 'task_complete') return 'final';
+    if (msg.type === 'task_complete') return 'final';
+  if (att?.type === 'file' && (att as MessageAttachment & { file_type?: string }).file_type === 'pptx') {
+    return 'final';
+  }
   if (att?.type === 'chart') return 'chart';
   if (att?.type === 'text' && msg.type === 'result_delivery') return 'intermediate';
   if (att?.type === 'code') return 'intermediate';
@@ -45,6 +50,13 @@ function inferCategory(msg: AgentMessage, att?: MessageAttachment): DeliverableC
 }
 
 function inferFileType(att?: MessageAttachment, content?: string): string {
+  const attAny = att as MessageAttachment & { file_type?: string };
+  if (attAny?.file_type === 'pptx' || att?.type === 'file') {
+    const name = att?.name || '';
+    if (name.toLowerCase().endsWith('.pptx') || attAny?.file_type === 'pptx') {
+      return 'pptx';
+    }
+  }
   if (att?.type === 'chart') return 'chart';
   if (att?.type === 'code') return 'code';
   if (att?.type === 'image') return 'png';
@@ -60,17 +72,22 @@ function buildDeliverableFromAttachment(
   const content =
     typeof att.content === 'string' ? att.content : JSON.stringify(att.content, null, 2);
   const category = inferCategory(msg, att);
+  const fileType = inferFileType(att, content);
+  const attAny = att as MessageAttachment & { file_type?: string; size?: number };
+  const downloadUrl =
+    fileType === 'pptx' && typeof att?.content === 'string' ? String(att.content) : undefined;
   return {
     id: `${msg.id}-att-${index}`,
     messageId: msg.id,
     name: att.name || '未命名交付物',
     category,
     type: att.type,
-    fileType: inferFileType(att, content),
-    content,
+    fileType,
+    content: fileType === 'pptx' ? '' : content,
+    downloadUrl,
     createdBy: msg.sender.name || msg.sender.role,
     createdAt: msg.timestamp,
-    size: new Blob([content]).size,
+    size: attAny.size ?? new Blob([content]).size,
     chartConfig:
       att.type === 'chart' && att.content && typeof att.content === 'object'
         ? (att.content as Record<string, unknown>)

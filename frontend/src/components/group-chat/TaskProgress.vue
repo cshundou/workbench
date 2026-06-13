@@ -8,6 +8,7 @@ defineProps<{
   steps: ProgressStep[];
   messages: AgentMessage[];
   deliverables: Record<string, unknown>[];
+  sessionId?: number;
 }>();
 
 const emit = defineEmits<{
@@ -50,6 +51,7 @@ function handleStepClick(step: ProgressStep): void {
     <DeliverablesPanel
       :messages="messages"
       :session-deliverables="deliverables"
+      :session-id="sessionId"
       @view="emit('viewDeliverable', $event)"
       @locate="emit('locateMessage', $event)"
     />

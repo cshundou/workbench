@@ -487,6 +487,7 @@ onUnmounted(() => {
         :steps="groupChatStore.progressSteps"
         :messages="groupChatStore.messages"
         :deliverables="groupChatStore.currentSession?.deliverables || []"
+        :session-id="groupChatStore.currentSession?.id"
         @view-deliverable="openReport"
         @locate-message="locateMessage"
         @jump-phase="jumpToPhase"

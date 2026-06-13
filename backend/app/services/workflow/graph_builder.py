@@ -43,6 +43,9 @@ from app.services.workflow.nodes.group_chat_subtasks import (
     mark_subtask_completed,
 )
 from app.services.workflow.team_builder import TeamBuilder
+from app.services.delivery.ppt_generator_service import ppt_generator_service
+from app.services.delivery.ppt_outline_builder import build_ppt_outline
+from app.services.delivery.task_intent import detect_delivery_format
 from app.services.workflow.role_catalog import (
     AUDIT_REJECT_ROLE_MAP,
     ROLE_AGENT_TYPE_MAP,
@@ -1290,6 +1293,10 @@ class WorkflowBuilder:
                 )
             state["workflow_phases"] = phases
             state["current_phase"] = 1
+            delivery_format = (team_config or {}).get("delivery_format") or detect_delivery_format(
+                state["task"]
+            )
+            state["delivery_format"] = delivery_format
             self._emit_group_chat_role(
                 "project_manager",
                 "task_assignment",
@@ -1492,10 +1499,33 @@ class WorkflowBuilder:
         return "audit"
 
     def _run_analyst_subtask(self, state: AgentState, task_desc: str) -> str:
-        """分析师子任务：基于已有结果生成报告。"""
+        """分析师子任务：基于已有结果生成报告或幻灯片大纲。"""
         results = state.get("results", {})
         llm = self._create_llm()
-        analysis_prompt = f"""
+        delivery_format = state.get("delivery_format") or detect_delivery_format(state["task"])
+        if delivery_format == "ppt":
+            analysis_prompt = f"""
+请基于以下资料完成演示文稿（PPT）大纲撰写：
+
+原始任务：{state['task']}
+撰写要求：{task_desc}
+
+已有资料：
+{json.dumps(results, ensure_ascii=False, default=str)}
+
+请输出 JSON 格式的幻灯片大纲（不要其他说明文字），结构如下：
+```json
+{{
+  "slides": [
+    {{"title": "封面标题", "bullets": ["副标题或说明"]}},
+    {{"title": "章节标题", "bullets": ["要点1", "要点2", "要点3"]}}
+  ]
+}}
+```
+要求：5-12 页幻灯片，每页 3-5 条要点，语言简洁专业。
+"""
+        else:
+            analysis_prompt = f"""
 请基于以下资料完成数据分析与报告撰写：
 
 原始任务：{state['task']}
@@ -1510,10 +1540,56 @@ class WorkflowBuilder:
             response = llm.invoke(analysis_prompt)
             content = response.content
             return content if isinstance(content, str) else str(content)
+        if delivery_format == "ppt":
+            return json.dumps(
+                {
+                    "slides": [
+                        {"title": state["task"][:40], "bullets": ["多 Agent 协同生成"]},
+                        {
+                            "title": "资料摘要",
+                            "bullets": [
+                                str(v)[:100]
+                                for v in list(results.values())[:5]
+                            ]
+                            or ["暂无资料"],
+                        },
+                    ]
+                },
+                ensure_ascii=False,
+            )
         return (
             f"【分析报告】\n\n任务：{task_desc}\n\n"
             f"数据摘要：\n{json.dumps(results, ensure_ascii=False, indent=2)}"
         )
+
+    def _generate_ppt_deliverable(self, state: AgentState) -> dict[str, Any] | None:
+        """审核通过后生成 PPTX 文件。"""
+        if self.tenant_id is None or self.execution_id is None:
+            logger.warning("缺少 tenant/session 上下文，跳过 PPT 生成")
+            return None
+        try:
+            outline = build_ppt_outline(
+                state["task"],
+                state.get("deliverables", []),
+            )
+            result = ppt_generator_service.generate_pptx(
+                self.tenant_id,
+                self.execution_id,
+                outline,
+            )
+            return {
+                "filename": result["filename"],
+                "file_path": result["file_path"],
+                "size": result["size"],
+                "slide_count": result["slide_count"],
+                "download_path": (
+                    f"/api/v1/group-chat/sessions/{self.execution_id}"
+                    f"/deliverables/{result['filename']}"
+                ),
+            }
+        except Exception as exc:
+            logger.exception("PPT 生成失败: %s", exc)
+            return None
 
     @staticmethod
     def _build_subtask_attachments(
@@ -1620,17 +1696,41 @@ class WorkflowBuilder:
             state["final_answer"] = final_answer
             state["status"] = "completed"
             state["progress"] = 100.0
+            delivery_format = state.get("delivery_format") or detect_delivery_format(
+                state["task"]
+            )
+            task_attachments: list[dict[str, Any]] = [
+                {"type": "text", "name": "最终报告", "content": final_answer},
+            ]
+            ppt_file = None
+            if delivery_format == "ppt":
+                ppt_file = self._generate_ppt_deliverable(state)
+                if ppt_file:
+                    state["ppt_file"] = ppt_file
+                    task_attachments.append(
+                        {
+                            "type": "file",
+                            "name": ppt_file["filename"],
+                            "content": ppt_file["download_path"],
+                            "file_type": "pptx",
+                            "size": ppt_file["size"],
+                        }
+                    )
             self._emit_group_chat_role(
                 "auditor",
                 "review_result",
                 f"✅ 审核通过！{review_result.get('summary', '')}",
                 metadata={"review": review_result},
             )
+            complete_msg = "🎉 所有审核通过，任务完成！最终交付物如下："
+            if ppt_file:
+                complete_msg += f"\n\n📎 演示文稿已生成：**{ppt_file['filename']}**（{ppt_file['slide_count']} 页）"
             self._emit_group_chat_role(
                 "project_manager",
                 "task_complete",
-                "🎉 所有审核通过，任务完成！最终交付物如下：",
-                attachments=[{"type": "text", "name": "最终报告", "content": final_answer}],
+                complete_msg,
+                attachments=task_attachments,
+                metadata={"ppt_file": ppt_file} if ppt_file else None,
             )
             self._set_member_status("auditor", "idle")
             return state

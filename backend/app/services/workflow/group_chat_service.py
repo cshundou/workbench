@@ -824,6 +824,16 @@ class GroupChatService:
             session.review_result = final_state.get("review_result")
             session.review_count = int(final_state.get("review_count") or 0)
             session.error_message = final_state.get("error") or None
+            ppt_file = final_state.get("ppt_file")
+            if ppt_file:
+                extra = dict(session.extra_params or {})
+                extra["ppt_file"] = ppt_file
+                extra["final_answer"] = final_state.get("final_answer")
+                session.extra_params = extra
+            elif final_state.get("final_answer"):
+                extra = dict(session.extra_params or {})
+                extra["final_answer"] = final_state.get("final_answer")
+                session.extra_params = extra
             if session.status in ("completed", "failed", "human_review"):
                 session.completed_at = datetime.now(timezone.utc)
             duration_ms = None
@@ -927,6 +937,22 @@ class GroupChatService:
         db.add(msg)
         await db.flush()
         return msg
+
+    async def get_deliverable_file(
+        self,
+        db: AsyncSession,
+        session_id: int,
+        tenant_id: int,
+        filename: str,
+    ) -> tuple[str, str]:
+        """获取群聊交付物文件路径（租户隔离校验）。"""
+        from app.services.delivery.ppt_generator_service import ppt_generator_service
+
+        await self._get_session_or_raise(db, session_id, tenant_id)
+        file_path = ppt_generator_service.get_file_path(tenant_id, session_id, filename)
+        if file_path is None:
+            raise NotFoundError(message="交付物文件不存在")
+        return str(file_path), filename
 
     async def _get_session_or_raise(
         self,
