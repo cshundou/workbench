@@ -4,12 +4,10 @@
 封装系统提示词 + 工具集 + 权限检查，供 LangGraph 节点同步调用。
 """
 
-import asyncio
 import json
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from sqlalchemy import select
 
@@ -24,6 +22,7 @@ from app.services.agent.tools import (
     TOOL_TAVILY_SEARCH,
 )
 from app.services.user_key_context import UserKeyContext
+from app.utils.async_runner import ephemeral_db_session, run_coro_in_fresh_loop
 
 logger = logging.getLogger(__name__)
 
@@ -65,15 +64,8 @@ class WorkflowAgentRunner:
 
     @staticmethod
     def _run_async(coro: Any) -> Any:
-        """在同步节点中执行协程。"""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    return pool.submit(asyncio.run, coro).result()
-            return asyncio.run(coro)
-        except RuntimeError:
-            return asyncio.run(coro)
+        """在同步节点中执行协程（独立 loop，避免跨 loop 复用连接池）。"""
+        return run_coro_in_fresh_loop(coro)
 
     async def _load_user(self, db: Any) -> User:
         stmt = select(User).where(User.id == self.user_id)
@@ -97,8 +89,6 @@ class WorkflowAgentRunner:
         Returns:
             {"answer": str, "tool_calls": list[dict], "duration_ms": int}
         """
-        from app.core.database import async_session_factory
-
         started = time.monotonic()
         tool_names = tools or ROLE_TOOLS.get(role, [])
         prompt = system_prompt or ROLE_SYSTEM_PROMPTS.get(role, "你是专业助手，请完成任务。")
@@ -119,7 +109,7 @@ class WorkflowAgentRunner:
         if role == "knowledge" and kb_id is not None:
             user_query = f"{task}\n\n请优先在知识库 ID={kb_id} 中检索。"
 
-        async with async_session_factory() as db:
+        async with ephemeral_db_session() as db:
             user = await self._load_user(db)
             result = await agent_service.run_agent(
                 agent_config=agent_config,
@@ -163,11 +153,10 @@ class WorkflowAgentRunner:
         task: str,
     ) -> dict[str, Any]:
         """加载用户自定义 Agent 配置并执行。"""
-        from app.core.database import async_session_factory
         from app.models.agent import Agent
 
         started = time.monotonic()
-        async with async_session_factory() as db:
+        async with ephemeral_db_session() as db:
             stmt = select(Agent).where(
                 Agent.id == agent_id,
                 Agent.tenant_id == self.tenant_id,
