@@ -25,6 +25,7 @@ from app.models.user import User
 from app.services.agent.tools import (
     AVAILABLE_TOOL_DEFINITIONS,
     TOOL_CALCULATOR,
+    TOOL_GENERATE_PPT,
     TOOL_KNOWLEDGE_BASE,
     TOOL_PYTHON_REPL,
     TOOL_SQL_QUERY,
@@ -34,6 +35,7 @@ from app.services.agent.tools import (
 from app.services.agent.tools.base import BaseTool, ToolResult
 from app.services.agent.tools.knowledge_base import KnowledgeBaseTool
 from app.services.agent.tools.calculator import CalculatorTool
+from app.services.agent.tools.generate_ppt import GeneratePptTool
 from app.services.agent.tools.python_repl import PythonReplTool
 from app.services.agent.tools.sql_query import SqlQueryTool
 from app.services.agent.tools.tavily_search import TavilySearchTool
@@ -61,6 +63,7 @@ class AgentService:
             TOOL_SQL_QUERY: SqlQueryTool,
             TOOL_CALCULATOR: CalculatorTool,
             TOOL_UI_AUTOMATION: UiAutomationTool,
+            TOOL_GENERATE_PPT: GeneratePptTool,
         }
 
     async def _resolve_custom_tool(
@@ -219,6 +222,8 @@ class AgentService:
             tool_cls = self.tool_registry[name]
             if tool_cls is KnowledgeBaseTool:
                 instances.append(KnowledgeBaseTool(db, tenant_id, user, user_ctx))
+            elif tool_cls is GeneratePptTool:
+                instances.append(GeneratePptTool(db, tenant_id, user, user_ctx))
             elif tool_cls is SqlQueryTool:
                 instances.append(SqlQueryTool(db, user_ctx))
             elif tool_cls is TavilySearchTool:

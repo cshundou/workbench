@@ -6,6 +6,7 @@ from app.services.agent.tools.knowledge_base import KnowledgeBaseTool
 from app.services.agent.tools.python_repl import PythonReplTool
 from app.services.agent.tools.sql_query import SqlQueryTool
 from app.services.agent.tools.tavily_search import TavilySearchTool
+from app.services.agent.tools.generate_ppt import GeneratePptTool
 from app.services.agent.tools.ui_automation import UiAutomationTool
 
 # 内置工具名称常量
@@ -15,6 +16,7 @@ TOOL_PYTHON_REPL = "python_repl"
 TOOL_SQL_QUERY = "sql_query"
 TOOL_CALCULATOR = "calculator"
 TOOL_UI_AUTOMATION = "ui_automation"
+TOOL_GENERATE_PPT = "generate_ppt"
 
 AVAILABLE_TOOL_DEFINITIONS: list[dict[str, str]] = [
     {
@@ -47,18 +49,25 @@ AVAILABLE_TOOL_DEFINITIONS: list[dict[str, str]] = [
         "label": "UI 自动化",
         "description": "网页抓取与 RPA 轻量自动化（无 API 系统对接）",
     },
+    {
+        "name": TOOL_GENERATE_PPT,
+        "label": "PPT 生成",
+        "description": "根据结构化大纲生成 PPTX 演示文稿文件",
+    },
 ]
 
 __all__ = [
     "AVAILABLE_TOOL_DEFINITIONS",
     "BaseTool",
     "CalculatorTool",
+    "GeneratePptTool",
     "KnowledgeBaseTool",
     "PythonReplTool",
     "SqlQueryTool",
     "TavilySearchTool",
     "ToolResult",
     "TOOL_CALCULATOR",
+    "TOOL_GENERATE_PPT",
     "TOOL_KNOWLEDGE_BASE",
     "TOOL_PYTHON_REPL",
     "TOOL_SQL_QUERY",

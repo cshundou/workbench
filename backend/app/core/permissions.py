@@ -55,6 +55,7 @@ TOOL_CODE_USE = "tool:code:use"
 TOOL_SQL_USE = "tool:sql:use"
 TOOL_CALCULATOR_USE = "tool:calculator:use"
 TOOL_UI_AUTOMATION_USE = "tool:ui_automation:use"
+TOOL_PPT_USE = "tool:ppt:use"
 
 # 全部工具权限
 ALL_TOOL_PERMISSIONS: list[str] = [
@@ -64,6 +65,7 @@ ALL_TOOL_PERMISSIONS: list[str] = [
     TOOL_SQL_USE,
     TOOL_CALCULATOR_USE,
     TOOL_UI_AUTOMATION_USE,
+    TOOL_PPT_USE,
 ]
 
 # 内置工具名称 -> 权限码映射
@@ -74,6 +76,7 @@ TOOL_PERMISSION_MAP: dict[str, str] = {
     "sql_query": TOOL_SQL_USE,
     "calculator": TOOL_CALCULATOR_USE,
     "ui_automation": TOOL_UI_AUTOMATION_USE,
+    "generate_ppt": TOOL_PPT_USE,
 }
 
 # 工具权限 -> 友好名称
@@ -84,6 +87,7 @@ TOOL_PERMISSION_LABELS: dict[str, str] = {
     TOOL_SQL_USE: "SQL查询工具",
     TOOL_CALCULATOR_USE: "计算器工具",
     TOOL_UI_AUTOMATION_USE: "UI自动化工具",
+    TOOL_PPT_USE: "PPT生成工具",
 }
 
 # 默认管理员拥有的全部权限标识
@@ -123,6 +127,7 @@ DEFAULT_USER_PERMISSIONS: list[str] = [
     TASK_READ,
     TOOL_KNOWLEDGE_USE,
     TOOL_CALCULATOR_USE,
+    TOOL_PPT_USE,
 ]
 
 # 只读用户权限

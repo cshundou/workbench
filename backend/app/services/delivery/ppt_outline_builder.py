@@ -45,8 +45,37 @@ def _split_sections(text: str) -> list[tuple[str, str]]:
     return sections
 
 
-def _parse_json_slides(text: str) -> list[dict[str, Any]] | None:
-    """尝试解析 Agent 输出的 JSON 幻灯片数组。"""
+def _normalize_slide_item(item: dict[str, Any]) -> dict[str, Any]:
+    """标准化单页幻灯片字段。"""
+    slide_type = item.get("slide_type") or item.get("type") or "content"
+    title = str(item.get("title") or item.get("heading") or "").strip()
+    subtitle = str(item.get("subtitle") or "").strip()
+    bullets_raw = item.get("bullets") or item.get("points") or []
+    bullets = (
+        [str(b).strip() for b in bullets_raw if str(b).strip()]
+        if isinstance(bullets_raw, list)
+        else []
+    )
+    body = str(item.get("content") or item.get("body") or "").strip()
+    if not bullets and body:
+        bullets = _extract_bullets(body) or [body[:200]]
+
+    slide: dict[str, Any] = {
+        "slide_type": slide_type,
+        "title": title or "内容",
+        "bullets": bullets[:8],
+    }
+    if subtitle:
+        slide["subtitle"] = subtitle
+    if item.get("chart"):
+        slide["chart"] = item["chart"]
+    if item.get("table"):
+        slide["table"] = item["table"]
+    return slide
+
+
+def _parse_json_outline(text: str) -> dict[str, Any] | None:
+    """尝试解析 Agent 输出的 JSON 大纲（含 slides / template_id）。"""
     text = text.strip()
     if not text:
         return None
@@ -59,29 +88,57 @@ def _parse_json_slides(text: str) -> list[dict[str, Any]] | None:
             data = json.loads(candidate)
         except json.JSONDecodeError:
             continue
-        if isinstance(data, dict) and isinstance(data.get("slides"), list):
-            data = data["slides"]
-        if not isinstance(data, list):
-            continue
-        slides: list[dict[str, Any]] = []
-        for item in data:
-            if not isinstance(item, dict):
+        if not isinstance(data, dict):
+            if isinstance(data, list):
+                data = {"slides": data}
+            else:
                 continue
-            title = str(item.get("title") or item.get("heading") or "").strip()
-            bullets_raw = item.get("bullets") or item.get("points") or []
-            bullets = (
-                [str(b).strip() for b in bullets_raw if str(b).strip()]
-                if isinstance(bullets_raw, list)
-                else []
-            )
-            body = str(item.get("content") or item.get("body") or "").strip()
-            if not bullets and body:
-                bullets = _extract_bullets(body) or [body[:200]]
-            if title or bullets:
-                slides.append({"title": title or "内容", "bullets": bullets[:8]})
-        if slides:
-            return slides
+        slides_raw = data.get("slides")
+        if not isinstance(slides_raw, list):
+            continue
+        slides = [
+            _normalize_slide_item(item)
+            for item in slides_raw
+            if isinstance(item, dict)
+        ]
+        if not slides:
+            continue
+        template_id = data.get("template_id") or data.get("template") or "business_minimal"
+        return {
+            "title": str(data.get("title") or "演示文稿"),
+            "subtitle": str(data.get("subtitle") or ""),
+            "template_id": template_id,
+            "slides": slides,
+        }
     return None
+
+
+def _build_default_structure(
+    title: str,
+    content_slides: list[dict[str, Any]],
+    *,
+    subtitle: str = "",
+    template_id: str = "business_minimal",
+) -> dict[str, Any]:
+    """构建含封面、目录、正文、结尾的标准结构。"""
+    toc_titles = [s.get("title", "") for s in content_slides if s.get("title")]
+    slides: list[dict[str, Any]] = [
+        {
+            "slide_type": "cover",
+            "title": title,
+            "subtitle": subtitle or "多 Agent 协同生成",
+        },
+    ]
+    if toc_titles:
+        slides.append({"slide_type": "toc", "title": "目录", "bullets": toc_titles[:12]})
+    slides.extend(content_slides)
+    slides.append({"slide_type": "ending", "title": "谢谢聆听"})
+    return {
+        "title": title,
+        "subtitle": subtitle,
+        "template_id": template_id,
+        "slides": slides,
+    }
 
 
 def build_ppt_outline(
@@ -94,22 +151,35 @@ def build_ppt_outline(
     汇总 deliverables 为 PPT 大纲。
 
     Returns:
-        {"title": str, "slides": [{"title": str, "bullets": list[str]}]}
+        {"title", "subtitle", "template_id", "slides": [...]}
     """
     combined_parts: list[str] = []
+    parsed_outline: dict[str, Any] | None = None
+
     for item in deliverables:
         content = str(item.get("content") or "").strip()
         if content:
             combined_parts.append(content)
+            if parsed_outline is None:
+                parsed_outline = _parse_json_outline(content)
 
     combined = "\n\n".join(combined_parts).strip()
     title = task.strip()[:80] or "演示文稿"
 
-    json_slides = _parse_json_slides(combined)
-    if json_slides:
-        return {"title": title, "slides": json_slides[:max_slides]}
+    if parsed_outline:
+        parsed_outline["title"] = parsed_outline.get("title") or title
+        slides = parsed_outline.get("slides") or []
+        if slides and slides[0].get("slide_type") not in ("cover", "toc", "ending"):
+            return _build_default_structure(
+                parsed_outline["title"],
+                slides[: max_slides - 3],
+                subtitle=parsed_outline.get("subtitle", ""),
+                template_id=str(parsed_outline.get("template_id") or "business_minimal"),
+            )
+        parsed_outline["slides"] = slides[:max_slides]
+        return parsed_outline
 
-    slides: list[dict[str, Any]] = [{"title": title, "bullets": ["汇报主题", task[:120]]}]
+    content_slides: list[dict[str, Any]] = []
     sections = _split_sections(combined)
 
     if sections:
@@ -124,19 +194,27 @@ def build_ppt_outline(
                 bullets = [p[:120] for p in paragraphs[:5]]
             if not bullets:
                 bullets = [body[:150]] if body else [clean_title]
-            slides.append({"title": clean_title[:60], "bullets": bullets[:6]})
+            content_slides.append(
+                {"slide_type": "content", "title": clean_title[:60], "bullets": bullets[:6]}
+            )
     elif combined:
         paragraphs = [p.strip() for p in combined.split("\n\n") if p.strip()]
-        for idx, para in enumerate(paragraphs[: max_slides - 1]):
+        for idx, para in enumerate(paragraphs[: max_slides - 3]):
             bullets = _extract_bullets(para) or [para[:150]]
-            slides.append({"title": f"要点 {idx + 1}", "bullets": bullets[:6]})
-
-    if len(slides) <= 1 and combined:
-        slides.append(
+            content_slides.append(
+                {
+                    "slide_type": "content",
+                    "title": f"要点 {idx + 1}",
+                    "bullets": bullets[:6],
+                }
+            )
+    else:
+        content_slides.append(
             {
-                "title": "详细内容",
-                "bullets": [combined[i : i + 120] for i in range(0, min(len(combined), 600), 120)],
+                "slide_type": "content",
+                "title": title,
+                "bullets": ["汇报主题", task[:120]],
             }
         )
 
-    return {"title": title, "slides": slides[:max_slides]}
+    return _build_default_structure(title, content_slides[: max_slides - 3])
