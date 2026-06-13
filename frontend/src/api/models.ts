@@ -81,14 +81,29 @@ export function fetchProviderModels(
     api_key?: string;
     base_url?: string;
     model_type?: string;
+    force_refresh?: boolean;
   },
 ): Promise<ProviderModelListResponse> {
   return request.post(`/model-providers/${provider}/models`, payload);
 }
 
+/** 模型能力标签文案 */
+export const MODEL_FEATURE_LABELS: Record<string, string> = {
+  stream: '流式',
+  'tool-call': '工具调用',
+  vision: '视觉',
+  embedding: '向量',
+  rerank: '重排序',
+};
+
 /** 获取当前用户可用模型 */
-export function getAvailableModels(modelType = 'llm'): Promise<AvailableModelsResponse> {
-  return request.get('/models/available', { params: { model_type: modelType } });
+export function getAvailableModels(
+  modelType = 'llm',
+  refresh = false,
+): Promise<AvailableModelsResponse> {
+  return request.get('/models/available', {
+    params: { model_type: modelType, refresh: refresh || undefined },
+  });
 }
 
 /** 从 AIModelEntity 获取显示名 */
@@ -127,6 +142,20 @@ export function validateAgentModelParamsFromEntity(
     return `最大 Token 必须在 ${maxRule.min}-${maxRule.max} 范围内`;
   }
   return null;
+}
+
+/** 格式化 Embedding 模型下拉展示 */
+export function formatEmbeddingOptionLabel(entity: AIModelEntity): string {
+  const name = getModelLabel(entity);
+  const provider = PROVIDER_LABELS[entity.provider] || entity.provider_label || entity.provider;
+  return `${name}（${provider} · ${entity.context_size} tokens）`;
+}
+
+/** 格式化 LLM 模型能力标签列表 */
+export function getDisplayFeatures(entity: AIModelEntity): string[] {
+  return (entity.features || [])
+    .filter((item) => item !== 'stream')
+    .map((item) => MODEL_FEATURE_LABELS[item] || item);
 }
 
 /** 将 AIModelEntity 转为 Agent 表单使用的结构 */

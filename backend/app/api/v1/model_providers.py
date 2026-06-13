@@ -103,7 +103,7 @@ async def fetch_provider_models(
         base_url=base_url,
         model_type=body.model_type,
         user_id=current_user.id,
-        use_cache=True,
+        use_cache=not body.force_refresh,
     )
 
     response = ProviderModelListResponse(
@@ -122,12 +122,14 @@ async def list_available_models(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     user_ctx: Annotated[UserKeyContext, Depends(get_user_key_context)],
     model_type: Optional[str] = Query(default=MODEL_TYPE_LLM, description="llm / text-embedding / rerank"),
+    refresh: bool = Query(default=False, description="跳过缓存强制重新拉取"),
 ) -> dict[str, Any]:
     """根据当前用户已配置的密钥，汇总返回可用模型。"""
     models, fetch_from, warning = await model_provider_service.get_available_models_for_user(
         user_keys=user_ctx.keys,
         model_type=model_type,
         user_id=current_user.id,
+        use_cache=not refresh,
     )
     providers = list(dict.fromkeys([m.provider for m in models if m.provider in LLM_PROVIDER_ORDER]))
     result = AvailableModelsResponse(

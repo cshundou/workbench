@@ -50,6 +50,7 @@ class ProviderModelListRequest(BaseModel):
     api_key: Optional[str] = Field(None, description="API 密钥（不传则使用已保存密钥）")
     base_url: Optional[str] = Field(None, description="自定义 API 地址")
     model_type: Optional[str] = Field(None, description="过滤模型类型：llm / text-embedding / rerank")
+    force_refresh: bool = Field(False, description="是否跳过缓存强制重新拉取")
 
 
 class ProviderModelListResponse(BaseModel):

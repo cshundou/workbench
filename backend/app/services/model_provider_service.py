@@ -738,6 +738,7 @@ class ModelProviderService:
         model_type: Optional[str] = None,
         *,
         user_id: Optional[int] = None,
+        use_cache: bool = True,
     ) -> tuple[list[AIModelEntity], str, Optional[str]]:
         """汇总用户已配置密钥的所有可用模型。"""
         all_models: dict[str, AIModelEntity] = {}
@@ -757,7 +758,7 @@ class ModelProviderService:
                 base_url=getattr(config, "base_url", None),
                 model_type=model_type,
                 user_id=user_id,
-                use_cache=True,
+                use_cache=use_cache,
             )
             if source == "remote":
                 fetch_from = "remote"
