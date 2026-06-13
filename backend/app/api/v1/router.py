@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from app.api.v1.marketplace import router as marketplace_router
 from app.api.v1.mcp import router as mcp_router
 from app.api.v1.plugins import router as plugins_router
 from app.api.v1.skills import router as skills_router
@@ -57,6 +58,7 @@ api_router.include_router(tasks_router)
 api_router.include_router(tools_router)
 api_router.include_router(mcp_router)
 api_router.include_router(plugins_router)
+api_router.include_router(marketplace_router)
 api_router.include_router(skills_router)
 
 

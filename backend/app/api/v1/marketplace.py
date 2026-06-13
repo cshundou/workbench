@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import CurrentUser, get_current_tenant_id, get_db_session
+from app.core.deps import CurrentUser, get_current_tenant_id, get_current_user, get_db_session
 from app.core.response import success_response
 from app.services.marketplace_service import marketplace_service
 
@@ -22,7 +22,7 @@ class ShareTemplateRequest(BaseModel):
 
 @router.get("/templates", summary="模板市场列表（50+ 官方）")
 async def list_marketplace_templates(
-    _: Annotated[CurrentUser, Depends()],
+    _: Annotated[CurrentUser, Depends(get_current_user)],
     category: Optional[str] = Query(default=None),
     industry: Optional[str] = Query(default=None),
     keyword: Optional[str] = Query(default=None),
@@ -36,7 +36,7 @@ async def list_marketplace_templates(
 @router.get("/templates/{template_id}", summary="模板详情")
 async def get_marketplace_template(
     template_id: str,
-    _: Annotated[CurrentUser, Depends()],
+    _: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> dict[str, Any]:
     tpl = marketplace_service.get_template(template_id)
     return success_response(data=tpl)
@@ -45,7 +45,7 @@ async def get_marketplace_template(
 @router.post("/templates/share", summary="分享模板到市场")
 async def share_template(
     body: ShareTemplateRequest,
-    user: Annotated[CurrentUser, Depends()],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     tenant_id: Annotated[int, Depends(get_current_tenant_id)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
