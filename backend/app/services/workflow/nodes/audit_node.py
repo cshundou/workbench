@@ -17,10 +17,19 @@ DEFAULT_AUDIT_DIMENSIONS: list[str] = [
     "compliance",
 ]
 
+PPT_AUDIT_DIMENSIONS: list[str] = [
+    "completeness",
+    "accuracy",
+    "logic",
+    "layout",
+    "compliance",
+]
+
 DIMENSION_LABELS: dict[str, str] = {
     "completeness": "内容完整性",
     "accuracy": "数据准确性",
     "logic": "逻辑合理性",
+    "layout": "版式与视觉",
     "compliance": "合规性",
 }
 
@@ -75,7 +84,7 @@ def run_forced_audit(
   "passed": true/false,
   "grade": "pass" | "conditional" | "reject",
   "issues": ["问题1", "问题2"],
-  "assignee": "researcher" | "engineer" | "analyst" | "content_editor" | "compliance_officer" | "financial_analyst" | "copywriter",
+  "assignee": "researcher" | "engineer" | "analyst" | "content_editor" | "compliance_officer" | "financial_analyst" | "copywriter" | "ppt_designer",
   "summary": "审核意见摘要",
   "dimensions": {{
     "completeness": true/false,

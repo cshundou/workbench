@@ -1374,9 +1374,10 @@ class WorkflowBuilder:
                 "copywriter",
                 "content_editor",
                 "data_visualizer",
+                "ppt_designer",
                 "compliance_officer",
             ):
-                result = self._run_analyst_subtask(state, task_desc)
+                result = self._run_analyst_subtask(state, task_desc, role=role)
                 result_key = "analysis"
             elif agent_type == "knowledge":
                 run_result = self._run_role_agent(
@@ -1498,14 +1499,48 @@ class WorkflowBuilder:
             return route
         return "audit"
 
-    def _run_analyst_subtask(self, state: AgentState, task_desc: str) -> str:
-        """分析师子任务：基于已有结果生成报告或幻灯片大纲。"""
+    def _run_analyst_subtask(
+        self,
+        state: AgentState,
+        task_desc: str,
+        *,
+        role: str = "analyst",
+    ) -> str:
+        """分析师/文案/PPT 设计师子任务：基于已有结果生成报告或幻灯片大纲。"""
         results = state.get("results", {})
         llm = self._create_llm()
         delivery_format = state.get("delivery_format") or detect_delivery_format(state["task"])
-        if delivery_format == "ppt":
+        if delivery_format == "ppt" and role == "ppt_designer":
             analysis_prompt = f"""
-请基于以下资料完成演示文稿（PPT）大纲撰写：
+请作为 PPT 设计师，基于以下资料完成演示文稿结构化方案并准备生成文件：
+
+原始任务：{state['task']}
+设计要求：{task_desc}
+
+已有资料：
+{json.dumps(results, ensure_ascii=False, default=str)}
+
+请输出 JSON（不要其他说明），结构如下：
+```json
+{{
+  "title": "演示标题",
+  "subtitle": "副标题",
+  "template_id": "business_minimal",
+  "slides": [
+    {{"slide_type": "cover", "title": "标题", "subtitle": "副标题"}},
+    {{"slide_type": "toc", "title": "目录", "bullets": ["章节1", "章节2"]}},
+    {{"slide_type": "content", "title": "章节", "bullets": ["要点1", "要点2"]}},
+    {{"slide_type": "section", "title": "过渡页标题", "subtitle": "说明"}},
+    {{"slide_type": "content", "title": "数据页", "bullets": ["结论"], "chart": {{"chart_type": "bar", "categories": ["A","B"], "series": [{{"name": "指标", "values": [1,2]}}]}}}},
+    {{"slide_type": "ending", "title": "谢谢聆听"}}
+  ]
+}}
+```
+要求：8-15 页，template_id 选 business_minimal 或 tech_modern，内容专业简洁。
+"""
+        elif delivery_format == "ppt":
+            analysis_prompt = f"""
+请作为文案策划师，基于以下资料完成演示文稿（PPT）大纲撰写：
 
 原始任务：{state['task']}
 撰写要求：{task_desc}
@@ -1516,9 +1551,9 @@ class WorkflowBuilder:
 请输出 JSON 格式的幻灯片大纲（不要其他说明文字），结构如下：
 ```json
 {{
+  "title": "演示标题",
   "slides": [
-    {{"title": "封面标题", "bullets": ["副标题或说明"]}},
-    {{"title": "章节标题", "bullets": ["要点1", "要点2", "要点3"]}}
+    {{"slide_type": "content", "title": "章节标题", "bullets": ["要点1", "要点2", "要点3"]}}
   ]
 }}
 ```
@@ -1582,6 +1617,7 @@ class WorkflowBuilder:
                 "file_path": result["file_path"],
                 "size": result["size"],
                 "slide_count": result["slide_count"],
+                "template_id": result.get("template_id", "business_minimal"),
                 "download_path": (
                     f"/api/v1/group-chat/sessions/{self.execution_id}"
                     f"/deliverables/{result['filename']}"
@@ -1644,13 +1680,18 @@ class WorkflowBuilder:
             "资料": "researcher",
             "逻辑": "analyst",
             "格式": "content_editor",
+            "版式": "ppt_designer",
+            "排版": "ppt_designer",
+            "视觉": "ppt_designer",
+            "PPT": "ppt_designer",
+            "幻灯片": "ppt_designer",
             "合规": "compliance_officer",
         }
         for kw, role in keyword_map.items():
             if kw in issues_text and (not team_role_ids or role in team_role_ids):
                 return role
         if team_role_ids and assignee not in team_role_ids:
-            for candidate in ("analyst", "engineer", "researcher", "copywriter"):
+            for candidate in ("ppt_designer", "analyst", "engineer", "researcher", "copywriter"):
                 if candidate in team_role_ids:
                     return candidate
         lookup = build_role_lookup(team_members)
@@ -1663,10 +1704,16 @@ class WorkflowBuilder:
         state = dict(state)
         review_count = int(state.get("review_count") or 0)
         self._set_member_status("auditor", "working")
+        delivery_format = state.get("delivery_format") or detect_delivery_format(state["task"])
+        audit_msg = (
+            "开始审核最终成果，将从完整性、版式视觉、逻辑合理性等维度评估..."
+            if delivery_format == "ppt"
+            else "开始审核最终成果，将从完整性、数据准确性、逻辑合理性、合规性四个维度评估..."
+        )
         self._emit_group_chat_role(
             "auditor",
             "progress_update",
-            "开始审核最终成果，将从完整性、数据准确性、逻辑合理性、合规性四个维度评估...",
+            audit_msg,
         )
 
         llm = self._create_llm()
@@ -1679,10 +1726,16 @@ class WorkflowBuilder:
             return content if isinstance(content, str) else str(content)
 
         audit_runner = ForcedAuditRunner(llm_invoke=_invoke if llm else None)
+        audit_config: dict[str, Any] = {}
+        if delivery_format == "ppt":
+            from app.services.workflow.nodes.audit_node import PPT_AUDIT_DIMENSIONS
+
+            audit_config["audit_dimensions"] = PPT_AUDIT_DIMENSIONS
         review_result = audit_runner.run(
             task=state["task"],
             deliverables=state.get("deliverables", []),
             results=state.get("results", {}),
+            config=audit_config,
         )
         state["review_result"] = review_result
 
@@ -1714,6 +1767,8 @@ class WorkflowBuilder:
                             "content": ppt_file["download_path"],
                             "file_type": "pptx",
                             "size": ppt_file["size"],
+                            "slide_count": ppt_file["slide_count"],
+                            "template_id": ppt_file.get("template_id"),
                         }
                     )
             self._emit_group_chat_role(
