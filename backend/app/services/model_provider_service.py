@@ -255,6 +255,15 @@ PREDEFINED_MODEL_MAP: dict[str, AIModelEntity] = {
     item.model: item for item in PREDEFINED_MODELS
 }
 
+PREDEFINED_MODEL_MAP_LOWER: dict[str, AIModelEntity] = {
+    item.model.lower(): item for item in PREDEFINED_MODELS
+}
+
+
+def normalize_model_id(model_id: str) -> str:
+    """规范化模型 ID 便于大小写不敏感匹配。"""
+    return model_id.strip().lower()
+
 
 def encode_model_preferences(llm_model: Optional[str], embedding_model: Optional[str]) -> Optional[str]:
     """将 LLM 与 Embedding 默认模型编码为单字段存储。"""
@@ -306,7 +315,7 @@ def infer_provider_from_model(model_name: Optional[str]) -> Optional[str]:
         return "tongyi"
     if name.startswith("doubao"):
         return "doubao"
-    if name.startswith(("abab", "minimax", "embo", "m3")):
+    if name.startswith(("abab", "minimax", "embo", "m3")) or "minimax" in name:
         return "minimax"
     if name.startswith("rerank"):
         return "cohere"
@@ -525,7 +534,9 @@ class ModelProviderService:
             resolved_type = infer_model_type(model_id)
             if model_type and resolved_type != model_type:
                 continue
-            predefined = self._predefined_map.get(model_id)
+            predefined = self._predefined_map.get(model_id) or PREDEFINED_MODEL_MAP_LOWER.get(
+                normalize_model_id(model_id)
+            )
             if predefined and predefined.provider == provider:
                 entity = self._clone_entity(predefined)
                 entity.fetch_from = "remote"
@@ -779,19 +790,34 @@ class ModelProviderService:
 
         return await validate_provider_key(provider, api_key, base_url)
 
+    def resolve_canonical_model_id(
+        self,
+        model_name: str,
+        models: list[AIModelEntity],
+        model_type: Optional[str] = None,
+    ) -> Optional[str]:
+        """将用户输入的模型名解析为可用列表中的规范 ID（大小写不敏感）。"""
+        if not model_name:
+            return None
+        target = normalize_model_id(model_name)
+        for item in models:
+            if model_type and item.model_type != model_type:
+                continue
+            if normalize_model_id(item.model) == target:
+                return item.model
+        predefined = PREDEFINED_MODEL_MAP_LOWER.get(target)
+        if predefined and (not model_type or predefined.model_type == model_type):
+            return predefined.model
+        return None
+
     def validate_model_in_list(
         self,
         model_name: str,
         models: list[AIModelEntity],
         model_type: Optional[str] = None,
     ) -> bool:
-        """校验模型是否在可用列表中。"""
-        for item in models:
-            if item.model == model_name:
-                if model_type and item.model_type != model_type:
-                    continue
-                return True
-        return False
+        """校验模型是否在可用列表中（大小写不敏感）。"""
+        return self.resolve_canonical_model_id(model_name, models, model_type) is not None
 
     @staticmethod
     def _clone_entity(entity: AIModelEntity) -> AIModelEntity:

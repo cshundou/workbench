@@ -92,6 +92,17 @@ class TestModelProviderService:
         assert model_provider_service.get_default_llm_model("minimax") == "minimax-m3"
         assert model_provider_service.get_default_embedding_model("minimax") == "embo-01"
 
+    def test_validate_model_in_list_case_insensitive(self) -> None:
+        models = model_provider_service.get_predefined_models(provider="minimax", model_type=MODEL_TYPE_LLM)
+        assert model_provider_service.validate_model_in_list("MiniMax-M3", models, MODEL_TYPE_LLM) or (
+            model_provider_service.validate_model_in_list("minimax-m3", models, MODEL_TYPE_LLM)
+        )
+
+    def test_resolve_canonical_model_id(self) -> None:
+        models = model_provider_service.get_predefined_models(provider="openai", model_type=MODEL_TYPE_LLM)
+        canonical = model_provider_service.resolve_canonical_model_id("GPT-4O", models, MODEL_TYPE_LLM)
+        assert canonical == "gpt-4o"
+
     @pytest.mark.asyncio
     async def test_fetch_provider_models_invalid_key(self) -> None:
         models, fetch_from, _, is_valid, _ = await model_provider_service.fetch_provider_models(

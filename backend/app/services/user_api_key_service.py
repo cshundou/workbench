@@ -140,9 +140,16 @@ class UserApiKeyService:
         record.api_key = encrypted
         record.base_url = data.base_url
 
+        # 先验证密钥，再拉取模型列表，避免无效密钥触发多余远程调用
+        is_valid, validate_message = await validate_provider_key(
+            provider,
+            data.api_key.strip(),
+            data.base_url,
+        )
+
         llm_model = data.model_name
         embedding_model = data.embedding_model_name
-        if provider in LLM_PROVIDERS and (llm_model or embedding_model):
+        if provider in LLM_PROVIDERS and is_valid and (llm_model or embedding_model):
             models, _, _, _, _ = await model_provider_service.fetch_provider_models(
                 provider=provider,
                 api_key=data.api_key.strip(),
@@ -151,26 +158,27 @@ class UserApiKeyService:
                 use_cache=False,
             )
             if models:
-                if llm_model and not model_provider_service.validate_model_in_list(
-                    llm_model, models, MODEL_TYPE_LLM
-                ):
-                    raise ValidationError(message=f"默认 LLM 模型不在可用列表中: {llm_model}")
-                if embedding_model and not model_provider_service.validate_model_in_list(
-                    embedding_model, models, MODEL_TYPE_EMBEDDING
-                ):
-                    raise ValidationError(
-                        message=f"默认 Embedding 模型不在可用列表中: {embedding_model}"
+                if llm_model:
+                    canonical_llm = model_provider_service.resolve_canonical_model_id(
+                        llm_model, models, MODEL_TYPE_LLM
                     )
+                    if canonical_llm is None:
+                        raise ValidationError(
+                            message=f"默认 LLM 模型不在可用列表中: {llm_model}"
+                        )
+                    llm_model = canonical_llm
+                if embedding_model:
+                    canonical_emb = model_provider_service.resolve_canonical_model_id(
+                        embedding_model, models, MODEL_TYPE_EMBEDDING
+                    )
+                    if canonical_emb is None:
+                        raise ValidationError(
+                            message=f"默认 Embedding 模型不在可用列表中: {embedding_model}"
+                        )
+                    embedding_model = canonical_emb
 
         record.model_name = encode_model_preferences(llm_model, embedding_model)
         record.is_default = data.is_default
-
-        # 保存时验证密钥有效性，避免写入无效 test key 后仍标记为可用
-        is_valid, validate_message = await validate_provider_key(
-            provider,
-            data.api_key.strip(),
-            data.base_url,
-        )
         record.is_valid = is_valid
         record.last_validated_at = datetime.now(timezone.utc)
         if not is_valid:
@@ -186,6 +194,7 @@ class UserApiKeyService:
             await self._clear_default_flags(db, user_id, provider)
 
         await db.flush()
+        await db.refresh(record)
         await audit_service.record_crud_action(
             db=db,
             tenant_id=tenant_id,
