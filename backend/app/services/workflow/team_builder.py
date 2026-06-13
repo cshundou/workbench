@@ -99,9 +99,9 @@ class TeamBuilder:
         if delivery_format == "ppt":
             domain = "presentation"
         complexity = self.assess_complexity(task)
-        team_size = self.determine_team_size(complexity)
+        team_size = self.determine_team_size(complexity, delivery_format=delivery_format)
         members = self.match_roles(task, domain, team_size, complexity=complexity)
-        members = self.plan_work_distribution(task, members)
+        members = self.plan_work_distribution(task, members, delivery_format=delivery_format)
         members = self._ensure_auditor(members)
 
         workflow = self._build_workflow_string(members)
@@ -111,7 +111,9 @@ class TeamBuilder:
             "team_size": len(members),
             "members": members,
             "workflow": workflow,
-            "workflow_phases": self.build_workflow_phases(members),
+            "workflow_phases": self.build_workflow_phases(
+                members, delivery_format=delivery_format
+            ),
             "max_review_rounds": 3,
             "domain": domain,
             "complexity": complexity,
@@ -153,7 +155,9 @@ class TeamBuilder:
             "team_size": len(members),
             "members": members,
             "workflow": "project_manager → researcher → engineer → analyst → auditor",
-            "workflow_phases": self.build_workflow_phases(members),
+            "workflow_phases": self.build_workflow_phases(
+                members, delivery_format=delivery_format
+            ),
             "max_review_rounds": 3,
             "domain": "presentation" if delivery_format == "ppt" else "general",
             "complexity": "medium",
@@ -189,8 +193,13 @@ class TeamBuilder:
             return "complex"
         return "medium"
 
-    def determine_team_size(self, complexity: str) -> int:
-        """根据复杂度确定团队规模（2-8 人）。"""
+    def determine_team_size(
+        self, complexity: str, *, delivery_format: str = "report"
+    ) -> int:
+        """根据复杂度确定团队规模；PPT 任务固定 3-5 人。"""
+        if delivery_format == "ppt":
+            ppt_size = {"simple": 3, "medium": 4, "complex": 5}
+            return ppt_size.get(complexity, 4)
         size_map = {"simple": 3, "medium": 5, "complex": 7}
         return min(max(size_map.get(complexity, 5), self.MIN_TEAM_SIZE), self.MAX_TEAM_SIZE)
 
@@ -244,21 +253,20 @@ class TeamBuilder:
             ],
             "presentation": {
                 "simple": [
-                    "project_manager",
-                    "analyst",
+                    "copywriter",
                     "ppt_designer",
                     "auditor",
                 ],
                 "medium": [
-                    "project_manager",
                     "copywriter",
+                    "analyst",
                     "ppt_designer",
                     "auditor",
                 ],
                 "complex": [
-                    "project_manager",
-                    "researcher",
                     "copywriter",
+                    "researcher",
+                    "analyst",
                     "ppt_designer",
                     "auditor",
                 ],
@@ -315,8 +323,13 @@ class TeamBuilder:
         self,
         task: str,
         members: list[dict[str, Any]],
+        *,
+        delivery_format: str = "report",
     ) -> list[dict[str, Any]]:
         """步骤4：分工规划，为每个角色分配子任务与阶段依赖。"""
+        if delivery_format == "ppt":
+            return self._plan_ppt_work_distribution(task, members)
+
         execution_roles = {
             m["role_id"]
             for m in members
@@ -345,9 +358,56 @@ class TeamBuilder:
                 member["phase"] = 2
         return members
 
+    def _plan_ppt_work_distribution(
+        self,
+        task: str,
+        members: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """
+        PPT 三阶段流水线分工：大纲策划(2) → 内容生产(3) → 排版生成(4)。
+        """
+        content_roles = [
+            m["role_id"]
+            for m in members
+            if m["role_id"] in ("researcher", "info_researcher", "analyst", "financial_analyst")
+        ]
+        for member in members:
+            role_id = member["role_id"]
+            member["subtasks"] = self._default_subtasks_for_role(role_id, task)
+            if role_id == "copywriter":
+                member["phase"] = 2
+                member["depends_on"] = []
+            elif role_id in content_roles:
+                member["phase"] = 3
+                member["depends_on"] = ["copywriter"]
+            elif role_id == "ppt_designer":
+                member["phase"] = 4
+                member["depends_on"] = content_roles or ["copywriter"]
+            elif role_id == "auditor":
+                member["phase"] = 99
+                member["depends_on"] = [
+                    m["role_id"] for m in members if m["role_id"] != "auditor"
+                ]
+            elif role_id == "project_manager":
+                member["phase"] = 1
+                member["depends_on"] = []
+            else:
+                member["phase"] = 3
+                member["depends_on"] = ["copywriter"]
+        return members
+
     @staticmethod
-    def build_workflow_phases(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def build_workflow_phases(
+        members: list[dict[str, Any]],
+        *,
+        delivery_format: str = "report",
+    ) -> list[dict[str, Any]]:
         """生成分阶段工作流描述（供统筹节点与前端时间线使用）。"""
+        ppt_phase_labels: dict[int, str] = {
+            2: "第一阶段：大纲策划",
+            3: "第二阶段：内容生产",
+            4: "第三阶段：排版生成",
+        }
         phase_map: dict[int, list[str]] = {}
         for member in members:
             role_id = member.get("role_id", "")
@@ -364,22 +424,25 @@ class TeamBuilder:
         ]
         for phase_num in sorted(phase for phase in phase_map if phase < 99):
             roles = phase_map[phase_num]
-            label = (
-                "任务拆解与协调"
-                if phase_num == 1
-                else ("成果汇总分析" if phase_num == 3 else "执行阶段")
-            )
+            if delivery_format == "ppt" and phase_num in ppt_phase_labels:
+                label = ppt_phase_labels[phase_num]
+            elif phase_num == 1:
+                label = "任务拆解与协调"
+            elif phase_num == 3:
+                label = "成果汇总分析"
+            else:
+                label = "执行阶段"
             phases.append(
                 {
                     "phase": phase_num,
-                    "label": f"阶段{phase_num}：{label}",
+                    "label": label if delivery_format == "ppt" and phase_num in ppt_phase_labels else f"阶段{phase_num}：{label}",
                     "roles": roles,
                 }
             )
         phases.append(
             {
                 "phase": 100,
-                "label": "终审交付",
+                "label": "最终审核与交付" if delivery_format == "ppt" else "终审交付",
                 "roles": [
                     m.get("name", "审核员")
                     for m in members
@@ -408,15 +471,16 @@ class TeamBuilder:
             "auditor": ["完整性审核", "准确性审核", "合规性审核"],
         }
         if detect_delivery_format(task) == "ppt":
-            subtask_map["copywriter"] = ["撰写演示文稿大纲与每页要点"]
-            subtask_map["ppt_designer"] = ["选择模板、排版并生成 PPT 文件"]
-            subtask_map["data_visualizer"] = ["优化幻灯片结构与视觉呈现"]
-            subtask_map["researcher"] = ["检索演示主题相关资料"]
-            subtask_map["analyst"] = ["汇总资料并补充幻灯片数据要点"]
+            subtask_map["copywriter"] = [
+                "撰写 SCQA 结构化大纲与每页核心观点（JSON slides）",
+            ]
+            subtask_map["researcher"] = ["检索行业资料与案例，标注来源"]
+            subtask_map["analyst"] = ["补充数据论据、配置图表与数据来源说明"]
+            subtask_map["ppt_designer"] = ["匹配版式模板并生成 PPT 文件"]
             subtask_map["auditor"] = [
-                "内容完整性审核",
-                "版式与视觉审核",
-                "合规性审核",
+                "大纲审核",
+                "内容审核",
+                "PPT 五维终稿审核",
             ]
         defaults = subtask_map.get(role_id, [f"处理任务：{task[:50]}"])
         return defaults
