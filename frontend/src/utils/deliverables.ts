@@ -18,6 +18,9 @@ export interface Deliverable {
   chartConfig?: Record<string, unknown>;
   /** PPTX 等二进制文件的 API 下载路径 */
   downloadUrl?: string;
+  /** PPT 页数 */
+  slideCount?: number;
+  templateId?: string;
 }
 
 const CATEGORY_ORDER: DeliverableCategory[] = ['final', 'chart', 'intermediate', 'reference'];
@@ -73,7 +76,12 @@ function buildDeliverableFromAttachment(
     typeof att.content === 'string' ? att.content : JSON.stringify(att.content, null, 2);
   const category = inferCategory(msg, att);
   const fileType = inferFileType(att, content);
-  const attAny = att as MessageAttachment & { file_type?: string; size?: number };
+  const attAny = att as MessageAttachment & {
+    file_type?: string;
+    size?: number;
+    slide_count?: number;
+    template_id?: string;
+  };
   const downloadUrl =
     fileType === 'pptx' && typeof att?.content === 'string' ? String(att.content) : undefined;
   return {
@@ -85,6 +93,8 @@ function buildDeliverableFromAttachment(
     fileType,
     content: fileType === 'pptx' ? '' : content,
     downloadUrl,
+    slideCount: attAny.slide_count,
+    templateId: attAny.template_id,
     createdBy: msg.sender.name || msg.sender.role,
     createdAt: msg.timestamp,
     size: attAny.size ?? new Blob([content]).size,
@@ -103,6 +113,32 @@ export function extractDeliverables(
   const map = new Map<string, Deliverable>();
 
   for (const msg of messages) {
+    if (msg.metadata?.ppt_file && typeof msg.metadata.ppt_file === 'object') {
+      const ppt = msg.metadata.ppt_file as Record<string, unknown>;
+      const pptFilename = String(ppt.filename || 'presentation.pptx');
+      const syntheticMsg: AgentMessage = {
+        id: msg.id,
+        timestamp: msg.timestamp,
+        sender: msg.sender,
+        type: msg.type,
+        content: msg.content,
+      };
+      const d = buildDeliverableFromAttachment(
+        syntheticMsg,
+        {
+          type: 'file',
+          name: pptFilename,
+          content: String(ppt.download_path || ''),
+          file_type: 'pptx',
+          size: Number(ppt.size || 0),
+          slide_count: Number(ppt.slide_count || 0),
+          template_id: String(ppt.template_id || ''),
+        } as MessageAttachment,
+        0,
+      );
+      d.id = `${msg.id}-ppt-file`;
+      map.set(d.id, d);
+    }
     if (msg.attachments?.length) {
       msg.attachments.forEach((att, idx) => {
         const d = buildDeliverableFromAttachment(msg, att, idx);

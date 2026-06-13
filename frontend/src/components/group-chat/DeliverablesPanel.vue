@@ -60,6 +60,12 @@ function handleView(d: Deliverable): void {
   emit('view', d);
 }
 
+function formatSlideMeta(d: Deliverable): string {
+  if (d.fileType !== 'pptx') return formatFileSize(d.size);
+  const pages = d.slideCount ? `${d.slideCount} 页 · ` : '';
+  return `${pages}${formatFileSize(d.size)}`;
+}
+
 function handleLocate(d: Deliverable): void {
   emit('locate', d.messageId);
 }
@@ -130,14 +136,19 @@ const categoryIcons: Record<DeliverableCategory, string> = {
         <div v-show="isExpanded(cat)" class="category-items">
           <div v-for="item in grouped[cat]" :key="item.id" class="deliverable-card">
             <div class="card-main" @click="handleLocate(item)">
-              <span class="card-name">{{ item.name }}</span>
+              <span class="card-name">
+                <span v-if="item.fileType === 'pptx'" class="ppt-icon">📊</span>
+                {{ item.name }}
+              </span>
               <span class="card-meta">
                 {{ item.createdBy }} · {{ formatTime(item.createdAt) }} ·
-                {{ formatFileSize(item.size) }}
+                {{ formatSlideMeta(item) }}
               </span>
             </div>
             <div class="card-actions">
-              <button type="button" class="action-btn" @click.stop="handleView(item)">查看</button>
+              <button type="button" class="action-btn" @click.stop="handleView(item)">
+                {{ item.fileType === 'pptx' ? '预览' : '查看' }}
+              </button>
               <button type="button" class="action-btn" @click.stop="handleDownload(item)">
                 下载
               </button>
@@ -245,6 +256,10 @@ const categoryIcons: Record<DeliverableCategory, string> = {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ppt-icon {
+  margin-right: 4px;
 }
 
 .card-meta {

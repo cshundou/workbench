@@ -262,6 +262,9 @@ export const ROLE_BUBBLE_COLORS: Record<string, string> = {
   engineer: '#722ED1',
   analyst: '#FF7D00',
   auditor: '#F53F3F',
+  copywriter: '#3491FA',
+  ppt_designer: '#5856D6',
+  data_visualizer: '#7BE188',
   user: '#86909C',
   system: '#C9CDD4',
 };
