@@ -6,6 +6,12 @@ import type { FormInstance, FormRules } from 'element-plus';
 import { Plus, Search, Edit, Delete, ChatDotRound, FolderOpened } from '@element-plus/icons-vue';
 import { createKnowledgeBase, updateKnowledgeBase, deleteKnowledgeBase } from '@/api/rag';
 import type { KnowledgeBaseInfo } from '@/api/rag';
+import {
+  getAvailableModels,
+  formatEmbeddingOptionLabel,
+  PROVIDER_LABELS,
+  type AIModelEntity,
+} from '@/api/models';
 import { useRagStore } from '@/stores/rag';
 import { useUserStore } from '@/stores/user';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
@@ -27,12 +33,26 @@ const isEdit = ref(false);
 const editingId = ref<number | null>(null);
 const formRef = ref<FormInstance>();
 const submitLoading = ref(false);
+const embeddingModelsLoading = ref(false);
+const embeddingModelsWarning = ref('');
+const embeddingModels = ref<AIModelEntity[]>([]);
+const originalEmbeddingModel = ref('');
+
+const EMBEDDING_PROVIDER_ORDER = ['openai', 'tongyi', 'doubao', 'minimax'] as const;
+
+const embeddingsByProvider = computed(() => {
+  const grouped: Record<string, AIModelEntity[]> = {};
+  for (const provider of EMBEDDING_PROVIDER_ORDER) {
+    grouped[provider] = embeddingModels.value.filter((item) => item.provider === provider);
+  }
+  return grouped;
+});
 
 const kbForm = reactive({
   name: '',
   description: '',
   is_public: false,
-  embedding_model: 'text-embedding-ada-002',
+  embedding_model: 'text-embedding-3-small',
 });
 
 const formRules: FormRules = {
@@ -44,6 +64,30 @@ const formRules: FormRules = {
 
 const canWrite = computed(() => userStore.hasPermission('kb:write'));
 const canDelete = computed(() => userStore.hasPermission('kb:delete'));
+
+/** 加载可用 Embedding 模型 */
+async function loadEmbeddingModels(refresh = false): Promise<void> {
+  embeddingModelsLoading.value = true;
+  embeddingModelsWarning.value = '';
+  try {
+    const response = await getAvailableModels('text-embedding', refresh);
+    embeddingModels.value = response.models.filter((item) => item.status !== 'deprecated');
+    if (response.warning) {
+      embeddingModelsWarning.value = response.warning;
+    }
+    if (
+      embeddingModels.value.length &&
+      !embeddingModels.value.some((item) => item.model === kbForm.embedding_model)
+    ) {
+      kbForm.embedding_model = embeddingModels.value[0].model;
+    }
+  } catch (error) {
+    console.error('[Load Embedding Models Error]', error);
+    embeddingModelsWarning.value = '加载 Embedding 模型失败，请检查 API 密钥配置';
+  } finally {
+    embeddingModelsLoading.value = false;
+  }
+}
 
 /** 加载知识库列表 */
 async function fetchList(): Promise<void> {
@@ -63,19 +107,22 @@ function handlePageChange(page: number): void {
 }
 
 /** 打开新建对话框 */
-function openCreateDialog(): void {
+async function openCreateDialog(): Promise<void> {
   isEdit.value = false;
   editingId.value = null;
   dialogTitle.value = '新建知识库';
   kbForm.name = '';
   kbForm.description = '';
   kbForm.is_public = false;
-  kbForm.embedding_model = 'text-embedding-ada-002';
+  kbForm.embedding_model =
+    embeddingModels.value[0]?.model || 'text-embedding-3-small';
+  originalEmbeddingModel.value = '';
+  await loadEmbeddingModels();
   dialogVisible.value = true;
 }
 
 /** 打开编辑对话框 */
-function openEditDialog(kb: KnowledgeBaseInfo): void {
+async function openEditDialog(kb: KnowledgeBaseInfo): Promise<void> {
   isEdit.value = true;
   editingId.value = kb.id;
   dialogTitle.value = '编辑知识库';
@@ -83,6 +130,8 @@ function openEditDialog(kb: KnowledgeBaseInfo): void {
   kbForm.description = kb.description || '';
   kbForm.is_public = kb.is_public;
   kbForm.embedding_model = kb.embedding_model;
+  originalEmbeddingModel.value = kb.embedding_model;
+  await loadEmbeddingModels();
   dialogVisible.value = true;
 }
 
@@ -95,6 +144,18 @@ async function handleSubmit(): Promise<void> {
 
   submitLoading.value = true;
   try {
+    if (
+      isEdit.value &&
+      originalEmbeddingModel.value &&
+      kbForm.embedding_model !== originalEmbeddingModel.value
+    ) {
+      await ElMessageBox.confirm(
+        '切换 Embedding 模型后，已有文档需要重新解析才能使用新向量，是否继续？',
+        '切换模型确认',
+        { confirmButtonText: '继续保存', cancelButtonText: '取消', type: 'warning' },
+      );
+    }
+
     if (isEdit.value && editingId.value) {
       await updateKnowledgeBase(editingId.value, {
         name: kbForm.name,
@@ -151,6 +212,7 @@ function goChat(kb: KnowledgeBaseInfo): void {
 
 onMounted(() => {
   fetchList();
+  loadEmbeddingModels();
 });
 </script>
 
@@ -239,11 +301,39 @@ onMounted(() => {
           />
         </el-form-item>
         <el-form-item label="嵌入模型">
-          <el-select v-model="kbForm.embedding_model" style="width: 100%">
-            <el-option label="text-embedding-ada-002" value="text-embedding-ada-002" />
-            <el-option label="text-embedding-3-small" value="text-embedding-3-small" />
-            <el-option label="text-embedding-3-large" value="text-embedding-3-large" />
-          </el-select>
+          <div class="embedding-model-row">
+            <el-select
+              v-model="kbForm.embedding_model"
+              :loading="embeddingModelsLoading"
+              placeholder="选择 Embedding 模型"
+              style="width: 100%"
+            >
+              <el-option-group
+                v-for="provider in EMBEDDING_PROVIDER_ORDER"
+                :key="provider"
+                :label="PROVIDER_LABELS[provider]"
+              >
+                <el-option
+                  v-for="item in embeddingsByProvider[provider]"
+                  :key="item.model"
+                  :label="formatEmbeddingOptionLabel(item)"
+                  :value="item.model"
+                />
+              </el-option-group>
+            </el-select>
+            <el-button
+              :loading="embeddingModelsLoading"
+              @click="loadEmbeddingModels(true)"
+            >
+              刷新
+            </el-button>
+          </div>
+          <p v-if="embeddingModelsWarning" class="embedding-hint warning">
+            {{ embeddingModelsWarning }}
+          </p>
+          <p v-else class="embedding-hint">
+            仅显示已配置 API 密钥对应的向量模型；切换模型后需重新解析文档。
+          </p>
         </el-form-item>
         <el-form-item label="是否公开">
           <el-switch v-model="kbForm.is_public" />
@@ -347,5 +437,22 @@ onMounted(() => {
   margin-top: 24px;
   display: flex;
   justify-content: center;
+}
+
+.embedding-model-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.embedding-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: $text-secondary;
+  line-height: 1.5;
+
+  &.warning {
+    color: $warning-color;
+  }
 }
 </style>

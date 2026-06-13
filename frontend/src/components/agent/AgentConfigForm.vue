@@ -7,6 +7,7 @@ import type { AgentInfo, ToolDefinition } from '@/api/agent';
 import PromptEditor from '@/components/agent/PromptEditor.vue';
 import {
   getAvailableModels,
+  MODEL_FEATURE_LABELS,
   PROVIDER_LABELS,
   toAgentModelDefinition,
   validateAgentModelParamsFromEntity,
@@ -102,19 +103,32 @@ const dialogVisible = computed({
 
 const isEdit = computed(() => !!props.agent?.id);
 
-async function loadAvailableModels(): Promise<void> {
+async function loadAvailableModels(refresh = false): Promise<void> {
   modelsLoading.value = true;
   modelsWarning.value = '';
   try {
-    const response = await getAvailableModels('llm');
+    const response = await getAvailableModels('llm', refresh);
     llmModelDefinitions.value = response.models.map(toAgentModelDefinition);
     if (response.warning) modelsWarning.value = response.warning;
+    if (
+      llmModelDefinitions.value.length &&
+      !llmModelDefinitions.value.some((m) => m.name === form.model_name)
+    ) {
+      form.model_name = llmModelDefinitions.value[0].name;
+    }
   } catch (error) {
     console.error('[Load Available Models Error]', error);
     modelsWarning.value = '加载模型列表失败';
   } finally {
     modelsLoading.value = false;
   }
+}
+
+function getModelFeatures(name: string): string[] {
+  const def = llmModelDefinitions.value.find((m) => m.name === name);
+  return (def?.features || [])
+    .filter((item) => item !== 'stream')
+    .map((item) => MODEL_FEATURE_LABELS[item] || item);
 }
 
 function syncModelPriorities(): void {
@@ -165,7 +179,7 @@ watch(
 
 watch(
   () => form.model_name,
-  (name) => {
+  () => {
     const limit = currentModelDef.value?.max_tokens ?? 128000;
     if (form.max_tokens > limit) {
       form.max_tokens = limit;
@@ -268,20 +282,39 @@ onMounted(() => {
       </el-form-item>
 
       <el-form-item label="主模型">
-        <el-select v-model="form.model_name" :loading="modelsLoading" style="width: 100%">
-          <el-option-group
-            v-for="provider in LLM_PROVIDER_ORDER"
-            :key="provider"
-            :label="PROVIDER_LABELS[provider]"
-          >
-            <el-option
-              v-for="item in modelsByProvider[provider]"
-              :key="item.name"
-              :label="item.label"
-              :value="item.name"
-            />
-          </el-option-group>
-        </el-select>
+        <div class="model-select-row">
+          <el-select v-model="form.model_name" :loading="modelsLoading" style="width: 100%">
+            <el-option-group
+              v-for="provider in LLM_PROVIDER_ORDER"
+              :key="provider"
+              :label="PROVIDER_LABELS[provider]"
+            >
+              <el-option
+                v-for="item in modelsByProvider[provider]"
+                :key="item.name"
+                :label="item.label"
+                :value="item.name"
+              >
+                <div class="model-option-row">
+                  <span>{{ item.label }}</span>
+                  <el-tag
+                    v-for="feature in getModelFeatures(item.name)"
+                    :key="feature"
+                    size="small"
+                    type="info"
+                    class="model-feature-tag"
+                  >
+                    {{ feature }}
+                  </el-tag>
+                  <el-tag v-if="item.name === form.model_name" size="small" type="warning">
+                    当前
+                  </el-tag>
+                </div>
+              </el-option>
+            </el-option-group>
+          </el-select>
+          <el-button :loading="modelsLoading" @click="loadAvailableModels(true)">刷新</el-button>
+        </div>
         <div v-if="modelsWarning" class="param-hint warning">{{ modelsWarning }}</div>
         <div v-if="paramHint" class="param-hint">{{ paramHint }}</div>
       </el-form-item>
@@ -386,20 +419,37 @@ onMounted(() => {
     </el-form-item>
 
     <el-form-item label="主模型">
-      <el-select v-model="form.model_name" style="width: 100%">
-        <el-option-group
-          v-for="provider in LLM_PROVIDER_ORDER"
-          :key="provider"
-          :label="PROVIDER_LABELS[provider]"
-        >
-          <el-option
-            v-for="item in modelsByProvider[provider]"
-            :key="item.name"
-            :label="item.label"
-            :value="item.name"
-          />
-        </el-option-group>
-      </el-select>
+      <div class="model-select-row">
+        <el-select v-model="form.model_name" :loading="modelsLoading" style="width: 100%">
+          <el-option-group
+            v-for="provider in LLM_PROVIDER_ORDER"
+            :key="provider"
+            :label="PROVIDER_LABELS[provider]"
+          >
+            <el-option
+              v-for="item in modelsByProvider[provider]"
+              :key="item.name"
+              :label="item.label"
+              :value="item.name"
+            >
+              <div class="model-option-row">
+                <span>{{ item.label }}</span>
+                <el-tag
+                  v-for="feature in getModelFeatures(item.name)"
+                  :key="feature"
+                  size="small"
+                  type="info"
+                  class="model-feature-tag"
+                >
+                  {{ feature }}
+                </el-tag>
+              </div>
+            </el-option>
+          </el-option-group>
+        </el-select>
+        <el-button :loading="modelsLoading" @click="loadAvailableModels(true)">刷新</el-button>
+      </div>
+      <div v-if="modelsWarning" class="param-hint warning">{{ modelsWarning }}</div>
       <div v-if="paramHint" class="param-hint">{{ paramHint }}</div>
     </el-form-item>
 
@@ -478,6 +528,27 @@ onMounted(() => {
   margin-top: 4px;
   font-size: 12px;
   color: $text-secondary;
+
+  &.warning {
+    color: $warning-color;
+  }
+}
+
+.model-select-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.model-option-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.model-feature-tag {
+  margin-left: 0;
 }
 
 .priority-panel {

@@ -158,6 +158,7 @@ async function loadPredefinedModels(config: ProviderConfig): Promise<void> {
 async function loadProviderModels(
   config: ProviderConfig,
   apiKey?: string,
+  forceRefresh = false,
 ): Promise<void> {
   const state = formStates[config.provider];
   state.modelsLoading = true;
@@ -166,6 +167,7 @@ async function loadProviderModels(
     const response = await fetchProviderModels(config.provider, {
       api_key: apiKey || state.apiKey.trim() || undefined,
       base_url: state.baseUrl.trim() || undefined,
+      force_refresh: forceRefresh,
     });
     modelOptions[config.provider] = {
       llm: response.models.filter((m) => m.model_type === 'llm'),
@@ -364,6 +366,17 @@ async function handleDelete(config: ProviderConfig): Promise<void> {
   await fetchRerankPreference();
 }
 
+/** 手动刷新模型列表 */
+async function handleRefreshModels(config: ProviderConfig): Promise<void> {
+  const state = formStates[config.provider];
+  if (!state.apiKey && !state.hasSaved) {
+    ElMessage.warning('请先输入或保存 API 密钥');
+    return;
+  }
+  await loadProviderModels(config, state.apiKey.trim() || undefined, true);
+  ElMessage.success('模型列表已刷新');
+}
+
 onMounted(async () => {
   loading.value = true;
   try {
@@ -438,46 +451,62 @@ onMounted(async () => {
               </el-form-item>
 
               <el-form-item label="默认 LLM 模型">
-                <el-select
-                  v-model="formStates[config.provider].modelName"
-                  :loading="formStates[config.provider].modelsLoading"
-                  :placeholder="
-                    formStates[config.provider].modelsLoading
-                      ? '正在加载可用模型…'
-                      : '选择默认对话模型'
-                  "
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="model in modelOptions[config.provider]?.llm || []"
-                    :key="model.model"
-                    :label="getModelLabel(model)"
-                    :value="model.model"
-                  />
-                </el-select>
+                <div class="model-select-row">
+                  <el-select
+                    v-model="formStates[config.provider].modelName"
+                    :loading="formStates[config.provider].modelsLoading"
+                    :placeholder="
+                      formStates[config.provider].modelsLoading
+                        ? '正在加载可用模型…'
+                        : '选择默认对话模型'
+                    "
+                    style="width: 100%"
+                  >
+                    <el-option
+                      v-for="model in modelOptions[config.provider]?.llm || []"
+                      :key="model.model"
+                      :label="getModelLabel(model)"
+                      :value="model.model"
+                    />
+                  </el-select>
+                  <el-button
+                    :loading="formStates[config.provider].modelsLoading"
+                    @click="handleRefreshModels(config)"
+                  >
+                    刷新
+                  </el-button>
+                </div>
                 <p v-if="formStates[config.provider].modelsWarning" class="models-warning">
                   {{ formStates[config.provider].modelsWarning }}
                 </p>
               </el-form-item>
 
               <el-form-item label="默认 Embedding 模型">
-                <el-select
-                  v-model="formStates[config.provider].embeddingModelName"
-                  :loading="formStates[config.provider].modelsLoading"
-                  :placeholder="
-                    formStates[config.provider].modelsLoading
-                      ? '正在加载可用模型…'
-                      : '选择默认向量模型'
-                  "
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="model in modelOptions[config.provider]?.embedding || []"
-                    :key="model.model"
-                    :label="getModelLabel(model)"
-                    :value="model.model"
-                  />
-                </el-select>
+                <div class="model-select-row">
+                  <el-select
+                    v-model="formStates[config.provider].embeddingModelName"
+                    :loading="formStates[config.provider].modelsLoading"
+                    :placeholder="
+                      formStates[config.provider].modelsLoading
+                        ? '正在加载可用模型…'
+                        : '选择默认向量模型'
+                    "
+                    style="width: 100%"
+                  >
+                    <el-option
+                      v-for="model in modelOptions[config.provider]?.embedding || []"
+                      :key="model.model"
+                      :label="getModelLabel(model)"
+                      :value="model.model"
+                    />
+                  </el-select>
+                  <el-button
+                    :loading="formStates[config.provider].modelsLoading"
+                    @click="handleRefreshModels(config)"
+                  >
+                    刷新
+                  </el-button>
+                </div>
               </el-form-item>
 
               <el-form-item>
@@ -800,6 +829,12 @@ onMounted(async () => {
   margin: 6px 0 0;
   font-size: 12px;
   color: $warning-color;
+}
+
+.model-select-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
 }
 
 .key-input-row {
