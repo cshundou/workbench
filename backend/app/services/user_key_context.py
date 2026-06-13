@@ -15,7 +15,10 @@ from langchain_openai import ChatOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import LLM_MODEL_MAP, SUPPORTED_LLM_MODEL_NAMES
+from app.services.model_provider_service import (
+    infer_provider_from_model,
+    model_provider_service,
+)
 from app.core.encryption import decrypt_api_key
 from app.core.exceptions import ApiKeyMissingError, ValidationError
 from app.core.logging import get_logger
@@ -39,62 +42,9 @@ RERANK_MODES: list[str] = [RERANK_MODE_AUTO, RERANK_MODE_COHERE, RERANK_MODE_OFF
 # 所有支持的提供商
 ALL_PROVIDERS: list[str] = LLM_PROVIDERS + TOOL_PROVIDERS + [RERANK_PREFERENCE_PROVIDER]
 
-# 各提供商默认 API 地址与模型
-PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
-    "openai": {
-        "base_url": "https://api.openai.com/v1",
-        "model_name": "gpt-4o",
-        "embedding_model": "text-embedding-3-small",
-    },
-    "tongyi": {
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model_name": "qwen-max",
-        "embedding_model": "text-embedding-v3",
-    },
-    "doubao": {
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "model_name": "doubao-pro-32k",
-        "embedding_model": "doubao-embedding",
-    },
-    "minimax": {
-        "base_url": "https://api.minimax.chat/v1",
-        "model_name": "abab6.5-chat",
-        "embedding_model": "embo-01",
-    },
-}
-
-
 def infer_llm_provider_from_model(model_name: Optional[str]) -> Optional[str]:
-    """
-    根据模型名称推断大模型提供商。
-
-    Args:
-        model_name: 模型名称，如 gpt-4o、qwen-max。
-
-    Returns:
-        提供商标识，无法推断时返回 None。
-    """
-    if not model_name:
-        return None
-
-    name = model_name.lower()
-    if name.startswith(("gpt-", "o1", "o3", "o4")) or "text-embedding" in name:
-        return "openai"
-    if name.startswith("qwen"):
-        return "tongyi"
-    if name.startswith("doubao"):
-        return "doubao"
-    if name.startswith(("abab", "minimax", "embo", "m3")):
-        return "minimax"
-    if name in SUPPORTED_LLM_MODEL_NAMES:
-        return LLM_MODEL_MAP[name]["provider"]
-    return None
-
-
-def _looks_like_embedding_model(model_name: str) -> bool:
-    """判断模型名称是否像 Embedding 模型而非对话模型。"""
-    name = model_name.lower()
-    return "embedding" in name or name.startswith("embo") or "ada-002" in name
+    """根据模型名称推断大模型提供商（兼容旧调用）。"""
+    return infer_provider_from_model(model_name)
 
 
 def resolve_embedding_model(
@@ -102,29 +52,12 @@ def resolve_embedding_model(
     requested_model: Optional[str] = None,
     config_model_name: Optional[str] = None,
 ) -> str:
-    """
-    解析与提供商匹配的 Embedding 模型名称。
-
-    当知识库配置的模型属于其他提供商，或用户保存的是对话模型时，
-    自动降级为该提供商默认 Embedding 模型。
-    """
-    defaults = PROVIDER_DEFAULTS.get(provider, {})
-    default_embedding = defaults.get("embedding_model", "text-embedding-3-small")
-
-    for candidate in (requested_model, config_model_name):
-        if not candidate:
-            continue
-        if infer_llm_provider_from_model(candidate) != provider:
-            continue
-        if _looks_like_embedding_model(candidate):
-            return candidate
-
-    logger.info(
-        "Embedding 模型与提供商 %s 不匹配，使用默认模型 %s",
+    """解析与提供商匹配的 Embedding 模型名称。"""
+    return model_provider_service.resolve_embedding_model(
         provider,
-        default_embedding,
+        requested_model=requested_model,
+        config_model_name=config_model_name,
     )
-    return default_embedding
 
 
 def resolve_minimax_group_id(base_url: Optional[str]) -> Optional[str]:
@@ -429,15 +362,20 @@ def create_chat_llm(
     config = user_ctx.get_llm_provider(
         preferred=preferred_provider or infer_llm_provider_from_model(model_name),
     )
-    defaults = PROVIDER_DEFAULTS.get(config.provider, {})
     inferred_provider = infer_llm_provider_from_model(model_name)
 
     # 智能体模型与最终提供商不匹配时，使用该提供商的默认模型
     if model_name and inferred_provider and inferred_provider != config.provider:
-        resolved_model = config.model_name or defaults.get("model_name", "gpt-4o")
+        resolved_model = model_provider_service.resolve_llm_model(
+            config.provider,
+            config_model_name=config.model_name,
+        )
     else:
-        resolved_model = model_name or config.model_name or defaults.get("model_name", "gpt-4o")
-    base_url = config.base_url or defaults.get("base_url")
+        resolved_model = model_name or model_provider_service.resolve_llm_model(
+            config.provider,
+            config_model_name=config.model_name,
+        )
+    base_url = config.base_url or model_provider_service.get_default_base_url(config.provider)
 
     kwargs: dict[str, Any] = {
         "model": resolved_model,
@@ -526,7 +464,6 @@ def _create_embeddings_from_config(
     """按提供商创建合适的 Embedding 客户端。"""
     from app.services.rag.minimax_embeddings import MiniMaxEmbeddingsClient
 
-    defaults = PROVIDER_DEFAULTS.get(provider, {})
     resolved_model = resolve_embedding_model(
         provider,
         requested_model=requested_model,
@@ -544,7 +481,7 @@ def _create_embeddings_from_config(
         provider=provider,
         api_key=api_key,
         resolved_model=resolved_model,
-        base_url=base_url or defaults.get("base_url"),
+        base_url=base_url or model_provider_service.get_default_base_url(provider),
     )
 
 
@@ -566,7 +503,9 @@ async def validate_provider_key(
     """
     try:
         if provider == "openai":
-            url = (base_url or PROVIDER_DEFAULTS["openai"]["base_url"]).rstrip("/") + "/models"
+            url = (
+                base_url or model_provider_service.get_default_base_url("openai")
+            ).rstrip("/") + "/models"
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
                 if resp.status_code == 200:
@@ -574,7 +513,6 @@ async def validate_provider_key(
                 return False, f"OpenAI 验证失败: HTTP {resp.status_code}"
 
         if provider in ("tongyi", "doubao", "minimax"):
-            defaults = PROVIDER_DEFAULTS[provider]
             if provider == "minimax":
                 try:
                     embeddings = _create_embeddings_from_config(
@@ -588,7 +526,9 @@ async def validate_provider_key(
                     return True, f"{provider} Embedding 连接成功"
                 except Exception as exc:
                     return False, f"{provider} Embedding 验证失败: {exc}"
-            url = (base_url or defaults["base_url"]).rstrip("/") + "/models"
+            url = (
+                base_url or model_provider_service.get_default_base_url(provider)
+            ).rstrip("/") + "/models"
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
                 if resp.status_code == 200:

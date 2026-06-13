@@ -7,10 +7,11 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.core.constants import (
-    GLOBAL_MAX_TOKENS_LIMIT,
-    SUPPORTED_LLM_MODEL_NAMES,
-    validate_agent_model_params,
+from app.core.constants import GLOBAL_MAX_TOKENS_LIMIT, validate_agent_model_params
+from app.services.model_provider_service import (
+    MODEL_TYPE_LLM,
+    infer_model_type,
+    model_provider_service,
 )
 
 
@@ -39,9 +40,9 @@ class AgentCreate(BaseModel):
     @field_validator("model_name")
     @classmethod
     def validate_model_name(cls, value: str) -> str:
-        """校验模型名称是否在支持列表中。"""
-        if value not in SUPPORTED_LLM_MODEL_NAMES:
-            raise ValueError(f"不支持的模型: {value}")
+        """校验模型名称（兼容历史与远程拉取模型）。"""
+        if infer_model_type(value) != MODEL_TYPE_LLM:
+            raise ValueError(f"不支持的模型类型: {value}")
         return value
 
     @model_validator(mode="after")
@@ -76,7 +77,7 @@ class AgentUpdate(BaseModel):
     @model_validator(mode="after")
     def validate_model_params(self) -> "AgentUpdate":
         """更新时若包含模型相关字段则联合校验。"""
-        if self.model_name is not None and self.model_name not in SUPPORTED_LLM_MODEL_NAMES:
+        if self.model_name is not None and infer_model_type(self.model_name) != MODEL_TYPE_LLM:
             raise ValueError(f"不支持的模型: {self.model_name}")
         if self.model_name is not None and self.temperature is not None and self.top_p is not None and self.max_tokens is not None:
             try:

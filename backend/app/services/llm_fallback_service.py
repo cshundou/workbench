@@ -8,7 +8,10 @@ from typing import Any, Optional
 
 from langchain_openai import ChatOpenAI
 
-from app.core.constants import LLM_MODEL_MAP
+from app.services.model_provider_service import (
+    decode_model_preferences,
+    model_provider_service,
+)
 from app.core.logging import get_logger
 from app.services.user_key_context import (
     UserKeyContext,
@@ -109,9 +112,8 @@ class LlmFallbackService:
 
         # 追加用户已配置密钥的默认模型
         for provider, config in user_ctx.keys.items():
-            default_model = config.model_name or LLM_MODEL_MAP.get(primary_model, {}).get(
-                "name"
-            )
+            llm_model, _ = decode_model_preferences(config.model_name)
+            default_model = llm_model or model_provider_service.get_default_llm_model(provider)
             if default_model and default_model not in ordered:
                 ordered.append(default_model)
 

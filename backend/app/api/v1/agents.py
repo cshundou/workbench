@@ -21,7 +21,8 @@ from app.core.deps import (
 from app.core.permissions import AGENT_DELETE, AGENT_READ, AGENT_WRITE
 from app.core.response import success_response
 from app.models.agent import Agent
-from app.core.constants import LLM_MODEL_DEFINITIONS, LLM_PROVIDER_ORDER
+from app.core.constants import LLM_PROVIDER_ORDER
+from app.services.model_provider_service import MODEL_TYPE_LLM, model_provider_service
 from app.schemas.agent import (
     AgentChatRequest,
     AgentCreate,
@@ -89,8 +90,14 @@ async def list_available_tools(
 @router.get("/models", summary="获取支持的大模型列表")
 async def list_supported_models(
     current_user: Annotated[CurrentUser, Depends(require_permission(AGENT_READ))],
+    user_ctx: Annotated[UserKeyCtx, Depends(get_user_key_context)],
 ) -> dict[str, Any]:
-    """按厂商分组返回所有支持的大模型及参数约束。"""
+    """按厂商分组返回可用大模型及参数约束（兼容旧接口，数据来自统一模型中心）。"""
+    entities, fetch_from, warning = await model_provider_service.get_available_models_for_user(
+        user_keys=user_ctx.keys,
+        model_type=MODEL_TYPE_LLM,
+        user_id=current_user.id,
+    )
     models = [
         ModelDefinitionResponse(
             name=item["name"],
@@ -101,10 +108,18 @@ async def list_supported_models(
             default_temperature=item["default_temperature"],
             default_top_p=item["default_top_p"],
         )
-        for item in LLM_MODEL_DEFINITIONS
+        for item in (
+            entity.to_legacy_definition()
+            for entity in entities
+            if entity.model_type == MODEL_TYPE_LLM
+        )
     ]
     result = ModelListResponse(models=models, providers=LLM_PROVIDER_ORDER)
-    return success_response(data=result.model_dump())
+    payload = result.model_dump()
+    payload["fetch_from"] = fetch_from
+    if warning:
+        payload["warning"] = warning
+    return success_response(data=payload)
 
 
 @router.get("/{agent_id}", summary="获取智能体详情")
