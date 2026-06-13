@@ -51,7 +51,32 @@ export interface UserApiKeyStatus {
   default_llm_provider: string | null;
   missing_for_rag: string[];
   missing_for_agent: string[];
+  rerank_mode: string;
+  available_rerank_providers: string[];
 }
+
+/** RAG 重排序偏好 */
+export interface RerankPreference {
+  mode: string;
+  available_llm_providers: string[];
+  has_cohere_key: boolean;
+}
+
+/** 重排序模式 */
+export type RerankMode =
+  | 'auto'
+  | 'cohere'
+  | 'off'
+  | 'openai'
+  | 'tongyi'
+  | 'doubao'
+  | 'minimax';
+
+/** 可用于 Embedding 重排序的大模型提供商 */
+export type RerankLlmProvider = Extract<
+  ApiKeyProvider,
+  'openai' | 'tongyi' | 'doubao' | 'minimax'
+>;
 
 /** 获取当前用户的 API 密钥列表 */
 export function listApiKeys(): Promise<UserApiKeyInfo[]> {
@@ -79,4 +104,14 @@ export function validateApiKey(
   apiKey?: string,
 ): Promise<UserApiKeyValidateResult> {
   return request.post(`/user/api-keys/${provider}/validate`, apiKey ? { api_key: apiKey } : {});
+}
+
+/** 获取 RAG 重排序偏好 */
+export function getRerankPreference(): Promise<RerankPreference> {
+  return request.get('/user/api-keys/rerank-preference');
+}
+
+/** 保存 RAG 重排序偏好 */
+export function saveRerankPreference(mode: RerankMode): Promise<RerankPreference> {
+  return request.put('/user/api-keys/rerank-preference', { mode });
 }

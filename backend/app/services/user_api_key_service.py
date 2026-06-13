@@ -13,6 +13,8 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.user_api_key import UserApiKey
 from app.schemas.user_api_key import (
+    RerankPreferenceResponse,
+    RerankPreferenceUpdate,
     UserApiKeyResponse,
     UserApiKeyStatusResponse,
     UserApiKeyUpsert,
@@ -22,7 +24,11 @@ from app.services.audit_service import audit_service
 from app.services.user_key_context import (
     ALL_PROVIDERS,
     LLM_PROVIDERS,
+    RERANK_MODE_COHERE,
+    RERANK_MODES,
+    RERANK_PREFERENCE_PROVIDER,
     TOOL_PROVIDERS,
+    ProviderKeyConfig,
     UserKeyContext,
     validate_provider_key,
 )
@@ -75,7 +81,11 @@ class UserApiKeyService:
         )
         result = await db.execute(stmt)
         records = result.scalars().all()
-        return [self._to_response(record) for record in records]
+        return [
+            self._to_response(record)
+            for record in records
+            if record.provider != RERANK_PREFERENCE_PROVIDER
+        ]
 
     async def upsert_key(
         self,
@@ -99,6 +109,8 @@ class UserApiKeyService:
         provider = data.provider.lower().strip()
         if provider not in ALL_PROVIDERS:
             raise ValidationError(message=f"不支持的提供商: {provider}")
+        if provider == RERANK_PREFERENCE_PROVIDER:
+            raise ValidationError(message="请使用重排序偏好接口保存 RAG 重排序设置")
 
         encrypted = encrypt_api_key(data.api_key.strip())
 
@@ -339,7 +351,91 @@ class UserApiKeyService:
             default_llm_provider=default_llm,
             missing_for_rag=missing_rag,
             missing_for_agent=missing_agent,
+            rerank_mode=user_ctx.get_rerank_mode(),
+            available_rerank_providers=user_ctx.get_available_rerank_llm_providers(),
         )
+
+    async def get_rerank_preference(
+        self,
+        user_ctx: UserKeyContext,
+    ) -> RerankPreferenceResponse:
+        """获取 RAG 重排序偏好。"""
+        return RerankPreferenceResponse(
+            mode=user_ctx.get_rerank_mode(),
+            available_llm_providers=user_ctx.get_available_rerank_llm_providers(),
+            has_cohere_key=user_ctx.has_cohere_key,
+        )
+
+    async def upsert_rerank_preference(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        tenant_id: int,
+        data: RerankPreferenceUpdate,
+        user_ctx: UserKeyContext,
+    ) -> RerankPreferenceResponse:
+        """
+        保存 RAG 重排序偏好。
+
+        Args:
+            db: 数据库会话。
+            user_id: 用户 ID。
+            tenant_id: 租户 ID。
+            data: 重排序偏好。
+            user_ctx: 当前用户密钥上下文。
+
+        Returns:
+            更新后的偏好。
+        """
+        mode = data.mode.lower().strip()
+        if mode not in RERANK_MODES:
+            raise ValidationError(message=f"不支持的重排序模式: {mode}")
+        if mode in LLM_PROVIDERS and mode not in user_ctx.get_available_rerank_llm_providers():
+            raise ValidationError(message=f"请先在「大模型」中配置 {mode} 的 API 密钥")
+        if mode == RERANK_MODE_COHERE and not user_ctx.has_cohere_key:
+            raise ValidationError(message="选择 Cohere 专用重排序前，请先配置 Cohere API 密钥")
+
+        stmt = select(UserApiKey).where(
+            UserApiKey.user_id == user_id,
+            UserApiKey.provider == RERANK_PREFERENCE_PROVIDER,
+        )
+        result = await db.execute(stmt)
+        record = result.scalar_one_or_none()
+
+        if record is None:
+            record = UserApiKey(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                provider=RERANK_PREFERENCE_PROVIDER,
+                api_key=encrypt_api_key("preference"),
+            )
+            db.add(record)
+
+        record.model_name = mode
+        record.is_valid = True
+        record.last_validated_at = datetime.now(timezone.utc)
+        await db.flush()
+
+        await audit_service.record_crud_action(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            action="api_key.rerank_preference",
+            resource_type="user_api_key",
+            resource_id=record.id,
+            detail={"mode": mode, "success": True, "result": "saved"},
+        )
+        logger.info("RAG 重排序偏好已保存 user_id=%s mode=%s", user_id, mode)
+
+        updated_ctx = UserKeyContext(user_id=user_id, tenant_id=tenant_id, keys=dict(user_ctx.keys))
+        updated_ctx.keys[RERANK_PREFERENCE_PROVIDER] = ProviderKeyConfig(
+            provider=RERANK_PREFERENCE_PROVIDER,
+            api_key="preference",
+            model_name=mode,
+            is_valid=True,
+            last_validated_at=record.last_validated_at,
+        )
+        return await self.get_rerank_preference(updated_ctx)
 
 
 user_api_key_service = UserApiKeyService()

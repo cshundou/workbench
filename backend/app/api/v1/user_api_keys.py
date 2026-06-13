@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_current_tenant_id, get_current_user, get_db_session
 from app.core.response import success_response
-from app.schemas.user_api_key import UserApiKeyUpsert
+from app.schemas.user_api_key import RerankPreferenceUpdate, UserApiKeyUpsert
 from app.services.user_api_key_service import user_api_key_service
 from app.services.user_key_context import user_key_resolver
 
@@ -44,6 +44,34 @@ async def get_api_key_status(
     user_ctx = await user_key_resolver.load_context(db, current_user.id, tenant_id)
     status = user_api_key_service.build_status(user_ctx)
     return success_response(data=status.model_dump())
+
+
+@router.get("/rerank-preference", summary="获取 RAG 重排序偏好")
+async def get_rerank_preference(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """返回当前用户的知识库重排序策略。"""
+    user_ctx = await user_key_resolver.load_context(db, current_user.id, tenant_id)
+    result = await user_api_key_service.get_rerank_preference(user_ctx)
+    return success_response(data=result.model_dump())
+
+
+@router.put("/rerank-preference", summary="保存 RAG 重排序偏好")
+async def upsert_rerank_preference(
+    data: RerankPreferenceUpdate,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """保存知识库重排序策略，可直接复用已配置的大模型。"""
+    user_ctx = await user_key_resolver.load_context(db, current_user.id, tenant_id)
+    result = await user_api_key_service.upsert_rerank_preference(
+        db, current_user.id, tenant_id, data, user_ctx
+    )
+    await db.commit()
+    return success_response(data=result.model_dump(), message="重排序设置已保存")
 
 
 @router.post("", summary="添加或更新 API 密钥")

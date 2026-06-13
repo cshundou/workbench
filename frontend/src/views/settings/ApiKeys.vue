@@ -4,10 +4,14 @@ import { ElMessage } from 'element-plus';
 import { CircleCheck, CircleClose, View, Hide } from '@element-plus/icons-vue';
 import {
   deleteApiKey,
+  getRerankPreference,
   listApiKeys,
+  saveRerankPreference,
   upsertApiKey,
   validateApiKey,
   type ApiKeyProvider,
+  type RerankLlmProvider,
+  type RerankMode,
   type UserApiKeyInfo,
 } from '@/api/apiKeys';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
@@ -55,10 +59,10 @@ const PROVIDER_CONFIGS: ProviderConfig[] = [
     provider: 'minimax',
     name: 'MiniMax',
     category: 'llm',
-    description: 'MiniMax 对话与嵌入模型',
+    description: 'MiniMax 对话与 embo-01 向量模型',
     models: ['abab6.5-chat', 'abab6.5s-chat', 'embo-01'],
-    defaultBaseUrl: 'https://api.minimax.chat/v1',
-    baseUrlPlaceholder: 'https://api.minimax.chat/v1',
+    defaultBaseUrl: '',
+    baseUrlPlaceholder: '可选：Group ID（部分账号 Embedding 需要）',
   },
   {
     provider: 'tavily',
@@ -73,7 +77,7 @@ const PROVIDER_CONFIGS: ProviderConfig[] = [
     provider: 'cohere',
     name: 'Cohere 重排序',
     category: 'tool',
-    description: 'RAG 检索结果重排序',
+    description: '可选，仅在重排序选择「Cohere 专用」时需要',
     models: ['rerank-multilingual-v3.0', 'rerank-english-v3.0'],
     defaultBaseUrl: '',
     baseUrlPlaceholder: '无需自定义地址',
@@ -143,7 +147,85 @@ function initFormStates(): void {
 initFormStates();
 
 const llmProviders = computed(() => PROVIDER_CONFIGS.filter((item) => item.category === 'llm'));
-const toolProviders = computed(() => PROVIDER_CONFIGS.filter((item) => item.category === 'tool'));
+const toolProviders = computed(() =>
+  PROVIDER_CONFIGS.filter((item) => item.category === 'tool' && item.provider !== 'cohere'),
+);
+const cohereConfig = computed(() => PROVIDER_CONFIGS.find((item) => item.provider === 'cohere'));
+
+/** 大模型提供商显示名 */
+const LLM_PROVIDER_LABELS: Record<ApiKeyProvider, string> = {
+  openai: 'OpenAI',
+  tongyi: '通义千问',
+  doubao: '豆包',
+  minimax: 'MiniMax',
+  tavily: 'Tavily 搜索',
+  cohere: 'Cohere',
+  pinecone: 'Pinecone',
+};
+
+const rerankMode = ref<RerankMode>('auto');
+const availableRerankProviders = ref<RerankLlmProvider[]>([]);
+const hasCohereKey = ref(false);
+const rerankSaving = ref(false);
+
+/** 重排序模式选项 */
+const rerankModeOptions = computed(() => {
+  const options: Array<{ value: RerankMode; label: string; disabled?: boolean }> = [
+    { value: 'auto', label: '自动（优先 Cohere，否则使用已配置大模型 Embedding）' },
+  ];
+
+  for (const provider of availableRerankProviders.value) {
+    options.push({
+      value: provider,
+      label: `使用 ${LLM_PROVIDER_LABELS[provider]}（复用已配置密钥）`,
+    });
+  }
+
+  options.push({
+    value: 'cohere',
+    label: 'Cohere 专用',
+    disabled: !hasCohereKey.value,
+  });
+  options.push({ value: 'off', label: '关闭重排序' });
+  return options;
+});
+
+async function fetchRerankPreference(): Promise<void> {
+  try {
+    const preference = await getRerankPreference();
+    rerankMode.value = preference.mode as RerankMode;
+    availableRerankProviders.value = preference.available_llm_providers as RerankLlmProvider[];
+    hasCohereKey.value = preference.has_cohere_key;
+  } catch (error) {
+    console.error('[Fetch Rerank Preference Error]', error);
+  }
+}
+
+async function handleSaveRerankPreference(): Promise<void> {
+  if (rerankMode.value === 'cohere' && !hasCohereKey.value) {
+    ElMessage.warning('请先配置 Cohere API 密钥');
+    return;
+  }
+  if (
+    ['openai', 'tongyi', 'doubao', 'minimax'].includes(rerankMode.value) &&
+    !availableRerankProviders.value.includes(rerankMode.value as RerankLlmProvider)
+  ) {
+    ElMessage.warning('请先在「大模型」中配置对应 API 密钥');
+    return;
+  }
+
+  rerankSaving.value = true;
+  try {
+    const preference = await saveRerankPreference(rerankMode.value);
+    availableRerankProviders.value = preference.available_llm_providers as RerankLlmProvider[];
+    hasCohereKey.value = preference.has_cohere_key;
+    ElMessage.success('重排序设置已保存');
+  } catch (error) {
+    console.error('[Save Rerank Preference Error]', error);
+  } finally {
+    rerankSaving.value = false;
+  }
+}
 
 /** 加载已保存的密钥 */
 async function fetchKeys(): Promise<void> {
@@ -256,6 +338,7 @@ async function handleSave(config: ProviderConfig): Promise<void> {
   } finally {
     state.saving = false;
   }
+  await fetchRerankPreference();
 }
 
 /** 删除密钥 */
@@ -273,9 +356,13 @@ async function handleDelete(config: ProviderConfig): Promise<void> {
   } catch (error) {
     console.error('[Delete API Key Error]', error);
   }
+  await fetchRerankPreference();
 }
 
-onMounted(fetchKeys);
+onMounted(async () => {
+  await fetchKeys();
+  await fetchRerankPreference();
+});
 </script>
 
 <template>
@@ -402,8 +489,102 @@ onMounted(fetchKeys);
     </section>
 
     <section class="provider-section">
+      <h3 class="section-title">RAG 重排序</h3>
+      <p class="section-desc">
+        知识库检索后可二次排序提升相关性。可直接复用上方已配置的大模型 Embedding，无需单独购买 Cohere。
+      </p>
+      <el-card shadow="never" class="provider-card rerank-card">
+        <el-form label-position="top" class="provider-form">
+          <el-form-item label="重排序策略">
+            <el-select v-model="rerankMode" placeholder="选择重排序策略" style="width: 100%">
+              <el-option
+                v-for="option in rerankModeOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+                :disabled="option.disabled"
+              />
+            </el-select>
+          </el-form-item>
+          <p v-if="availableRerankProviders.length === 0" class="rerank-hint">
+            尚未配置大模型密钥，请先在上方「大模型」区域配置 OpenAI / 通义 / 豆包 / MiniMax 等。
+          </p>
+          <p v-else class="rerank-hint">
+            已检测到 {{ availableRerankProviders.map((p) => LLM_PROVIDER_LABELS[p]).join('、') }} 密钥，可直接选择使用。
+          </p>
+          <div class="action-row">
+            <el-button type="primary" :loading="rerankSaving" @click="handleSaveRerankPreference">
+              保存重排序设置
+            </el-button>
+          </div>
+        </el-form>
+      </el-card>
+
+      <el-card
+        v-if="cohereConfig && rerankMode === 'cohere'"
+        shadow="never"
+        class="provider-card"
+      >
+        <div class="provider-header">
+          <div>
+            <h4 class="provider-name">{{ cohereConfig.name }}</h4>
+            <p class="provider-desc">{{ cohereConfig.description }}</p>
+          </div>
+          <el-tag v-if="formStates.cohere.hasSaved" type="success" size="small">已配置</el-tag>
+        </div>
+
+        <el-form label-position="top" class="provider-form">
+          <el-form-item label="API 密钥">
+            <div class="key-input-row">
+              <el-input
+                v-model="formStates.cohere.apiKey"
+                :type="formStates.cohere.showKey ? 'text' : 'password'"
+                placeholder="输入 Cohere API 密钥"
+                autocomplete="off"
+              />
+              <el-button
+                text
+                :icon="formStates.cohere.showKey ? Hide : View"
+                @click="formStates.cohere.showKey = !formStates.cohere.showKey"
+              />
+            </div>
+            <p class="key-preview">当前：{{ keyPreview('cohere') }}</p>
+          </el-form-item>
+
+          <el-form-item v-if="cohereConfig.models.length" label="默认模型">
+            <el-select v-model="formStates.cohere.modelName" placeholder="选择默认模型" style="width: 100%">
+              <el-option
+                v-for="model in cohereConfig.models"
+                :key="model"
+                :label="model"
+                :value="model"
+              />
+            </el-select>
+          </el-form-item>
+
+          <div class="action-row">
+            <el-button :loading="formStates.cohere.validating" @click="handleValidate(cohereConfig)">
+              测试连接
+            </el-button>
+            <el-button type="primary" :loading="formStates.cohere.saving" @click="handleSave(cohereConfig)">
+              保存
+            </el-button>
+            <el-button
+              v-if="formStates.cohere.hasSaved"
+              type="danger"
+              plain
+              @click="handleDelete(cohereConfig)"
+            >
+              删除
+            </el-button>
+          </div>
+        </el-form>
+      </el-card>
+    </section>
+
+    <section class="provider-section">
       <h3 class="section-title">工具</h3>
-      <p class="section-desc">按需配置搜索、重排序与向量库相关密钥</p>
+      <p class="section-desc">按需配置搜索与向量库相关密钥</p>
       <el-row :gutter="20">
         <el-col v-for="config in toolProviders" :key="config.provider" :xs="24" :lg="12">
           <el-card shadow="never" class="provider-card">
@@ -530,6 +711,17 @@ onMounted(fetchKeys);
   margin: 0 0 16px;
   color: $text-secondary;
   font-size: 14px;
+}
+
+.rerank-card {
+  max-width: 720px;
+}
+
+.rerank-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: $text-secondary;
+  line-height: 1.6;
 }
 
 .provider-card {

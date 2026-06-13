@@ -43,6 +43,20 @@ class UserApiKeyValidateResult(BaseModel):
     message: str
 
 
+class RerankPreferenceUpdate(BaseModel):
+    """RAG 重排序偏好更新请求。"""
+
+    mode: str = Field(..., min_length=1, max_length=50, description="重排序模式")
+
+
+class RerankPreferenceResponse(BaseModel):
+    """RAG 重排序偏好响应。"""
+
+    mode: str
+    available_llm_providers: List[str] = Field(default_factory=list)
+    has_cohere_key: bool = False
+
+
 class UserApiKeyStatusResponse(BaseModel):
     """用户密钥配置状态摘要。"""
 
@@ -55,3 +69,5 @@ class UserApiKeyStatusResponse(BaseModel):
     default_llm_provider: Optional[str] = None
     missing_for_rag: List[str] = Field(default_factory=list)
     missing_for_agent: List[str] = Field(default_factory=list)
+    rerank_mode: str = "auto"
+    available_rerank_providers: List[str] = Field(default_factory=list)
