@@ -75,7 +75,7 @@ export async function authGuard(
     try {
       await userStore.fetchUserInfo();
     } catch {
-      userStore.logout();
+      userStore.clearSession();
       next({ name: 'Login' });
       return;
     }

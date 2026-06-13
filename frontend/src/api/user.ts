@@ -61,11 +61,14 @@ export function refreshAccessToken(
   }>;
 }
 
-/** 用户登出 */
-export function logout(): Promise<void> {
-  const refreshToken = localStorage.getItem('refresh_token');
-  localStorage.removeItem('refresh_token');
-  return request.post('/auth/logout', refreshToken ? { refresh_token: refreshToken } : {});
+/** 用户登出（skipAuthHandler 避免 401 时与全局拦截器互相触发） */
+export function logout(refreshToken?: string | null): Promise<void> {
+  const rt = refreshToken ?? localStorage.getItem('refresh_token');
+  return request.post(
+    '/auth/logout',
+    rt ? { refresh_token: rt } : {},
+    { skipAuthHandler: true },
+  ) as Promise<void>;
 }
 
 /** 获取用户列表 */

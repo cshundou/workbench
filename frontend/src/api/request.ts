@@ -9,6 +9,16 @@ import router from '@/router';
 import { shouldRedirectOn401 } from '@/router/guards';
 import { useUserStore } from '@/stores/user';
 
+/** 扩展 Axios 配置：跳过 401 全局登出，避免 logout 接口递归调用 */
+declare module 'axios' {
+  interface InternalAxiosRequestConfig {
+    skipAuthHandler?: boolean;
+  }
+}
+
+/** 是否正在处理会话过期，避免并发 401 重复弹窗与重复清态 */
+let handlingUnauthorized = false;
+
 /** Axios 实例：统一 baseURL、超时与拦截器 */
 const request: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
@@ -51,19 +61,26 @@ request.interceptors.response.use(
     const status = error.response?.status;
     const responseData = error.response?.data as ApiResponse | undefined;
     const errorMessage = responseData?.message || error.message || '网络错误';
+    const config = error.config as InternalAxiosRequestConfig | undefined;
+    const skipAuthHandler = config?.skipAuthHandler === true;
 
-    if (status === 401) {
-      localStorage.removeItem('token');
-      useUserStore().logout();
-      const currentRoute = router.currentRoute.value;
-      if (shouldRedirectOn401(currentRoute) && currentRoute.name !== 'Login') {
-        router.push({
-          name: 'Login',
-          query: { redirect: currentRoute.fullPath },
-        });
-        ElMessage.error('登录已过期，请重新登录');
-      } else {
-        ElMessage.warning('此操作需要登录');
+    if (status === 401 && !skipAuthHandler) {
+      if (!handlingUnauthorized) {
+        handlingUnauthorized = true;
+        useUserStore().clearSession();
+        const currentRoute = router.currentRoute.value;
+        if (shouldRedirectOn401(currentRoute) && currentRoute.name !== 'Login') {
+          router.push({
+            name: 'Login',
+            query: { redirect: currentRoute.fullPath },
+          });
+          ElMessage.error('登录已过期，请重新登录');
+        } else if (currentRoute.name !== 'Login') {
+          ElMessage.warning('此操作需要登录');
+        }
+        window.setTimeout(() => {
+          handlingUnauthorized = false;
+        }, 1000);
       }
     } else if (status === 428) {
       ElMessage.warning(errorMessage || '请先配置 API 密钥');

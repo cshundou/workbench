@@ -38,7 +38,7 @@ describe('useUserStore', () => {
   it('logout 清除状态', async () => {
     const store = useUserStore();
     await store.login('admin', 'password');
-    store.logout();
+    store.clearSession();
     expect(store.isLoggedIn).toBe(false);
     expect(localStorage.getItem('token')).toBeNull();
   });

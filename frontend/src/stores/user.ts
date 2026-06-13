@@ -23,14 +23,25 @@ export const useUserStore = defineStore('user', () => {
     permissions.value = res.permissions;
   }
 
-  function logout(): void {
-    apiLogout().catch((error) => {
-      console.error('[Logout Error]', error);
-    });
+  /** 清除本地登录态（不调用后端 logout，供 401 拦截器使用） */
+  function clearSession(): void {
     token.value = null;
     userInfo.value = null;
     permissions.value = [];
     localStorage.removeItem('token');
+    localStorage.removeItem('refresh_token');
+  }
+
+  /** 用户主动登出：尽力通知服务端，失败时仍清除本地态 */
+  function logout(): void {
+    const refreshToken = localStorage.getItem('refresh_token');
+    apiLogout(refreshToken)
+      .catch((error) => {
+        console.error('[Logout Error]', error);
+      })
+      .finally(() => {
+        clearSession();
+      });
   }
 
   function hasPermission(permission: string): boolean {
@@ -44,6 +55,7 @@ export const useUserStore = defineStore('user', () => {
     isLoggedIn,
     login,
     fetchUserInfo,
+    clearSession,
     logout,
     hasPermission,
   };
