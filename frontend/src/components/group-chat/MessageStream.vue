@@ -21,10 +21,12 @@ const props = defineProps<{
   typingRole?: string | null;
   filterRole?: string | null;
   highlightMessageId?: string | null;
+  sessionId?: number;
 }>();
 
 const emit = defineEmits<{
   viewReport: [deliverable: Partial<Deliverable> & { content: string; name: string }];
+  previewPptx: [deliverable: Deliverable];
 }>();
 
 const displayMessages = computed(() => {
@@ -45,6 +47,9 @@ const roleLabels: Record<string, string> = {
   engineer: '工程师',
   analyst: '分析师',
   auditor: '审核员',
+  copywriter: '文案策划师',
+  ppt_designer: 'PPT设计师',
+  data_visualizer: '数据可视化设计师',
   user: '用户',
   system: '系统',
 };
@@ -149,6 +154,42 @@ function handleChartEnlarge(config: Record<string, unknown>, name: string, msg: 
     createdAt: msg.timestamp,
     size: 0,
   });
+}
+
+function handlePreviewPptx(filename: string, slideCount: number | undefined, msg: AgentMessage): void {
+  emit('previewPptx', {
+    id: `${msg.id}-pptx`,
+    messageId: msg.id,
+    name: filename,
+    category: 'final',
+    type: 'file',
+    fileType: 'pptx',
+    content: '',
+    createdBy: msg.sender.name || msg.sender.role,
+    createdAt: msg.timestamp,
+    size: 0,
+    slideCount,
+  });
+}
+
+async function handleDownloadPptx(filename: string): Promise<void> {
+  if (!props.sessionId) {
+    ElMessage.warning('无法下载：缺少会话信息');
+    return;
+  }
+  try {
+    const { downloadGroupChatDeliverable } = await import('@/api/groupChat');
+    const blob = await downloadGroupChatDeliverable(props.sessionId, filename);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename.toLowerCase().endsWith('.pptx') ? filename : `${filename}.pptx`;
+    link.click();
+    URL.revokeObjectURL(url);
+    ElMessage.success('PPT 已下载');
+  } catch {
+    ElMessage.error('下载失败');
+  }
 }
 
 /** 识别消息级图表配置（附件内图表由 MessageAttachment 渲染） */
@@ -257,8 +298,11 @@ function detectChartConfig(msg: AgentMessage): Record<string, unknown> | null {
             <MessageAttachmentView
               v-if="item.message.attachments?.length"
               :attachments="item.message.attachments"
+              :session-id="sessionId"
               @view-detail="(c, n) => handleAttachmentDetail(c, n, item.message!)"
               @view-chart="(c, n) => handleChartEnlarge(c, n, item.message!)"
+              @preview-pptx="(name, count) => handlePreviewPptx(name, count, item.message!)"
+              @download-pptx="(name) => handleDownloadPptx(name)"
             />
 
             <!-- 交付物操作栏 -->

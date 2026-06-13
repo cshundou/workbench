@@ -9,6 +9,7 @@ import TaskProgress from '@/components/group-chat/TaskProgress.vue';
 import ChatInput from '@/components/group-chat/ChatInput.vue';
 import TeamAdjustDialog from '@/components/group-chat/TeamAdjustDialog.vue';
 import ReportViewer from '@/components/group-chat/ReportViewer.vue';
+import PptPreviewDialog from '@/components/group-chat/PptPreviewDialog.vue';
 import type { TeamConfig } from '@/api/agentRoles';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
@@ -50,6 +51,7 @@ const highlightMessageId = ref<string | null>(null);
 
 /** 报告查看器 */
 const reportVisible = ref(false);
+const pptPreviewVisible = ref(false);
 const activeDeliverable = ref<Deliverable | null>(null);
 
 const showStartForm = computed(() => !groupChatStore.currentSession);
@@ -242,6 +244,10 @@ function locateMessage(messageId: string): void {
 }
 
 function openReport(deliverable: Deliverable | (Partial<Deliverable> & { content: string; name: string })): void {
+  if (deliverable.fileType === 'pptx') {
+    openPptPreview(deliverable as Deliverable);
+    return;
+  }
   activeDeliverable.value = {
     id: deliverable.id || deliverable.messageId || 'report',
     messageId: deliverable.messageId || deliverable.id || '',
@@ -256,6 +262,11 @@ function openReport(deliverable: Deliverable | (Partial<Deliverable> & { content
     chartConfig: deliverable.chartConfig,
   };
   reportVisible.value = true;
+}
+
+function openPptPreview(deliverable: Deliverable): void {
+  activeDeliverable.value = deliverable;
+  pptPreviewVisible.value = true;
 }
 
 /** 进度步骤点击跳转到对应阶段首条消息 */
@@ -444,7 +455,9 @@ onUnmounted(() => {
             :typing-role="groupChatStore.typingRole"
             :filter-role="groupChatStore.selectedRole"
             :highlight-message-id="highlightMessageId"
+            :session-id="groupChatStore.currentSession?.id"
             @view-report="openReport"
+            @preview-pptx="openPptPreview"
           />
         </div>
 
@@ -497,6 +510,11 @@ onUnmounted(() => {
     <ReportViewer
       v-model:visible="reportVisible"
       :deliverable="activeDeliverable"
+    />
+    <PptPreviewDialog
+      v-model:visible="pptPreviewVisible"
+      :deliverable="activeDeliverable"
+      :session-id="groupChatStore.currentSession?.id"
     />
   </div>
 </template>

@@ -50,8 +50,17 @@ const statusLabel: Record<string, string> = {
   idle: '在线',
 };
 
+const roleDisplayNames: Record<string, string> = {
+  copywriter: '文案策划师',
+  ppt_designer: 'PPT设计师',
+  data_visualizer: '数据可视化设计师',
+};
+
 function memberStatus(member: GroupChatMember): string {
   if (props.typingRole === member.role) {
+    if (member.role === 'ppt_designer') {
+      return '排版生成中…';
+    }
     return member.role === 'project_manager' ? '思考中…' : '执行中…';
   }
   if (member.is_auditor && member.review_round) {
@@ -79,6 +88,10 @@ const teamTitle = computed(() => {
   const count = props.members.length;
   return count ? `项目团队（${count}人）` : '项目团队';
 });
+
+function displayMemberName(member: GroupChatMember): string {
+  return member.name || roleDisplayNames[member.role] || member.role;
+}
 
 function handleClick(member: GroupChatMember): void {
   emit('selectMember', member.role);
@@ -120,7 +133,7 @@ function handleClick(member: GroupChatMember): void {
           {{ member.avatar }}
         </span>
         <div class="member-info">
-          <span class="member-name">{{ member.name }}</span>
+          <span class="member-name">{{ displayMemberName(member) }}</span>
           <span class="member-status" :class="statusClass(member)">
             <span class="status-dot" :class="statusClass(member)" />
             {{ memberStatus(member) }}
