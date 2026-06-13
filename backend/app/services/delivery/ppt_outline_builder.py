@@ -8,6 +8,110 @@ import json
 import re
 from typing import Any
 
+# 八大必备模块默认页（SCQA + One Slide One Idea）
+STANDARD_MODULE_SLIDES: list[dict[str, Any]] = [
+    {"slide_type": "cover", "title": "{title}", "subtitle": "{subtitle}"},
+    {"slide_type": "toc", "title": "目录", "bullets": []},
+    {"slide_type": "content", "title": "背景与现状", "bullets": ["行业/业务情境", "当前面临的核心挑战"]},
+    {"slide_type": "content", "title": "核心问题与目标", "bullets": ["待解决的关键问题", "本次汇报目标"]},
+    {"slide_type": "content", "title": "分析与方案", "bullets": ["核心观点", "支撑论据"]},
+    {"slide_type": "content", "title": "关键数据", "bullets": ["指标说明（来源：待补充）"], "chart": None},
+    {"slide_type": "content", "title": "总结与建议", "bullets": ["核心结论", "下一步行动建议"]},
+    {"slide_type": "ending", "title": "谢谢聆听"},
+]
+
+MIN_PAGES_BY_COMPLEXITY: dict[str, int] = {"simple": 8, "medium": 12, "complex": 18}
+
+
+def enforce_standard_structure(
+    outline: dict[str, Any],
+    *,
+    title: str = "演示文稿",
+    subtitle: str = "",
+    complexity: str = "medium",
+) -> dict[str, Any]:
+    """补全八大模块结构，确保页数达标。"""
+    slides = list(outline.get("slides") or [])
+    if not slides:
+        slides = [
+            {**s, "title": s["title"].format(title=title, subtitle=subtitle or "多 Agent 协同生成")}
+            if "{title}" in s.get("title", "") else s
+            for s in STANDARD_MODULE_SLIDES
+        ]
+    else:
+        modules_found = set()
+        for slide in slides:
+            if not isinstance(slide, dict):
+                continue
+            st = str(slide.get("slide_type", "")).lower()
+            t = str(slide.get("title", "")).lower()
+            if st == "cover" or "封面" in t:
+                modules_found.add("cover")
+            if st == "toc" or "目录" in t:
+                modules_found.add("toc")
+            if "背景" in t or "现状" in t:
+                modules_found.add("background")
+            if "问题" in t or "目标" in t:
+                modules_found.add("problem")
+            if "方案" in t or "分析" in t:
+                modules_found.add("solution")
+            if "数据" in t or slide.get("chart") or slide.get("table"):
+                modules_found.add("data")
+            if "总结" in t or "建议" in t or "结论" in t:
+                modules_found.add("summary")
+            if st == "ending" or "谢谢" in t:
+                modules_found.add("ending")
+
+        insertions: list[dict[str, Any]] = []
+        if "background" not in modules_found:
+            insertions.append(
+                {"slide_type": "content", "title": "背景与现状", "bullets": ["情境说明", "核心冲突"]}
+            )
+        if "problem" not in modules_found:
+            insertions.append(
+                {"slide_type": "content", "title": "核心问题与目标", "bullets": ["问题定义", "汇报目标"]}
+            )
+        if "solution" not in modules_found:
+            insertions.append(
+                {"slide_type": "content", "title": "分析与方案", "bullets": ["核心观点", "实施路径"]}
+            )
+        if "data" not in modules_found:
+            insertions.append(
+                {
+                    "slide_type": "content",
+                    "title": "关键数据",
+                    "bullets": ["数据来源：待标注"],
+                }
+            )
+        if "summary" not in modules_found:
+            insertions.append(
+                {"slide_type": "content", "title": "总结与建议", "bullets": ["核心结论", "行动建议"]}
+            )
+        # 在 ending 前插入缺失模块
+        ending_idx = next(
+            (i for i, s in enumerate(slides) if str(s.get("slide_type", "")).lower() == "ending"),
+            len(slides),
+        )
+        for offset, item in enumerate(insertions):
+            slides.insert(ending_idx + offset, item)
+
+    min_pages = MIN_PAGES_BY_COMPLEXITY.get(complexity, 12)
+    while len(slides) < min_pages:
+        idx = len(slides) - 1
+        slides.insert(
+            idx,
+            {
+                "slide_type": "content",
+                "title": f"补充要点 {len(slides)}",
+                "bullets": ["核心观点（One Slide One Idea）", "论据与数据（来源：待标注）"],
+            },
+        )
+
+    outline["slides"] = slides[: max(min_pages + 3, 25)]
+    outline.setdefault("title", title)
+    outline.setdefault("subtitle", subtitle)
+    return outline
+
 
 def _extract_bullets(block: str) -> list[str]:
     """从文本块提取要点列表。"""
@@ -218,3 +322,20 @@ def build_ppt_outline(
         )
 
     return _build_default_structure(title, content_slides[: max_slides - 3])
+
+
+def build_ppt_outline_with_quality(
+    task: str,
+    deliverables: list[dict[str, Any]],
+    *,
+    max_slides: int = 20,
+    complexity: str = "medium",
+) -> dict[str, Any]:
+    """汇总交付物并强制八大模块结构。"""
+    outline = build_ppt_outline(task, deliverables, max_slides=max_slides)
+    return enforce_standard_structure(
+        outline,
+        title=outline.get("title") or task[:80],
+        subtitle=outline.get("subtitle") or "",
+        complexity=complexity,
+    )
