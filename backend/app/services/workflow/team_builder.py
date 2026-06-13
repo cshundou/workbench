@@ -100,7 +100,7 @@ class TeamBuilder:
             domain = "presentation"
         complexity = self.assess_complexity(task)
         team_size = self.determine_team_size(complexity)
-        members = self.match_roles(task, domain, team_size)
+        members = self.match_roles(task, domain, team_size, complexity=complexity)
         members = self.plan_work_distribution(task, members)
         members = self._ensure_auditor(members)
 
@@ -199,6 +199,8 @@ class TeamBuilder:
         task: str,
         domain: str,
         team_size: int,
+        *,
+        complexity: str = "medium",
     ) -> list[dict[str, Any]]:
         """步骤3：从角色库匹配专业角色。"""
         # 领域 → 优先角色
@@ -240,13 +242,27 @@ class TeamBuilder:
                 "analyst",
                 "auditor",
             ],
-            "presentation": [
-                "project_manager",
-                "researcher",
-                "copywriter",
-                "data_visualizer",
-                "auditor",
-            ],
+            "presentation": {
+                "simple": [
+                    "project_manager",
+                    "analyst",
+                    "ppt_designer",
+                    "auditor",
+                ],
+                "medium": [
+                    "project_manager",
+                    "copywriter",
+                    "ppt_designer",
+                    "auditor",
+                ],
+                "complex": [
+                    "project_manager",
+                    "researcher",
+                    "copywriter",
+                    "ppt_designer",
+                    "auditor",
+                ],
+            },
             "general": [
                 "project_manager",
                 "researcher",
@@ -255,7 +271,14 @@ class TeamBuilder:
                 "auditor",
             ],
         }
-        role_ids = domain_roles.get(domain, domain_roles["general"])
+        if domain == "presentation":
+            preset_roles = domain_roles["presentation"].get(
+                complexity,
+                domain_roles["presentation"]["medium"],
+            )
+            role_ids = list(preset_roles)
+        else:
+            role_ids = domain_roles.get(domain, domain_roles["general"])
         # 按 team_size 裁剪（保留 auditor）
         selected: list[str] = []
         for rid in role_ids:
@@ -378,6 +401,7 @@ class TeamBuilder:
             "analyst": ["数据分析与报告撰写"],
             "financial_analyst": ["财务核算", "ROI 分析"],
             "copywriter": ["报告撰写与润色"],
+            "ppt_designer": ["选择模板并生成 PPT 文件"],
             "content_editor": ["内容校验与格式统一"],
             "compliance_officer": ["合规性检查"],
             "data_visualizer": ["幻灯片结构优化", "视觉层次与排版方案"],
@@ -385,9 +409,15 @@ class TeamBuilder:
         }
         if detect_delivery_format(task) == "ppt":
             subtask_map["copywriter"] = ["撰写演示文稿大纲与每页要点"]
+            subtask_map["ppt_designer"] = ["选择模板、排版并生成 PPT 文件"]
             subtask_map["data_visualizer"] = ["优化幻灯片结构与视觉呈现"]
             subtask_map["researcher"] = ["检索演示主题相关资料"]
             subtask_map["analyst"] = ["汇总资料并补充幻灯片数据要点"]
+            subtask_map["auditor"] = [
+                "内容完整性审核",
+                "版式与视觉审核",
+                "合规性审核",
+            ]
         defaults = subtask_map.get(role_id, [f"处理任务：{task[:50]}"])
         return defaults
 

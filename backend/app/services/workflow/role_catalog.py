@@ -109,15 +109,16 @@ PRESET_PROFESSIONAL_ROLES: list[dict[str, Any]] = [
     },
     {
         "role_id": "copywriter",
-        "name": "文案策划",
+        "name": "文案策划师",
         "avatar": "✍️",
         "category": "content",
-        "responsibility": "报告撰写、内容润色、方案输出",
-        "tools": ["document", "format"],
+        "responsibility": "PPT 大纲撰写、每页核心内容提炼、文案表达优化",
+        "tools": ["document", "format", "knowledge"],
         "color": "#3491FA",
         "system_prompt": (
-            "你是文案策划，擅长撰写专业报告、润色内容和输出完整方案，"
-            "确保文字表达清晰、结构合理。"
+            "你是文案策划师，擅长为演示文稿撰写结构化大纲、提炼每页核心要点、"
+            "优化文案表达，确保内容逻辑清晰、语言简洁专业。"
+            "输出 PPT 任务时请优先给出 JSON 格式 slides 大纲。"
         ),
         "is_builtin": False,
     },
@@ -177,6 +178,22 @@ PRESET_PROFESSIONAL_ROLES: list[dict[str, Any]] = [
         ),
         "is_builtin": False,
     },
+    {
+        "role_id": "ppt_designer",
+        "name": "PPT设计师",
+        "avatar": "🎨",
+        "category": "design",
+        "responsibility": "版式设计、模板选择、PPT 文件生成与修改优化",
+        "tools": ["ppt", "chart", "format"],
+        "color": "#5856D6",
+        "system_prompt": (
+            "你是 PPT 设计师，负责将内容大纲转化为结构化幻灯片方案，"
+            "选择合适模板（business_minimal 商务简约 / tech_modern 科技风），"
+            "安排封面、目录、正文、过渡页与结尾页，并调用 generate_ppt 工具生成 .pptx 文件。"
+            "输出 JSON 时需包含 slide_type、chart、table 等字段。"
+        ),
+        "is_builtin": True,
+    },
 ]
 
 # 经典五角色 ID（向后兼容）
@@ -195,6 +212,8 @@ AUDIT_REJECT_ROLE_MAP: dict[str, str] = {
     "research": "researcher",
     "logic": "analyst",
     "format": "content_editor",
+    "layout": "ppt_designer",
+    "visual": "ppt_designer",
     "compliance": "compliance_officer",
     "completeness": "copywriter",
 }
@@ -211,6 +230,7 @@ ROLE_AGENT_TYPE_MAP: dict[str, str] = {
     "copywriter": "analysis",
     "content_editor": "analysis",
     "data_visualizer": "analysis",
+    "ppt_designer": "analysis",
     "compliance_officer": "analysis",
     "auditor": "audit",
 }
