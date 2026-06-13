@@ -63,6 +63,9 @@ async function loadData(): Promise<void> {
 
 /** 刷新所有待处理文档的解析进度 */
 async function refreshProgress(): Promise<void> {
+  if (!Array.isArray(ragStore.documents)) {
+    return;
+  }
   const pendingDocs = ragStore.documents.filter((doc) => doc.status === 0);
   if (pendingDocs.length === 0) {
     return;
@@ -88,6 +91,9 @@ async function refreshProgress(): Promise<void> {
 function startProgressPolling(): void {
   stopProgressPolling();
   progressTimer = setInterval(() => {
+    if (!Array.isArray(ragStore.documents)) {
+      return;
+    }
     const hasPending = ragStore.documents.some((doc) => doc.status === 0);
     if (hasPending) {
       refreshProgress();
@@ -241,10 +247,20 @@ onUnmounted(() => {
         </el-card>
 
         <el-card shadow="never">
+          <el-alert
+            v-if="ragStore.documentsError"
+            type="error"
+            :title="ragStore.documentsError"
+            show-icon
+            class="doc-error-alert"
+          >
+            <el-button type="primary" link @click="loadData">点击重试</el-button>
+          </el-alert>
           <DocumentList
             :documents="ragStore.documents"
             :progress-map="progressMap"
-            :loading="ragStore.isLoading"
+            :loading="ragStore.documentsLoading"
+            :total="ragStore.documentsTotal"
             :can-write="canWrite"
             @delete="handleDelete"
             @download="handleDownload"
@@ -313,6 +329,10 @@ onUnmounted(() => {
 }
 
 .hint-item {
+  margin-bottom: 12px;
+}
+
+.doc-error-alert {
   margin-bottom: 12px;
 }
 </style>

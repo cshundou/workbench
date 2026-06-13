@@ -25,4 +25,14 @@ describe('useRagStore', () => {
     await store.fetchKnowledgeBase(1);
     expect(store.currentKb?.id).toBe(1);
   });
+
+  it('fetchDocuments 解析分页 items 为数组', async () => {
+    const store = useRagStore();
+    const ok = await store.fetchDocuments(1);
+    expect(ok).toBe(true);
+    expect(Array.isArray(store.documents)).toBe(true);
+    expect(store.documents).toEqual([]);
+    expect(store.documentsTotal).toBe(0);
+    expect(store.documentsLoading).toBe(false);
+  });
 });

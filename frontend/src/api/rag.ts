@@ -157,9 +157,14 @@ export function rebuildKnowledgeBaseVectors(kbId: number): Promise<{
   }>;
 }
 
-/** 获取文档列表 */
-export function getDocuments(kbId: number): Promise<DocumentInfo[]> {
-  return request.get(`/knowledge-bases/${kbId}/documents`) as Promise<DocumentInfo[]>;
+/** 获取文档列表（分页） */
+export function getDocuments(
+  kbId: number,
+  params?: PageParams,
+): Promise<PageResult<DocumentInfo>> {
+  return request.get(`/knowledge-bases/${kbId}/documents`, { params }) as Promise<
+    PageResult<DocumentInfo>
+  >;
 }
 
 /** 上传文档（支持进度回调） */
@@ -212,7 +217,7 @@ export function deleteDocument(kbId: number, docId: number): Promise<void> {
 /** 查询文档解析进度 */
 export function getDocumentProgress(kbId: number, docId: number): Promise<DocumentProgress> {
   return request.get(
-    `/knowledge-bases/${kbId}/documents/${docId}/progress`,
+    `/knowledge-bases/${kbId}/documents/${docId}/parse-progress`,
   ) as Promise<DocumentProgress>;
 }
 

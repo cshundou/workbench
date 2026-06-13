@@ -7,8 +7,11 @@ const props = defineProps<{
   documents: DocumentInfo[];
   progressMap: Record<number, number>;
   loading?: boolean;
+  total?: number;
   canWrite?: boolean;
 }>();
+
+const displayCount = computed(() => props.total ?? props.documents.length);
 
 const emit = defineEmits<{
   delete: [doc: DocumentInfo];
@@ -52,7 +55,7 @@ const hasPendingDocs = computed(() => props.documents.some((doc) => doc.status =
 <template>
   <div class="document-list">
     <div class="list-header flex-between">
-      <span class="list-title">文档列表 ({{ documents.length }})</span>
+      <span class="list-title">文档列表 ({{ displayCount }})</span>
       <el-button v-if="hasPendingDocs" text type="primary" :icon="Refresh" @click="emit('refresh')">
         刷新进度
       </el-button>

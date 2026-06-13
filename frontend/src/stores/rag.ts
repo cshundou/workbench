@@ -17,8 +17,16 @@ export const useRagStore = defineStore('rag', () => {
   const currentKb = ref<KnowledgeBaseInfo | null>(null);
   const documents = ref<DocumentInfo[]>([]);
   const searchResults = ref<SearchResultItem[]>([]);
+  /** 列表页等通用加载态 */
   const isLoading = ref(false);
+  /** 知识库详情加载态 */
+  const kbLoading = ref(false);
+  /** 文档列表加载态 */
+  const documentsLoading = ref(false);
+  /** 文档列表加载错误信息 */
+  const documentsError = ref<string | null>(null);
   const total = ref(0);
+  const documentsTotal = ref(0);
 
   /** 加载知识库列表 */
   async function fetchKnowledgeBases(params?: PageParams): Promise<void> {
@@ -36,26 +44,33 @@ export const useRagStore = defineStore('rag', () => {
 
   /** 加载知识库详情 */
   async function fetchKnowledgeBase(id: number): Promise<void> {
-    isLoading.value = true;
+    kbLoading.value = true;
     try {
       currentKb.value = await getKnowledgeBaseById(id);
     } catch (error) {
       console.error('[Fetch Knowledge Base Error]', error);
       currentKb.value = null;
     } finally {
-      isLoading.value = false;
+      kbLoading.value = false;
     }
   }
 
   /** 加载文档列表 */
-  async function fetchDocuments(kbId: number): Promise<void> {
-    isLoading.value = true;
+  async function fetchDocuments(kbId: number, params?: PageParams): Promise<boolean> {
+    documentsLoading.value = true;
+    documentsError.value = null;
     try {
-      documents.value = await getDocuments(kbId);
+      const res = await getDocuments(kbId, params);
+      documents.value = Array.isArray(res.items) ? res.items : [];
+      documentsTotal.value = res.total ?? documents.value.length;
+      return true;
     } catch (error) {
       console.error('[Fetch Documents Error]', error);
+      documents.value = [];
+      documentsError.value = '文档列表加载失败，请检查网络后重试';
+      return false;
     } finally {
-      isLoading.value = false;
+      documentsLoading.value = false;
     }
   }
 
@@ -75,6 +90,8 @@ export const useRagStore = defineStore('rag', () => {
   function clearCurrentKb(): void {
     currentKb.value = null;
     documents.value = [];
+    documentsTotal.value = 0;
+    documentsError.value = null;
     searchResults.value = [];
   }
 
@@ -84,7 +101,11 @@ export const useRagStore = defineStore('rag', () => {
     documents,
     searchResults,
     isLoading,
+    kbLoading,
+    documentsLoading,
+    documentsError,
     total,
+    documentsTotal,
     fetchKnowledgeBases,
     fetchKnowledgeBase,
     fetchDocuments,
