@@ -139,6 +139,17 @@ const categoryIcons: Record<DeliverableCategory, string> = {
               <span class="card-name">
                 <span v-if="item.fileType === 'pptx'" class="ppt-icon">📊</span>
                 {{ item.name }}
+                <el-tag
+                  v-if="item.qualityScore != null"
+                  size="small"
+                  type="success"
+                  class="quality-tag"
+                >
+                  {{ item.qualityScore }}分 · {{ item.qualityGrade || '良好' }}
+                </el-tag>
+                <el-tag v-if="item.auditRound" size="small" type="info" class="quality-tag">
+                  第{{ item.auditRound }}轮审核
+                </el-tag>
               </span>
               <span class="card-meta">
                 {{ item.createdBy }} · {{ formatTime(item.createdAt) }} ·
@@ -260,6 +271,11 @@ const categoryIcons: Record<DeliverableCategory, string> = {
 
 .ppt-icon {
   margin-right: 4px;
+}
+
+.quality-tag {
+  margin-left: 6px;
+  vertical-align: middle;
 }
 
 .card-meta {

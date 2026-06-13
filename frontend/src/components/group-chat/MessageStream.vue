@@ -5,6 +5,8 @@ import { CircleCheck, CircleClose } from '@element-plus/icons-vue';
 import MarkdownRenderer from '@/components/chat/MarkdownRenderer.vue';
 import MessageAttachmentView from '@/components/group-chat/MessageAttachment.vue';
 import ChartRenderer from '@/components/group-chat/ChartRenderer.vue';
+import AuditResultCard, { type PptAuditReview } from '@/components/group-chat/AuditResultCard.vue';
+import AuditReportDialog from '@/components/group-chat/AuditReportDialog.vue';
 import { ROLE_BUBBLE_COLORS, type AgentMessage } from '@/api/groupChat';
 import {
   buildStreamItems,
@@ -40,6 +42,21 @@ const streamItems = computed(() => buildStreamItems(displayMessages.value));
 
 const expandedIds = ref<Set<string>>(new Set());
 const collapsedLongIds = ref<Set<string>>(new Set());
+const auditDialogVisible = ref(false);
+const auditDialogReview = ref<PptAuditReview | null>(null);
+
+function getPptAuditReview(msg: AgentMessage): PptAuditReview | null {
+  const review = msg.metadata?.review;
+  if (review && typeof review === 'object' && (msg.metadata?.ppt_audit || review.audit_type)) {
+    return review as PptAuditReview;
+  }
+  return null;
+}
+
+function openAuditDetail(review: PptAuditReview): void {
+  auditDialogReview.value = review;
+  auditDialogVisible.value = true;
+}
 
 const roleLabels: Record<string, string> = {
   project_manager: '项目经理',
@@ -277,6 +294,12 @@ function detectChartConfig(msg: AgentMessage): Record<string, unknown> | null {
               审核不通过
             </div>
 
+            <AuditResultCard
+              v-if="getPptAuditReview(item.message)"
+              :review="getPptAuditReview(item.message)!"
+              @view-detail="openAuditDetail(getPptAuditReview(item.message)!)"
+            />
+
             <!-- 图表内嵌渲染 -->
             <ChartRenderer
               v-if="detectChartConfig(item.message)"
@@ -346,6 +369,12 @@ function detectChartConfig(msg: AgentMessage): Record<string, unknown> | null {
       <span class="typing-text">正在输入...</span>
       <span class="typing-dots"><span /><span /><span /></span>
     </div>
+
+    <AuditReportDialog
+      :visible="auditDialogVisible"
+      :review="auditDialogReview"
+      @close="auditDialogVisible = false"
+    />
   </div>
 </template>
 

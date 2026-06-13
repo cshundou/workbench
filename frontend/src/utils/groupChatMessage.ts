@@ -32,6 +32,7 @@ const REVIEW_TYPES = new Set(['review_result', 'review_request']);
 /** 根据消息 type 推断执行阶段 */
 export function getMessagePhase(msg: AgentMessage): ExecutionPhase {
   const t = msg.type;
+  if (msg.metadata?.ppt_pipeline) return 'review';
   if (t === 'task_start' || t === 'phase_start') return 'startup';
   if (t === 'phase_summary') return 'execution';
   if (REVIEW_TYPES.has(t)) return 'review';
@@ -103,6 +104,15 @@ export function buildStreamItems(messages: AgentMessage[]): StreamItem[] {
   let lastPhase: ExecutionPhase | null = null;
 
   for (const msg of messages) {
+    // PPT 流水线阶段分割线（系统消息 metadata.ppt_pipeline）
+    if (msg.metadata?.ppt_pipeline && msg.type === 'phase_start') {
+      items.push({
+        kind: 'phase',
+        phase: { phase: 'review', label: msg.content.replace(/^[✅❌📑]\s*/, '') },
+      });
+      continue;
+    }
+
     const phase = getMessagePhase(msg);
     if (phase !== lastPhase && phase !== 'other') {
       items.push({

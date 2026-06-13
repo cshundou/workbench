@@ -21,6 +21,9 @@ export interface Deliverable {
   /** PPT 页数 */
   slideCount?: number;
   templateId?: string;
+  qualityScore?: number;
+  qualityGrade?: string;
+  auditRound?: number;
 }
 
 const CATEGORY_ORDER: DeliverableCategory[] = ['final', 'chart', 'intermediate', 'reference'];
@@ -81,6 +84,9 @@ function buildDeliverableFromAttachment(
     size?: number;
     slide_count?: number;
     template_id?: string;
+    quality_score?: number;
+    quality_grade?: string;
+    audit_round?: number;
   };
   const downloadUrl =
     fileType === 'pptx' && typeof att?.content === 'string' ? String(att.content) : undefined;
@@ -95,6 +101,9 @@ function buildDeliverableFromAttachment(
     downloadUrl,
     slideCount: attAny.slide_count,
     templateId: attAny.template_id,
+    qualityScore: attAny.quality_score,
+    qualityGrade: attAny.quality_grade,
+    auditRound: attAny.audit_round,
     createdBy: msg.sender.name || msg.sender.role,
     createdAt: msg.timestamp,
     size: attAny.size ?? new Blob([content]).size,
