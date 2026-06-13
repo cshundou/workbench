@@ -44,7 +44,8 @@ from app.services.workflow.nodes.group_chat_subtasks import (
 )
 from app.services.workflow.team_builder import TeamBuilder
 from app.services.delivery.ppt_generator_service import ppt_generator_service
-from app.services.delivery.ppt_outline_builder import build_ppt_outline
+from app.services.delivery.ppt_outline_builder import build_ppt_outline, build_ppt_outline_with_quality
+from app.services.delivery.ppt_audit_service import ppt_audit_service, MAX_REJECT_ROUNDS
 from app.services.delivery.task_intent import detect_delivery_format
 from app.services.workflow.role_catalog import (
     AUDIT_REJECT_ROLE_MAP,
@@ -230,6 +231,10 @@ class AgentState(TypedDict):
     gc_tier_route: NotRequired[str]
     delivery_format: NotRequired[str]
     ppt_file: NotRequired[dict[str, Any]]
+    ppt_outline: NotRequired[dict[str, Any]]
+    ppt_reject_counts: NotRequired[dict[str, int]]
+    ppt_quality_report: NotRequired[dict[str, Any]]
+    ppt_complexity: NotRequired[str]
 
 
 StatusCallback = Callable[[str, str, dict[str, Any]], None]
@@ -1290,8 +1295,12 @@ class WorkflowBuilder:
             state["progress"] = 10.0
             phases = (team_config or {}).get("workflow_phases")
             if not phases:
+                delivery_fmt = (team_config or {}).get("delivery_format") or detect_delivery_format(
+                    state["task"]
+                )
                 phases = TeamBuilder.build_workflow_phases(
-                    (team_config or {}).get("members", [])
+                    (team_config or {}).get("members", []),
+                    delivery_format=delivery_fmt,
                 )
             state["workflow_phases"] = phases
             state["current_phase"] = 1
@@ -1299,6 +1308,10 @@ class WorkflowBuilder:
                 state["task"]
             )
             state["delivery_format"] = delivery_format
+            if delivery_format == "ppt":
+                state["ppt_reject_counts"] = {"outline": 0, "content": 0, "final": 0}
+                complexity = (team_config or {}).get("complexity") or "medium"
+                state["ppt_complexity"] = complexity
             self._emit_group_chat_role(
                 "project_manager",
                 "task_assignment",
@@ -1420,6 +1433,26 @@ class WorkflowBuilder:
             )
             mark_subtask_completed(state["subtasks"], subtask_id)
             role_name = self._get_role_info(role, state).get("name", role)
+
+            # PPT 排版阶段：设计师完成后立即生成文件
+            delivery_format = state.get("delivery_format") or detect_delivery_format(
+                state["task"]
+            )
+            if delivery_format == "ppt" and role == "ppt_designer":
+                ppt_file = self._generate_ppt_deliverable(state)
+                if ppt_file:
+                    state["ppt_file"] = ppt_file
+                    attachments.append(
+                        {
+                            "type": "file",
+                            "name": ppt_file["filename"],
+                            "content": ppt_file["download_path"],
+                            "file_type": "pptx",
+                            "size": ppt_file["size"],
+                            "slide_count": ppt_file["slide_count"],
+                        }
+                    )
+
             self._emit_group_chat_role(
                 role,
                 "answer",
@@ -1479,7 +1512,26 @@ class WorkflowBuilder:
 
         next_phase = get_next_phase(subtasks, current_phase)
         if next_phase is not None:
+            # PPT 卡点：阶段完成前先执行大纲/内容审核
+            delivery_format = state.get("delivery_format") or detect_delivery_format(
+                state["task"]
+            )
+            if delivery_format == "ppt" and current_phase in (2, 3):
+                checkpoint = self._run_ppt_phase_checkpoint(state, current_phase)
+                if checkpoint and not checkpoint.get("passed"):
+                    if state.get("status") == "human_review":
+                        state["gc_tier_route"] = "audit"
+                    else:
+                        state["gc_tier_route"] = "continue_tier"
+                    state["progress"] = calc_group_chat_progress(
+                        subtasks, state.get("status", "running")
+                    )
+                    return state
             state["current_phase"] = next_phase
+            if delivery_format == "ppt":
+                phase_labels = {2: "大纲策划", 3: "内容生产", 4: "排版生成"}
+                label = phase_labels.get(next_phase, f"阶段{next_phase}")
+                self._emit_ppt_stage_divider(f"进入{label}阶段")
             state["gc_tier_route"] = "next_phase"
         else:
             state["status"] = "reviewing"
@@ -1538,28 +1590,63 @@ class WorkflowBuilder:
   ]
 }}
 ```
-要求：8-15 页，template_id 选 business_minimal 或 tech_modern，内容专业简洁。
+要求：8-15 页，每页指定 layout 字段，template_id 选 business_report/data_analysis/tech_proposal 等，遵守 6x6 原则。
 """
-        elif delivery_format == "ppt":
+        elif delivery_format == "ppt" and role == "copywriter":
             analysis_prompt = f"""
-请作为文案策划师，基于以下资料完成演示文稿（PPT）大纲撰写：
+请作为文案策划师，输出 PPT 结构化大纲（JSON only）：
 
 原始任务：{state['task']}
-撰写要求：{task_desc}
+子任务：{task_desc}
+
+必须遵循：
+1. SCQA 故事线 + One Slide One Idea（每页一个核心观点）
+2. 八大模块：封面、目录、背景/现状、核心问题、分析/方案、数据/图表、总结/建议、结尾
+3. 每页要点≤6条，每条≤6个核心词；每个观点配论据
+4. 页数：simple≥8 / medium≥12 / complex≥18
+
+```json
+{{
+  "title": "演示标题",
+  "subtitle": "副标题",
+  "template_id": "business_report",
+  "slides": [
+    {{"slide_type": "cover", "title": "...", "subtitle": "..."}},
+    {{"slide_type": "toc", "title": "目录", "bullets": ["..."]}},
+    {{"slide_type": "content", "title": "背景与现状", "bullets": ["情境(S)", "冲突(C)"]}},
+    {{"slide_type": "content", "title": "核心问题", "bullets": ["问题(Q)", "目标"]}},
+    {{"slide_type": "content", "title": "方案", "bullets": ["观点", "论据（来源：...）"]}},
+    {{"slide_type": "content", "title": "关键数据", "bullets": ["指标"], "chart": {{"chart_type": "bar", "categories": ["A","B"], "series": [{{"name": "指标", "values": [1,2]}}]}}}},
+    {{"slide_type": "content", "title": "总结与建议", "bullets": ["结论", "行动建议"]}},
+    {{"slide_type": "ending", "title": "谢谢聆听"}}
+  ]
+}}
+```
+"""
+        elif delivery_format == "ppt" and role in ("analyst", "researcher", "financial_analyst"):
+            analysis_prompt = f"""
+请作为数据/研究角色，基于大纲与资料完成 PPT 内容填充：
+
+原始任务：{state['task']}
+任务说明：{task_desc}
 
 已有资料：
 {json.dumps(results, ensure_ascii=False, default=str)}
 
-请输出 JSON 格式的幻灯片大纲（不要其他说明文字），结构如下：
-```json
-{{
-  "title": "演示标题",
-  "slides": [
-    {{"slide_type": "content", "title": "章节标题", "bullets": ["要点1", "要点2", "要点3"]}}
-  ]
-}}
-```
-要求：5-12 页幻灯片，每页 3-5 条要点，语言简洁专业。
+要求：
+1. 论点+论据+数据，所有数据标注来源
+2. 数据页须含 chart 或 table 配置
+3. 禁止空洞套话，输出 JSON slides 片段或 Markdown 章节
+
+请输出可直接合并到大纲的内容（JSON 或 Markdown）。
+"""
+        elif delivery_format == "ppt":
+            analysis_prompt = f"""
+请基于以下资料补充 PPT 相关内容：
+
+原始任务：{state['task']}
+要求：{task_desc}
+资料：{json.dumps(results, ensure_ascii=False, default=str)[:2000]}
 """
         else:
             analysis_prompt = f"""
@@ -1600,26 +1687,33 @@ class WorkflowBuilder:
         )
 
     def _generate_ppt_deliverable(self, state: AgentState) -> dict[str, Any] | None:
-        """审核通过后生成 PPTX 文件。"""
+        """排版阶段生成 PPTX 文件（含八大模块结构与版式匹配）。"""
         if self.tenant_id is None or self.execution_id is None:
             logger.warning("缺少 tenant/session 上下文，跳过 PPT 生成")
             return None
         try:
-            outline = build_ppt_outline(
+            complexity = str(state.get("ppt_complexity") or "medium")
+            outline = build_ppt_outline_with_quality(
                 state["task"],
                 state.get("deliverables", []),
+                complexity=complexity,
             )
+            state["ppt_outline"] = outline
             result = ppt_generator_service.generate_pptx(
                 self.tenant_id,
                 self.execution_id,
                 outline,
             )
+            quality = state.get("ppt_quality_report") or {}
             return {
                 "filename": result["filename"],
                 "file_path": result["file_path"],
                 "size": result["size"],
                 "slide_count": result["slide_count"],
-                "template_id": result.get("template_id", "business_minimal"),
+                "template_id": result.get("template_id", "business_report"),
+                "quality_score": quality.get("total_score"),
+                "quality_grade": quality.get("grade_label"),
+                "audit_round": int(state.get("review_count") or 0),
                 "download_path": (
                     f"/api/v1/group-chat/sessions/{self.execution_id}"
                     f"/deliverables/{result['filename']}"
@@ -1628,6 +1722,102 @@ class WorkflowBuilder:
         except Exception as exc:
             logger.exception("PPT 生成失败: %s", exc)
             return None
+
+    def _emit_ppt_stage_divider(self, label: str, *, passed: bool | None = None) -> None:
+        """PPT 流水线阶段切换系统消息。"""
+        if passed is True:
+            content = f"✅ {label}，进入下一阶段"
+        elif passed is False:
+            content = f"❌ {label}，已打回修改"
+        else:
+            content = f"📑 {label}"
+        self._emit_group_chat_role(
+            "system",
+            "phase_start",
+            content,
+            metadata={"ppt_pipeline": True, "passed": passed},
+        )
+
+    def _run_ppt_phase_checkpoint(
+        self,
+        state: AgentState,
+        completed_phase: int,
+    ) -> dict[str, Any] | None:
+        """
+        PPT 双审核卡点：phase 2 大纲审核、phase 3 内容审核。
+        返回审核报告；不通过时更新 state 并返回 report。
+        """
+        delivery_format = state.get("delivery_format") or detect_delivery_format(state["task"])
+        if delivery_format != "ppt":
+            return None
+
+        complexity = str(state.get("ppt_complexity") or "medium")
+        deliverables = state.get("deliverables", [])
+        reject_counts: dict[str, int] = dict(state.get("ppt_reject_counts") or {})
+
+        if completed_phase == 2:
+            outline = state.get("ppt_outline") or build_ppt_outline_with_quality(
+                state["task"], deliverables, complexity=complexity
+            )
+            state["ppt_outline"] = outline
+            report = ppt_audit_service.audit_outline(
+                outline, complexity=complexity, deliverables=deliverables
+            )
+            audit_key = "outline"
+            stage_label = "大纲审核"
+        elif completed_phase == 3:
+            outline = state.get("ppt_outline")
+            report = ppt_audit_service.audit_content(
+                outline, deliverables, complexity=complexity
+            )
+            audit_key = "content"
+            stage_label = "内容审核"
+        else:
+            return None
+
+        state["ppt_quality_report"] = report
+        if report.get("passed"):
+            self._emit_ppt_stage_divider(f"{stage_label}通过", passed=True)
+            return report
+
+        reject_counts[audit_key] = reject_counts.get(audit_key, 0) + 1
+        state["ppt_reject_counts"] = reject_counts
+        round_no = reject_counts[audit_key]
+        assignee = report.get("assignee", "copywriter")
+
+        if round_no >= MAX_REJECT_ROUNDS:
+            state["status"] = "human_review"
+            state["error"] = f"{stage_label}连续{MAX_REJECT_ROUNDS}次未通过，已转人工审核"
+            self._emit_group_chat_role(
+                "auditor",
+                "review_result",
+                f"❌ {stage_label}第{round_no}次不通过，已达上限，已转人工审核。",
+                metadata={"review": report, "human_review": True, "ppt_audit": True},
+            )
+            return report
+
+        for subtask in state.get("subtasks", []):
+            if subtask.get("role") == assignee:
+                subtask["status"] = "pending"
+                issues = report.get("issues") or []
+                hint = issues[0] if issues else report.get("summary", "")
+                subtask["task"] = f"【{stage_label}打回】{hint}"
+                break
+        state["current_phase"] = completed_phase
+        state["gc_tier_route"] = "continue_tier"
+        self._emit_ppt_stage_divider(
+            f"{stage_label}不通过（第{round_no}次）",
+            passed=False,
+        )
+        self._emit_group_chat_role(
+            "auditor",
+            "review_result",
+            f"❌ {stage_label}不通过（第{round_no}次），已打回"
+            f"{self._get_role_info(assignee, state).get('name', assignee)}。\n"
+            f"得分：{report.get('total_score', 0)}（合格线 {report.get('pass_threshold', 80)}）",
+            metadata={"review": report, "assignee": assignee, "ppt_audit": True},
+        )
+        return report
 
     @staticmethod
     def _build_subtask_attachments(
@@ -1730,15 +1920,24 @@ class WorkflowBuilder:
         audit_runner = ForcedAuditRunner(llm_invoke=_invoke if llm else None)
         audit_config: dict[str, Any] = {}
         if delivery_format == "ppt":
-            from app.services.workflow.nodes.audit_node import PPT_AUDIT_DIMENSIONS
-
-            audit_config["audit_dimensions"] = PPT_AUDIT_DIMENSIONS
-        review_result = audit_runner.run(
-            task=state["task"],
-            deliverables=state.get("deliverables", []),
-            results=state.get("results", {}),
-            config=audit_config,
-        )
+            complexity = str(state.get("ppt_complexity") or "medium")
+            review_result = ppt_audit_service.audit_final(
+                task=state["task"],
+                deliverables=state.get("deliverables", []),
+                results=state.get("results", {}),
+                outline=state.get("ppt_outline"),
+                ppt_file=state.get("ppt_file"),
+                complexity=complexity,
+                llm_invoke=_invoke if llm else None,
+            )
+            state["ppt_quality_report"] = review_result
+        else:
+            review_result = audit_runner.run(
+                task=state["task"],
+                deliverables=state.get("deliverables", []),
+                results=state.get("results", {}),
+                config=audit_config,
+            )
         state["review_result"] = review_result
 
         if review_result.get("passed"):
@@ -1757,27 +1956,36 @@ class WorkflowBuilder:
             task_attachments: list[dict[str, Any]] = [
                 {"type": "text", "name": "最终报告", "content": final_answer},
             ]
-            ppt_file = None
-            if delivery_format == "ppt":
+            ppt_file = state.get("ppt_file")
+            if delivery_format == "ppt" and not ppt_file:
                 ppt_file = self._generate_ppt_deliverable(state)
-                if ppt_file:
-                    state["ppt_file"] = ppt_file
-                    task_attachments.append(
-                        {
-                            "type": "file",
-                            "name": ppt_file["filename"],
-                            "content": ppt_file["download_path"],
-                            "file_type": "pptx",
-                            "size": ppt_file["size"],
-                            "slide_count": ppt_file["slide_count"],
-                            "template_id": ppt_file.get("template_id"),
-                        }
-                    )
+            if ppt_file:
+                state["ppt_file"] = ppt_file
+                task_attachments.append(
+                    {
+                        "type": "file",
+                        "name": ppt_file["filename"],
+                        "content": ppt_file["download_path"],
+                        "file_type": "pptx",
+                        "size": ppt_file["size"],
+                        "slide_count": ppt_file["slide_count"],
+                        "template_id": ppt_file.get("template_id"),
+                        "quality_score": ppt_file.get("quality_score"),
+                        "quality_grade": ppt_file.get("quality_grade"),
+                        "audit_round": ppt_file.get("audit_round"),
+                    }
+                )
             self._emit_group_chat_role(
                 "auditor",
                 "review_result",
-                f"✅ 审核通过！{review_result.get('summary', '')}",
-                metadata={"review": review_result},
+                f"✅ 审核通过！{review_result.get('summary', '')}"
+                + (
+                    f"（{review_result.get('total_score', '')}分 · "
+                    f"{review_result.get('grade_label', '')}）"
+                    if delivery_format == "ppt"
+                    else ""
+                ),
+                metadata={"review": review_result, "ppt_audit": delivery_format == "ppt"},
             )
             complete_msg = "🎉 所有审核通过，任务完成！最终交付物如下："
             if ppt_file:
