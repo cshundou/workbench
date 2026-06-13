@@ -92,6 +92,15 @@ export interface NodeExecutionLog {
   completed_at?: string | null;
 }
 
+/** 错误修改建议 */
+export interface ErrorSuggestion {
+  title: string;
+  description: string;
+  action_type?: string | null;
+  action_target?: string | null;
+  priority?: number;
+}
+
 /** 工作流执行记录 */
 export interface WorkflowExecution {
   id: number;
@@ -108,6 +117,11 @@ export interface WorkflowExecution {
   node_statuses?: Record<string, string>;
   logs?: NodeExecutionLog[];
   trace_id?: string | null;
+  effective_graph_definition?: GraphDefinition | null;
+  failed_node_id?: string | null;
+  error_code?: string | null;
+  error_suggestions?: ErrorSuggestion[];
+  raw_error?: string | null;
 }
 
 /** 人工介入参数 */

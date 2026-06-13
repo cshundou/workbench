@@ -107,6 +107,16 @@ class NodeExecutionLog(BaseModel):
     completed_at: Optional[str] = None
 
 
+class ErrorSuggestion(BaseModel):
+    """错误修改建议。"""
+
+    title: str
+    description: str
+    action_type: Optional[str] = None
+    action_target: Optional[str] = None
+    priority: int = 0
+
+
 class WorkflowExecutionResponse(BaseModel):
     """工作流执行记录响应。"""
 
@@ -125,6 +135,26 @@ class WorkflowExecutionResponse(BaseModel):
     trace_id: Optional[str] = None
     node_statuses: dict[str, str] = Field(default_factory=dict)
     logs: List[NodeExecutionLog] = Field(default_factory=list)
+    effective_graph_definition: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="本次执行实际使用的拓扑（含标准图 fallback）",
+    )
+    failed_node_id: Optional[str] = Field(
+        default=None,
+        description="失败节点 id（若有）",
+    )
+    error_code: Optional[str] = Field(
+        default=None,
+        description="错误码（便于前端展示建议与跳转）",
+    )
+    error_suggestions: List[ErrorSuggestion] = Field(
+        default_factory=list,
+        description="智能修改建议列表",
+    )
+    raw_error: Optional[str] = Field(
+        default=None,
+        description="原始技术错误（默认折叠展示）",
+    )
 
     model_config = {"from_attributes": True}
 

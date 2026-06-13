@@ -19,6 +19,7 @@ from app.models.user import User
 from app.models.workflow import Workflow
 from app.models.workflow_execution import WorkflowExecution
 from app.schemas.workflow import (
+    ErrorSuggestion,
     GraphDefinition,
     HumanInterventionRequest,
     NodeExecutionLog,
@@ -30,6 +31,7 @@ from app.schemas.workflow import (
     WorkflowResponse,
     WorkflowUpdate,
 )
+from app.utils.error_translator import UserFacingError, translate_error_message
 from app.services.workflow.graph_builder import (
     NODE_LABELS,
     STANDARD_GRAPH_DEFINITION,
@@ -89,6 +91,107 @@ class WorkflowService:
         _runtime_state[execution_id] = runtime
         runtime_state_store.save(execution_id, runtime)
 
+    @staticmethod
+    def _ensure_runtime_dict(runtime: dict[str, Any], key: str) -> dict[str, Any]:
+        """确保运行时 state 中指定字段为 dict。"""
+        value = runtime.get(key)
+        if not isinstance(value, dict):
+            runtime[key] = {}
+        return runtime[key]
+
+    @staticmethod
+    def _ensure_runtime_list(runtime: dict[str, Any], key: str) -> list[Any]:
+        """确保运行时 state 中指定字段为 list。"""
+        value = runtime.get(key)
+        if not isinstance(value, list):
+            runtime[key] = []
+        return runtime[key]
+
+    @staticmethod
+    def resolve_effective_graph(
+        graph_definition: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """解析实际执行拓扑：空图回退标准六节点模板。"""
+        if graph_definition and graph_definition.get("nodes"):
+            return dict(graph_definition)
+        return dict(STANDARD_GRAPH_DEFINITION)
+
+    def _get_effective_graph_from_execution(
+        self, execution: WorkflowExecution
+    ) -> dict[str, Any]:
+        """从执行记录获取有效拓扑快照。"""
+        params = execution.input_params or {}
+        snapshot = params.get("graph_definition_snapshot")
+        if isinstance(snapshot, dict) and snapshot.get("nodes"):
+            return snapshot
+        runtime = self._load_runtime_state(execution.id)
+        runtime_snapshot = runtime.get("graph_definition_snapshot")
+        if isinstance(runtime_snapshot, dict) and runtime_snapshot.get("nodes"):
+            return runtime_snapshot
+        return dict(STANDARD_GRAPH_DEFINITION)
+
+    @staticmethod
+    def extract_failure_info(
+        final_state: dict[str, Any],
+        logs: list[dict[str, Any]],
+    ) -> tuple[str, Optional[str]]:
+        """从最终状态与日志提取失败原因与失败节点。"""
+        error = str(final_state.get("error") or "").strip()
+        failed_node: Optional[str] = final_state.get("failed_node")
+        if isinstance(failed_node, str):
+            failed_node = failed_node.strip() or None
+        else:
+            failed_node = None
+
+        if not error:
+            for log in reversed(logs):
+                if log.get("status") == "failed":
+                    log_error = log.get("error")
+                    if log_error:
+                        error = str(log_error)
+                        failed_node = failed_node or log.get("node_id")
+                        break
+
+        if not error:
+            error = "工作流执行失败，详见执行日志"
+        return error, failed_node
+
+    def _build_error_context(
+        self,
+        execution: WorkflowExecution,
+        failed_node: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """构建错误翻译上下文。"""
+        params = execution.input_params or {}
+        return {
+            "execution_id": execution.id,
+            "workflow_id": execution.workflow_id,
+            "failed_node_id": failed_node,
+            "kb_id": params.get("kb_id"),
+        }
+
+    def _persist_user_facing_error(
+        self,
+        execution_id: int,
+        facing: UserFacingError,
+        failed_node: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """将用户可读错误写入运行时状态，并返回 WS 载荷。"""
+        runtime = self._load_runtime_state(execution_id) or {}
+        runtime["error_code"] = facing.error_code
+        runtime["error_suggestions"] = [s.to_dict() for s in facing.suggestions]
+        runtime["raw_error"] = facing.raw_error
+        if failed_node:
+            runtime["failed_node_id"] = failed_node
+        self._save_runtime_state(execution_id, runtime)
+        return {
+            "error": facing.user_message,
+            "error_code": facing.error_code,
+            "error_suggestions": runtime["error_suggestions"],
+            "raw_error": facing.raw_error,
+            "failed_node": failed_node,
+        }
+
     def _to_execution_response(
         self,
         execution: WorkflowExecution,
@@ -98,6 +201,18 @@ class WorkflowService:
         logs_raw = runtime.get("logs") or list(execution.execution_logs or [])
         node_statuses = runtime.get("node_statuses") or dict(execution.node_statuses or {})
         logs = [NodeExecutionLog(**log) for log in logs_raw]
+        failed_node_id = runtime.get("failed_node_id")
+        if execution.status == "failed" and not failed_node_id:
+            for log in reversed(logs_raw):
+                if log.get("status") == "failed":
+                    failed_node_id = log.get("node_id")
+                    break
+        suggestions_raw = runtime.get("error_suggestions") or []
+        error_suggestions = [
+            ErrorSuggestion(**item)
+            for item in suggestions_raw
+            if isinstance(item, dict)
+        ]
         return WorkflowExecutionResponse(
             id=execution.id,
             workflow_id=execution.workflow_id,
@@ -114,6 +229,13 @@ class WorkflowService:
             trace_id=runtime.get("trace_id"),
             node_statuses=node_statuses,
             logs=logs,
+            effective_graph_definition=self._get_effective_graph_from_execution(
+                execution
+            ),
+            failed_node_id=failed_node_id,
+            error_code=runtime.get("error_code"),
+            error_suggestions=error_suggestions,
+            raw_error=runtime.get("raw_error"),
         )
 
     async def _persist_execution_runtime(
@@ -264,8 +386,8 @@ class WorkflowService:
         runtime = self._load_runtime_state(execution_id)
         if not runtime:
             runtime = {"thread_id": "", "node_statuses": {}, "logs": []}
-        runtime["node_statuses"][node_id] = status
-        runtime["logs"].append(log_entry)
+        self._ensure_runtime_dict(runtime, "node_statuses")[node_id] = status
+        self._ensure_runtime_list(runtime, "logs").append(log_entry)
         running_nodes = [
             nid
             for nid, node_status in runtime["node_statuses"].items()
@@ -463,7 +585,14 @@ class WorkflowService:
         from app.models.workflow_version import WorkflowVersion
 
         workflow = await self._get_workflow_or_raise(db, workflow_id, tenant_id)
-        await self._check_workflow_access(workflow, user, require_owner=True)
+        await self._check_workflow_access(workflow, require_owner=True)
+
+        if not (workflow.graph_definition or {}).get("nodes"):
+            workflow.graph_definition = dict(STANDARD_GRAPH_DEFINITION)
+            logger.info(
+                "发布工作流时自动回填标准拓扑 workflow_id=%s",
+                workflow_id,
+            )
 
         validation = self.validate_graph_definition(workflow.graph_definition)
         if not validation["valid"]:
@@ -707,10 +836,12 @@ class WorkflowService:
             metadata={"task": data.task[:200]},
         )
 
+        effective_graph = self.resolve_effective_graph(workflow.graph_definition)
         input_params = {
             "task": data.task,
             "require_human_approval": data.require_human_approval,
             "kb_id": data.kb_id,
+            "graph_definition_snapshot": effective_graph,
             **data.extra_params,
         }
 
@@ -726,11 +857,10 @@ class WorkflowService:
         await db.refresh(execution)
 
         thread_id = f"execution_{execution.id}"
-        self._init_runtime_state(
-            execution.id, thread_id, workflow.graph_definition
-        )
+        self._init_runtime_state(execution.id, thread_id, effective_graph)
         runtime = self._load_runtime_state(execution.id)
         runtime["trace_id"] = trace.trace_id
+        runtime["graph_definition_snapshot"] = effective_graph
         self._save_runtime_state(execution.id, runtime)
         await quota_extended_service.increment(tenant_id, "workflow_executions")
 
@@ -1251,7 +1381,9 @@ class WorkflowService:
 
         status = final_state.get("status", "completed")
         final_status = status
-        output_result: dict[str, Any] | None = None
+        ws_payload: dict[str, Any] | None = None
+        runtime = self._load_runtime_state(execution_id)
+        logs = list(runtime.get("logs") or [])
 
         async with async_session_factory() as db:
             stmt = select(WorkflowExecution).where(
@@ -1275,18 +1407,37 @@ class WorkflowService:
                 return
 
             if status == "failed":
+                error_raw, failed_node = self.extract_failure_info(
+                    final_state, logs
+                )
+                facing = translate_error_message(
+                    error_raw,
+                    context=self._build_error_context(execution, failed_node),
+                )
                 execution.status = "failed"
-                execution.error_message = final_state.get("error", "执行失败")
+                execution.error_message = facing.user_message
                 execution.completed_at = datetime.now(timezone.utc)
                 final_status = "failed"
-                output_result = None
+                if failed_node:
+                    self._ensure_runtime_dict(runtime, "node_statuses")[
+                        failed_node
+                    ] = "failed"
+                    self._save_runtime_state(execution_id, runtime)
+                    await self._persist_execution_runtime(
+                        execution_id,
+                        list(runtime.get("logs", [])),
+                        dict(runtime.get("node_statuses", {})),
+                    )
+                ws_payload = self._persist_user_facing_error(
+                    execution_id, facing, failed_node
+                )
             else:
                 execution.status = "completed"
-                output_result = {
+                ws_payload = {
                     "results": final_state.get("results", {}),
                     "final": final_state.get("results", {}).get("final"),
                 }
-                execution.output_result = output_result
+                execution.output_result = ws_payload
                 execution.completed_at = datetime.now(timezone.utc)
                 final_status = "completed"
 
@@ -1295,13 +1446,17 @@ class WorkflowService:
         await workflow_ws_manager.broadcast_execution_status(
             execution_id,
             final_status,
-            output_result,
+            ws_payload,
         )
 
     async def _mark_execution_failed(
-        self, execution_id: int, error_message: str
+        self,
+        execution_id: int,
+        error_message: str,
+        *,
+        failed_node: Optional[str] = None,
     ) -> None:
-        """标记执行失败。"""
+        """标记执行失败，并翻译为用户可读中文错误。"""
         from app.core.database import async_session_factory
 
         async with async_session_factory() as db:
@@ -1310,13 +1465,20 @@ class WorkflowService:
             )
             result = await db.execute(stmt)
             execution = result.scalar_one()
+            facing = translate_error_message(
+                error_message,
+                context=self._build_error_context(execution, failed_node),
+            )
             execution.status = "failed"
-            execution.error_message = error_message
+            execution.error_message = facing.user_message
             execution.completed_at = datetime.now(timezone.utc)
             await db.commit()
 
+        ws_payload = self._persist_user_facing_error(
+            execution_id, facing, failed_node
+        )
         await workflow_ws_manager.broadcast_execution_status(
-            execution_id, "failed", {"error": error_message}
+            execution_id, "failed", ws_payload
         )
 
 
@@ -1354,6 +1516,11 @@ class WorkflowService:
         """
         builder = WorkflowBuilder()
         warnings: list[str] = []
+        if not (definition or {}).get("nodes"):
+            warnings.append(
+                "工作流拓扑为空，执行时将使用标准六节点模板，建议编辑并保存拓扑"
+            )
+            definition = dict(STANDARD_GRAPH_DEFINITION)
         for node in definition.get("nodes") or []:
             if node.get("type") == "knowledge":
                 config = node.get("config") or {}

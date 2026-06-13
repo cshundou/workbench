@@ -238,6 +238,10 @@ class Settings(BaseSettings):
         default=2,
         description="调度中心最大二次规划次数",
     )
+    error_advisor_enabled: bool = Field(
+        default=False,
+        description="是否启用 LLM 错误建议增强（默认仅规则建议）",
+    )
 
     # 监控告警配置
     alert_enabled: bool = Field(default=False, description="是否启用监控告警")

@@ -34,7 +34,10 @@ const typeIcon = computed(() => {
 <template>
   <div
     class="workflow-node"
-    :class="{ 'is-selected': selected }"
+    :class="{
+      'is-selected': selected,
+      'is-failed': status === 'failed',
+    }"
     :style="{ borderColor: selected ? statusColor : undefined }"
   >
     <Handle type="target" :position="Position.Top" />
@@ -67,6 +70,12 @@ const typeIcon = computed(() => {
   &.is-selected {
     border-color: $primary-color;
     border-width: 2px;
+  }
+
+  &.is-failed {
+    border-color: #f53f3f;
+    border-width: 2px;
+    box-shadow: 0 0 0 2px rgba(245, 63, 63, 0.15);
   }
 }
 

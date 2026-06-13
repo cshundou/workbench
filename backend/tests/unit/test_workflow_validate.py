@@ -66,10 +66,10 @@ class TestWorkflowServiceValidate:
         assert result["valid"] is True
         assert result["errors"] == []
 
-    def test_validate_graph_failure(self, service: WorkflowService) -> None:
+    def test_validate_empty_graph_warns_and_uses_standard(self, service: WorkflowService) -> None:
         result = service.validate_graph_definition({"nodes": [], "edges": []})
-        assert result["valid"] is False
-        assert len(result["errors"]) > 0
+        assert result["valid"] is True
+        assert any("标准六节点" in w for w in result["warnings"])
 
     @pytest.mark.asyncio
     async def test_get_replay_params_success(self, service: WorkflowService) -> None:

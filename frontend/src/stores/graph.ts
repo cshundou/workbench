@@ -212,11 +212,40 @@ export const useGraphStore = defineStore('graph', () => {
 
     if (message.type === 'execution_status' && message.status) {
       if (currentExecution.value) {
+        const data = message.data || {};
+        const failedNode =
+          typeof data.failed_node === 'string' ? data.failed_node : undefined;
+        const suggestions = Array.isArray(data.error_suggestions)
+          ? (data.error_suggestions as WorkflowExecution['error_suggestions'])
+          : currentExecution.value.error_suggestions;
         currentExecution.value = {
           ...currentExecution.value,
           status: message.status,
-          output_result: message.data || currentExecution.value.output_result,
+          error_message:
+            typeof data.error === 'string'
+              ? data.error
+              : currentExecution.value.error_message,
+          error_code:
+            typeof data.error_code === 'string'
+              ? data.error_code
+              : currentExecution.value.error_code,
+          error_suggestions: suggestions,
+          raw_error:
+            typeof data.raw_error === 'string'
+              ? data.raw_error
+              : currentExecution.value.raw_error,
+          failed_node_id: failedNode ?? currentExecution.value.failed_node_id,
+          output_result:
+            data.results || data.final
+              ? (data as WorkflowExecution['output_result'])
+              : currentExecution.value.output_result,
         };
+        if (failedNode) {
+          nodeStatuses.value = {
+            ...nodeStatuses.value,
+            [failedNode]: 'failed',
+          };
+        }
       }
       if (['completed', 'failed', 'interrupted'].includes(message.status)) {
         stopExecutionPolling();

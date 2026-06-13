@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { NodeExecutionLog } from '@/api/workflow';
+import type { ErrorSuggestion, NodeExecutionLog } from '@/api/workflow';
+import ErrorAdvicePanel from '@/components/common/ErrorAdvicePanel.vue';
 import { NODE_STATUS_COLORS } from '@/stores/graph';
 
 const props = defineProps<{
   logs: NodeExecutionLog[];
   selectedNodeId?: string | null;
   traceId?: string | null;
+  globalError?: string;
+  executionStatus?: string;
+  errorSuggestions?: ErrorSuggestion[];
+  rawError?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -29,6 +34,16 @@ const sortedLogs = computed(() => {
       return ta.localeCompare(tb);
     });
   return filtered;
+});
+
+const failedLog = computed(() =>
+  [...props.logs].reverse().find((log) => log.status === 'failed'),
+);
+
+const failureSummary = computed(() => {
+  if (props.executionStatus !== 'failed') return '';
+  if (props.globalError) return props.globalError;
+  return failedLog.value?.error || '';
 });
 
 const loopGroups = computed(() => {
@@ -79,6 +94,15 @@ function formatTime(iso?: string | null): string {
         查看链路 TraceID
       </router-link>
     </div>
+    <ErrorAdvicePanel
+      v-if="failureSummary"
+      :message="failureSummary"
+      :suggestions="errorSuggestions"
+      :raw-error="rawError"
+      class="failure-summary"
+      @open-node="(nodeId) => emit('select', nodeId)"
+    />
+
     <div class="panel-toolbar">
       <el-input v-model="keyword" size="small" placeholder="搜索日志内容" clearable />
     </div>
@@ -135,6 +159,10 @@ function formatTime(iso?: string | null): string {
   background: #fff;
   border-radius: $border-radius;
   border: 1px solid $border-color;
+}
+
+.failure-summary {
+  margin: 8px 12px 0;
 }
 
 .panel-header {

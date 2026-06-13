@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft, VideoPlay, Check, Close, CircleClose, Download, ChatDotRound } from '@element-plus/icons-vue';
 import WorkflowCanvas from '@/components/workflow/WorkflowCanvas.vue';
 import ExecutionLogPanel from '@/components/workflow/ExecutionLogPanel.vue';
+import ErrorAdvicePanel from '@/components/common/ErrorAdvicePanel.vue';
 import MessageStream from '@/components/group-chat/MessageStream.vue';
 import StreamingText from '@/components/chat/StreamingText.vue';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
@@ -12,6 +13,7 @@ import { useGraphStore } from '@/stores/graph';
 import { getKnowledgeBases } from '@/api/rag';
 import { exportExecutionLogs } from '@/api/workflow';
 import type { NodeExecutionLog } from '@/api/workflow';
+import { resolveEffectiveGraph } from '@/constants/workflowGraph';
 
 const route = useRoute();
 const router = useRouter();
@@ -37,9 +39,28 @@ const rejectTargetOptions = computed(() =>
   })),
 );
 
-const graphDefinition = computed(
-  () => graphStore.currentWorkflow?.graph_definition || { nodes: [], edges: [] },
+const graphDefinition = computed(() =>
+  resolveEffectiveGraph(
+    graphStore.currentExecution?.effective_graph_definition,
+    graphStore.currentWorkflow?.graph_definition,
+  ),
 );
+
+const executionError = computed(
+  () => graphStore.currentExecution?.error_message || '',
+);
+
+const failedNodeId = computed(
+  () => graphStore.currentExecution?.failed_node_id || null,
+);
+
+const errorSuggestions = computed(
+  () => graphStore.currentExecution?.error_suggestions || [],
+);
+
+const rawError = computed(() => graphStore.currentExecution?.raw_error || null);
+
+const isFailed = computed(() => executionStatus.value === 'failed');
 
 const executionStatus = computed(() => graphStore.currentExecution?.status || 'idle');
 
@@ -169,6 +190,14 @@ function handleNodeClick(nodeId: string): void {
   selectedLog.value = logs.length > 0 ? logs[logs.length - 1] : null;
 }
 
+function focusFailedNode(nodeId?: string): void {
+  const target = nodeId || failedNodeId.value;
+  if (target) {
+    handleNodeClick(target);
+    viewMode.value = 'topology';
+  }
+}
+
 function goBack(): void {
   router.push({ name: 'WorkflowList' });
 }
@@ -198,6 +227,12 @@ onMounted(async () => {
   if (executionId) {
     await graphStore.refreshExecution(executionId);
     graphStore.connectWebSocket(executionId);
+    if (graphStore.currentExecution?.status === 'failed') {
+      const failedId = graphStore.currentExecution.failed_node_id;
+      if (failedId) {
+        handleNodeClick(failedId);
+      }
+    }
   }
 });
 
@@ -238,6 +273,21 @@ onUnmounted(() => {
 
     <el-row :gutter="16" class="main-content">
       <el-col :span="16">
+        <ErrorAdvicePanel
+          v-if="isFailed && executionError"
+          :message="executionError"
+          :suggestions="errorSuggestions"
+          :raw-error="rawError"
+          class="failure-banner"
+          @open-node="focusFailedNode"
+          @retry="handleExecute"
+        />
+        <div v-if="isFailed && failedNodeId" class="failed-node-link">
+          <el-button link type="primary" size="small" @click="focusFailedNode">
+            定位失败节点：{{ failedNodeId }}
+          </el-button>
+        </div>
+
         <el-card v-show="viewMode === 'topology'" shadow="never" class="canvas-card">
           <template #header>
             <span>工作流拓扑</span>
@@ -406,6 +456,10 @@ onUnmounted(() => {
             :logs="graphStore.executionLogs"
             :selected-node-id="selectedNodeId"
             :trace-id="graphStore.currentExecution?.trace_id"
+            :global-error="executionError"
+            :execution-status="executionStatus"
+            :error-suggestions="errorSuggestions"
+            :raw-error="rawError"
             @select="handleNodeClick"
           />
         </el-card>
@@ -419,6 +473,14 @@ onUnmounted(() => {
   padding: 0;
 }
 
+.failure-banner {
+  margin-bottom: 8px;
+}
+
+.failed-node-link {
+  margin-bottom: 12px;
+}
+
 .canvas-card {
   margin-bottom: 16px;
   border-radius: $border-radius-lg;
@@ -427,6 +489,19 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: space-between;
+  }
+
+  :deep(.el-card__body) {
+    height: 480px;
+    padding: 0;
+  }
+}
+
+.groupchat-card {
+  :deep(.el-card__body) {
+    height: 480px;
+    overflow-y: auto;
+    padding: 12px;
   }
 }
 

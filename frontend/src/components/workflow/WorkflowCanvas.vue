@@ -72,6 +72,12 @@ const edges = computed(() =>
 
 <template>
   <div class="workflow-canvas">
+    <el-empty
+      v-if="!nodes.length"
+      description="拓扑未配置，已使用标准六节点模板执行"
+      class="empty-canvas"
+    />
+    <template v-else>
     <div v-if="isParallelActive" class="parallel-badge">
       并行执行中（{{ parallelRunningNodes.length }} 个节点）
     </div>
@@ -94,6 +100,7 @@ const edges = computed(() =>
         />
       </template>
     </VueFlow>
+    </template>
   </div>
 </template>
 
@@ -106,6 +113,13 @@ const edges = computed(() =>
   background: $bg-white;
   border-radius: $border-radius;
   border: 1px solid $border-color;
+}
+
+.empty-canvas {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .parallel-badge {

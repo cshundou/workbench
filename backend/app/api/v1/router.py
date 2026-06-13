@@ -27,6 +27,7 @@ from app.api.v1.users import router as users_router
 from app.api.v1.user_api_keys import router as user_api_keys_router
 from app.api.v1.workflow_ws import router as workflow_ws_router
 from app.api.v1.workflows import router as workflows_router
+from app.api.v1.errors import router as errors_router
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.response import success_response
@@ -42,6 +43,7 @@ api_router.include_router(users_router)
 api_router.include_router(roles_router)
 api_router.include_router(knowledge_bases_router)
 api_router.include_router(workflows_router)
+api_router.include_router(errors_router)
 api_router.include_router(workflow_ws_router)
 api_router.include_router(group_chat_router)
 api_router.include_router(professional_roles_router)
