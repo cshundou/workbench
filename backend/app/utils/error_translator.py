@@ -187,17 +187,25 @@ def translate_error(
             raw_error=raw,
         )
 
+    # LangGraph 状态 schema 不匹配（常见：未声明字段写入 state）
+    if "Invalid state update" in raw:
+        return UserFacingError(
+            user_message="多智能体协作状态异常，执行被中断，请点击「重新执行」重试",
+            error_code="WORKFLOW_STATE_CORRUPT",
+            suggestions=_base_suggestions_for_code("WORKFLOW_STATE_CORRUPT", ctx),
+            raw_error=raw,
+        )
+
     # 知识库未配置
     if any(
         kw in raw
         for kw in (
             "未配置知识库",
-            "kb_id",
             "知识库 ID",
             "请选择知识库",
             "Knowledge base",
         )
-    ) or "ValidationError" in raw and "知识库" in raw:
+    ) or ("ValidationError" in raw and "知识库" in raw):
         return UserFacingError(
             user_message="未选择或未配置知识库，无法执行知识库检索",
             error_code="KB_NOT_CONFIGURED",

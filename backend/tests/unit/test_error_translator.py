@@ -37,3 +37,9 @@ class TestErrorTranslator:
         facing = translate_error("Task got Future attached to a different loop")
         assert facing.error_code == "ASYNC_LOOP_ERROR"
         assert "重新执行" in facing.user_message
+
+    def test_invalid_state_update_not_kb_error(self) -> None:
+        raw = "Invalid state update, expected dict ... got {'kb_id': 1, 'delivery_format': 'ppt'}"
+        facing = translate_error(raw)
+        assert facing.error_code == "WORKFLOW_STATE_CORRUPT"
+        assert "知识库" not in facing.user_message

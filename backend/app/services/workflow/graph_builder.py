@@ -228,6 +228,8 @@ class AgentState(TypedDict):
     current_phase: NotRequired[int]
     workflow_phases: NotRequired[list[dict[str, Any]]]
     gc_tier_route: NotRequired[str]
+    delivery_format: NotRequired[str]
+    ppt_file: NotRequired[dict[str, Any]]
 
 
 StatusCallback = Callable[[str, str, dict[str, Any]], None]
