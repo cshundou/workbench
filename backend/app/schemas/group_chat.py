@@ -123,6 +123,9 @@ class GroupChatSessionResponse(BaseModel):
     review_count: int
     kb_id: Optional[int] = None
     error_message: Optional[str] = None
+    error_code: Optional[str] = None
+    error_suggestions: List[dict[str, Any]] = Field(default_factory=list)
+    raw_error: Optional[str] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

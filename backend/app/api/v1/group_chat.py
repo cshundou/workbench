@@ -35,6 +35,16 @@ class GroupChatResolveRequest(BaseModel):
     comment: Optional[str] = Field(default=None, max_length=2000)
 
 
+class GroupChatInterveneRequest(BaseModel):
+    """失败态人工介入请求。"""
+
+    action: Literal["supplement", "restart"] = Field(
+        default="supplement",
+        description="supplement=仅补充说明；restart=补充后重新执行",
+    )
+    message: Optional[str] = Field(default=None, max_length=4000)
+
+
 @router.post("/sessions", summary="创建群聊协同会话")
 async def create_group_chat_session(
     data: GroupChatSessionCreate,
@@ -134,6 +144,41 @@ async def cancel_group_chat_session(
     result = await group_chat_service.cancel_session(db, session_id, tenant_id)
     await db.commit()
     return success_response(data=result.model_dump(), message="会话已取消")
+
+
+@router.post("/sessions/{session_id}/restart", summary="重新执行群聊会话")
+async def restart_group_chat_session(
+    session_id: int,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """重新执行失败或已取消的群聊协同任务。"""
+    _ = current_user
+    result = await group_chat_service.restart_session(db, session_id, tenant_id)
+    await db.commit()
+    return success_response(data=result.model_dump(), message="已重新启动协作")
+
+
+@router.post("/sessions/{session_id}/intervene", summary="失败态人工介入")
+async def intervene_group_chat_session(
+    session_id: int,
+    body: GroupChatInterveneRequest,
+    current_user: Annotated[CurrentUser, Depends(require_permission(WF_WRITE))],
+    tenant_id: Annotated[int, Depends(get_current_tenant_id)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """失败或取消状态下补充说明，或补充后重新执行。"""
+    _ = current_user
+    result = await group_chat_service.intervene_session(
+        db,
+        session_id,
+        tenant_id,
+        body.action,
+        body.message,
+    )
+    await db.commit()
+    return success_response(data=result.model_dump(), message="介入处理完成")
 
 
 @router.post("/sessions/{session_id}/resolve", summary="人工审核处理")

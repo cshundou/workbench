@@ -45,6 +45,7 @@ def enrich_subtasks_from_team_config(
                     "status": "pending",
                     "depends_on": member.get("depends_on", []),
                     "parallel_group": member.get("parallel_group"),
+                    "phase": int(member.get("phase") or 2),
                 }
             )
     if not subtasks:
@@ -83,6 +84,8 @@ def enrich_subtasks_with_roles(
                 "role": role,
                 "task": item.get("task", task),
                 "status": "pending",
+                "phase": 2 if role != "project_manager" else 1,
+                "depends_on": ["project_manager"] if role not in ("project_manager",) else [],
             }
         )
     if not subtasks:
@@ -93,9 +96,16 @@ def enrich_subtasks_with_roles(
                 "role": "researcher",
                 "task": task,
                 "status": "pending",
+                "phase": 2,
+                "depends_on": ["project_manager"],
             }
         )
     if not any(s.get("role") == "analyst" for s in subtasks):
+        exec_roles = [
+            s.get("role")
+            for s in subtasks
+            if s.get("role") not in ("analyst", "project_manager", "auditor")
+        ]
         subtasks.append(
             {
                 "id": f"subtask_{len(subtasks) + 1}",
@@ -103,6 +113,8 @@ def enrich_subtasks_with_roles(
                 "role": "analyst",
                 "task": f"基于已有资料汇总并生成分析报告：{task}",
                 "status": "pending",
+                "phase": 3,
+                "depends_on": exec_roles,
             }
         )
     return subtasks
@@ -124,15 +136,45 @@ def _dependencies_met(
     return all(dep in completed_roles for dep in depends_on)
 
 
-def get_pending_subtask(subtasks: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
-    """获取下一个待执行子任务（支持依赖调度，跳过已失败任务）。"""
+def get_pending_subtask(
+    subtasks: list[dict[str, Any]],
+    current_phase: Optional[int] = None,
+) -> Optional[dict[str, Any]]:
+    """获取下一个待执行子任务（按阶段 + 依赖调度）。"""
     for subtask in subtasks:
         status = subtask.get("status")
         if status in ("completed", "error"):
             continue
+        if current_phase is not None and subtask.get("phase") != current_phase:
+            continue
         if _dependencies_met(subtask, subtasks):
             return subtask
     return None
+
+
+def has_pending_in_phase(
+    subtasks: list[dict[str, Any]],
+    phase: int,
+) -> bool:
+    """当前阶段是否仍有未完成的就绪子任务。"""
+    return get_pending_subtask(subtasks, current_phase=phase) is not None
+
+
+def get_next_phase(
+    subtasks: list[dict[str, Any]],
+    current_phase: int,
+) -> Optional[int]:
+    """获取下一个仍有待办任务的阶段号。"""
+    phases = sorted(
+        {
+            int(s.get("phase") or 2)
+            for s in subtasks
+            if s.get("status") not in ("completed", "error")
+            and int(s.get("phase") or 2) > current_phase
+            and int(s.get("phase") or 2) < 99
+        }
+    )
+    return phases[0] if phases else None
 
 
 def mark_subtask_completed(subtasks: list[dict[str, Any]], subtask_id: str) -> None:

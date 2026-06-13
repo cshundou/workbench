@@ -37,6 +37,7 @@ from app.services.user_key_context import user_key_resolver
 from app.services.workflow.group_chat_engine import GroupChatEngine
 from app.services.workflow.group_chat_ws_manager import group_chat_ws_manager
 from app.services.workflow.team_builder import team_builder
+from app.utils.error_translator import translate_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -231,8 +232,12 @@ class GroupChatService:
     ) -> GroupChatMessageResponse:
         """用户发言补充信息。"""
         session = await self._get_session_or_raise(db, session_id, tenant_id)
-        if session.status in ("completed", "failed"):
+        if session.status == "completed":
             raise ValidationError(message="会话已结束，无法发言")
+        if session.status == "failed":
+            raise ValidationError(
+                message="会话已失败，请通过下方输入补充说明（将走人工介入通道）"
+            )
 
         await guardrails_service.validate_user_input(data.content)
 
@@ -335,6 +340,109 @@ class GroupChatService:
             },
         )
         logger.info("群聊会话已取消 session_id=%s", session_id)
+        return await self._build_session_response(db, session)
+
+    async def restart_session(
+        self,
+        db: AsyncSession,
+        session_id: int,
+        tenant_id: int,
+    ) -> GroupChatSessionResponse:
+        """重新执行失败或已取消的群聊会话。"""
+        session = await self._get_session_or_raise(db, session_id, tenant_id)
+        if session.status not in ("failed", "cancelled"):
+            raise ValidationError(message="仅失败或已取消的会话可重新执行")
+
+        _cancelled_sessions.discard(session_id)
+        extra = dict(session.extra_params or {})
+        extra.pop("cancelled", None)
+        subtasks = list(session.subtasks or [])
+        for item in subtasks:
+            if isinstance(item, dict) and item.get("status") in ("error", "completed"):
+                if item.get("status") == "error":
+                    item["status"] = "pending"
+
+        session.status = "pending"
+        session.progress = 0.0
+        session.error_message = None
+        session.completed_at = None
+        session.subtasks = subtasks
+        session.extra_params = extra
+        await db.flush()
+
+        thread_id = extra.get("thread_id") or f"group_chat_{session.id}"
+        task_id = await enqueue_task(
+            "execute_group_chat_task",
+            session.id,
+            tenant_id,
+            session.user_id,
+            session.task_description,
+            session.kb_id,
+            thread_id,
+        )
+        extra["task_id"] = task_id
+        session.extra_params = extra
+        await db.flush()
+
+        await group_chat_ws_manager.broadcast(
+            session_id,
+            {"type": "session_update", "status": "pending", "progress": 0},
+        )
+        logger.info("群聊会话已重启 session_id=%s task_id=%s", session_id, task_id)
+        return await self._build_session_response(db, session)
+
+    async def intervene_session(
+        self,
+        db: AsyncSession,
+        session_id: int,
+        tenant_id: int,
+        action: str,
+        message: Optional[str] = None,
+    ) -> GroupChatSessionResponse:
+        """失败态人工介入：补充说明或补充后重启。"""
+        session = await self._get_session_or_raise(db, session_id, tenant_id)
+        if session.status not in ("failed", "cancelled", "human_review"):
+            raise ValidationError(message="当前状态不支持人工介入")
+
+        if message:
+            await guardrails_service.validate_user_input(message)
+            supplements = list((session.extra_params or {}).get("user_supplements") or [])
+            supplements.append(message)
+            extra = dict(session.extra_params or {})
+            extra["user_supplements"] = supplements
+            session.extra_params = extra
+            payload = {
+                "id": f"user-intervene-{session_id}-{int(datetime.now(timezone.utc).timestamp() * 1000)}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "sender": {
+                    "id": "user",
+                    "name": "用户",
+                    "role": "user",
+                    "avatar": "👤",
+                },
+                "type": "question",
+                "content": message,
+                "attachments": [],
+                "metadata": {"intervention": True},
+            }
+            await self._persist_message(
+                db,
+                session,
+                "user",
+                "question",
+                message,
+                payload,
+            )
+            await db.flush()
+            await group_chat_ws_manager.broadcast(
+                session_id,
+                {"type": "group_chat_message", "message": payload},
+            )
+
+        if action == "restart":
+            await db.commit()
+            return await self.restart_session(db, session_id, tenant_id)
+
         return await self._build_session_response(db, session)
 
     async def resolve_human_review(
@@ -646,10 +754,12 @@ class GroupChatService:
                 "final_answer": "",
                 "tenant_id": tenant_id,
                 "user_id": user_id,
+                "current_phase": 1,
+                "workflow_phases": team_config.get("workflow_phases") or [],
             }
             config = {
                 "configurable": {"thread_id": thread_id},
-                "recursion_limit": 50,
+                "recursion_limit": 120,
             }
 
             if self.is_session_cancelled(session_id):
@@ -759,8 +869,15 @@ class GroupChatService:
         )
 
     async def _mark_session_failed(self, session_id: int, error: str) -> None:
-        """标记会话失败。"""
+        """标记会话失败（中文错误说明）。"""
         from app.core.database import async_session_factory
+
+        facing = translate_error_message(
+            error,
+            context={"execution_id": session_id},
+        )
+        user_message = facing.user_message
+        suggestions = [s.to_dict() for s in facing.suggestions]
 
         async with async_session_factory() as db:
             stmt = select(GroupChatSession).where(GroupChatSession.id == session_id)
@@ -768,13 +885,25 @@ class GroupChatService:
             if session is None:
                 return
             session.status = "failed"
-            session.error_message = error
+            session.error_message = user_message
+            extra = dict(session.extra_params or {})
+            extra["error_code"] = facing.error_code
+            extra["error_suggestions"] = suggestions
+            extra["raw_error"] = facing.raw_error
+            session.extra_params = extra
             session.completed_at = datetime.now(timezone.utc)
             await db.commit()
 
         await group_chat_ws_manager.broadcast(
             session_id,
-            {"type": "session_update", "status": "failed", "error": error},
+            {
+                "type": "session_update",
+                "status": "failed",
+                "error": user_message,
+                "error_code": facing.error_code,
+                "error_suggestions": suggestions,
+                "raw_error": facing.raw_error,
+            },
         )
 
     async def _persist_message(
@@ -838,6 +967,9 @@ class GroupChatService:
             review_count=session.review_count,
             kb_id=session.kb_id,
             error_message=session.error_message,
+            error_code=extra.get("error_code"),
+            error_suggestions=extra.get("error_suggestions") or [],
+            raw_error=extra.get("raw_error"),
             completed_at=session.completed_at,
             created_at=session.created_at,
             updated_at=session.updated_at,

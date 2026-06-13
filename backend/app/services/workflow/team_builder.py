@@ -94,6 +94,7 @@ class TeamBuilder:
             "team_size": len(members),
             "members": members,
             "workflow": workflow,
+            "workflow_phases": self.build_workflow_phases(members),
             "max_review_rounds": 3,
             "domain": domain,
             "complexity": complexity,
@@ -126,12 +127,14 @@ class TeamBuilder:
                     "subtasks": self._default_subtasks_for_role(role_id, task),
                 }
             )
+        members = self.plan_work_distribution(task, members)
         return {
             "team_id": f"team_{uuid.uuid4().hex[:12]}",
             "task_description": task,
             "team_size": len(members),
             "members": members,
             "workflow": "project_manager → researcher → engineer → analyst → auditor",
+            "workflow_phases": self.build_workflow_phases(members),
             "max_review_rounds": 3,
             "domain": "general",
             "complexity": "medium",
@@ -263,26 +266,78 @@ class TeamBuilder:
         task: str,
         members: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """步骤4：分工规划，为每个角色分配子任务。"""
+        """步骤4：分工规划，为每个角色分配子任务与阶段依赖。"""
+        execution_roles = {
+            m["role_id"]
+            for m in members
+            if m["role_id"] not in ("auditor", "project_manager", "analyst")
+        }
         for member in members:
             role_id = member["role_id"]
             member["subtasks"] = self._default_subtasks_for_role(role_id, task)
-            # 设置依赖关系
             if role_id == "analyst":
                 member["depends_on"] = [
                     m["role_id"]
                     for m in members
-                    if m["role_id"] in ("researcher", "engineer", "info_researcher")
+                    if m["role_id"] in execution_roles
                 ]
+                member["phase"] = 3
             elif role_id == "auditor":
                 member["depends_on"] = [
                     m["role_id"] for m in members if m["role_id"] != "auditor"
                 ]
+                member["phase"] = 99
             elif role_id == "project_manager":
                 member["depends_on"] = []
+                member["phase"] = 1
             else:
                 member["depends_on"] = ["project_manager"]
+                member["phase"] = 2
         return members
+
+    @staticmethod
+    def build_workflow_phases(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """生成分阶段工作流描述（供统筹节点与前端时间线使用）。"""
+        phase_map: dict[int, list[str]] = {}
+        for member in members:
+            role_id = member.get("role_id", "")
+            if role_id == "auditor":
+                continue
+            phase = int(member.get("phase") or 2)
+            phase_map.setdefault(phase, []).append(member.get("name", role_id))
+        phases: list[dict[str, Any]] = [
+            {
+                "phase": 0,
+                "label": "智能组队",
+                "roles": [],
+            },
+        ]
+        for phase_num in sorted(phase for phase in phase_map if phase < 99):
+            roles = phase_map[phase_num]
+            label = (
+                "任务拆解与协调"
+                if phase_num == 1
+                else ("成果汇总分析" if phase_num == 3 else "执行阶段")
+            )
+            phases.append(
+                {
+                    "phase": phase_num,
+                    "label": f"阶段{phase_num}：{label}",
+                    "roles": roles,
+                }
+            )
+        phases.append(
+            {
+                "phase": 100,
+                "label": "终审交付",
+                "roles": [
+                    m.get("name", "审核员")
+                    for m in members
+                    if m.get("role_id") == "auditor"
+                ],
+            }
+        )
+        return phases
 
     @staticmethod
     def _default_subtasks_for_role(role_id: str, task: str) -> list[str]:

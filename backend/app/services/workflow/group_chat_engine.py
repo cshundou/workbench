@@ -222,8 +222,58 @@ class GroupChatEngine:
     ) -> list[dict[str, str]]:
         """根据会话状态与团队配置生成动态进度步骤。"""
         members = (team_config or {}).get("members", [])
+        workflow_phases = (team_config or {}).get("workflow_phases") or []
+        if workflow_phases:
+            steps: list[dict[str, str]] = []
+            for phase in workflow_phases:
+                phase_num = int(phase.get("phase", 0))
+                if phase_num == 0:
+                    steps.append(
+                        {
+                            "key": "team_build",
+                            "label": phase.get("label", "智能组队"),
+                            "status": "completed",
+                        }
+                    )
+                    continue
+                if phase_num >= 100:
+                    review_status = "pending"
+                    if session_status == "reviewing":
+                        review_status = "running"
+                    elif session_status in ("completed", "human_review"):
+                        review_status = "completed"
+                    steps.append(
+                        {
+                            "key": "audit",
+                            "label": phase.get("label", "终审交付"),
+                            "status": review_status,
+                        }
+                    )
+                    continue
+                phase_subtasks = [
+                    s for s in subtasks if int(s.get("phase") or 2) == phase_num
+                ]
+                if not phase_subtasks:
+                    step_status = "pending"
+                elif all(t.get("status") == "completed" for t in phase_subtasks):
+                    step_status = "completed"
+                elif any(t.get("status") == "completed" for t in phase_subtasks):
+                    step_status = "running"
+                else:
+                    step_status = "pending"
+                steps.append(
+                    {
+                        "key": f"phase_{phase_num}",
+                        "label": phase.get("label", f"阶段{phase_num}"),
+                        "status": step_status,
+                    }
+                )
+            delivery_status = "completed" if session_status == "completed" else "pending"
+            steps.append({"key": "delivery", "label": "最终交付", "status": delivery_status})
+            return steps
+
         if members:
-            steps: list[dict[str, str]] = [
+            steps = [
                 {
                     "key": "team_build",
                     "label": "智能组队",
