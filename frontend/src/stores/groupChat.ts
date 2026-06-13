@@ -6,6 +6,8 @@ import {
   createGroupChatSession,
   getGroupChatMessages,
   getGroupChatSession,
+  interveneGroupChatSession,
+  restartGroupChatSession,
   resolveGroupChatReview,
   sendGroupChatMessage,
   type AgentMessage,
@@ -37,9 +39,18 @@ export const useGroupChatStore = defineStore('groupChat', () => {
 
   const sessionStatus = computed(() => currentSession.value?.status || 'idle');
   const progress = computed(() => currentSession.value?.progress ?? 0);
-  const isCompleted = computed(() =>
-    ['completed', 'failed', 'human_review'].includes(sessionStatus.value),
+  const isCompleted = computed(() => sessionStatus.value === 'completed');
+
+  const canIntervene = computed(() =>
+    ['failed', 'cancelled', 'human_review'].includes(sessionStatus.value),
   );
+
+  const canSendMessage = computed(() => {
+    const status = sessionStatus.value;
+    if (status === 'completed') return false;
+    if (status === 'human_review') return false;
+    return ['running', 'pending', 'reviewing', 'failed', 'cancelled'].includes(status);
+  });
 
   /** 创建并启动群聊会话 */
   async function startSession(params: CreateGroupChatParams): Promise<GroupChatSession> {
@@ -74,11 +85,35 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     }
   }
 
-  /** 用户发言 */
-  async function sendUserMessage(content: string): Promise<void> {
+  /** 用户发言（失败态走人工介入通道） */
+  async function sendUserMessage(content: string, restartAfter = false): Promise<void> {
     if (!currentSession.value) return;
+    if (sessionStatus.value === 'failed' || sessionStatus.value === 'cancelled') {
+      const session = await interveneGroupChatSession(
+        currentSession.value.id,
+        restartAfter ? 'restart' : 'supplement',
+        content,
+      );
+      currentSession.value = session;
+      members.value = session.members;
+      progressSteps.value = session.progress_steps;
+      if (restartAfter) {
+        connectWebSocket(session.id);
+      }
+      return;
+    }
     const record = await sendGroupChatMessage(currentSession.value.id, content);
     messages.value.push(record.payload);
+  }
+
+  /** 重新执行会话 */
+  async function restartSession(): Promise<void> {
+    if (!currentSession.value) return;
+    const session = await restartGroupChatSession(currentSession.value.id);
+    currentSession.value = session;
+    members.value = session.members;
+    progressSteps.value = session.progress_steps;
+    connectWebSocket(session.id);
   }
 
   /** 同步消息列表（断线重连后） */
@@ -239,9 +274,15 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         status: msg.status || currentSession.value.status,
         progress: msg.progress ?? currentSession.value.progress,
         error_message: msg.error ?? currentSession.value.error_message,
+        error_code: msg.error_code ?? currentSession.value.error_code,
+        error_suggestions: msg.error_suggestions ?? currentSession.value.error_suggestions,
+        raw_error: msg.raw_error ?? currentSession.value.raw_error,
       };
       if (msg.final_answer) {
         finalAnswer.value = msg.final_answer;
+      }
+      if (msg.status === 'pending' && msg.status) {
+        startPolling(currentSession.value.id);
       }
       if (msg.status && ['completed', 'failed', 'human_review'].includes(msg.status)) {
         stopPolling();
@@ -287,9 +328,12 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     sessionStatus,
     progress,
     isCompleted,
+    canIntervene,
+    canSendMessage,
     startSession,
     loadSession,
     sendUserMessage,
+    restartSession,
     connectWebSocket,
     disconnectWebSocket,
     cancelSession,

@@ -5,6 +5,7 @@ import { Position } from '@element-plus/icons-vue';
 const props = defineProps<{
   disabled?: boolean;
   loading?: boolean;
+  placeholder?: string;
 }>();
 
 const emit = defineEmits<{
@@ -34,7 +35,7 @@ function handleKeydown(e: KeyboardEvent): void {
       v-model="input"
       type="textarea"
       :rows="2"
-      placeholder="输入补充信息，随时发言..."
+      :placeholder="placeholder || '输入补充信息，随时发言...'"
       :disabled="disabled"
       resize="none"
       @keydown="handleKeydown"

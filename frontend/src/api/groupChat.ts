@@ -87,6 +87,9 @@ export interface GroupChatSession {
   review_count: number;
   kb_id?: number | null;
   error_message?: string | null;
+  error_code?: string | null;
+  error_suggestions?: { title: string; description: string; action_type?: string }[];
+  raw_error?: string | null;
   completed_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -148,6 +151,9 @@ export interface GroupChatWsMessage {
   progress?: number;
   final_answer?: string;
   error?: string;
+  error_code?: string;
+  error_suggestions?: { title: string; description: string }[];
+  raw_error?: string;
 }
 
 /** 创建群聊会话 */
@@ -181,6 +187,23 @@ export function sendGroupChatMessage(
 /** 取消群聊会话 */
 export function cancelGroupChatSession(sessionId: number): Promise<void> {
   return request.post(`/group-chat/sessions/${sessionId}/cancel`) as Promise<void>;
+}
+
+/** 重新执行失败/已取消的群聊会话 */
+export function restartGroupChatSession(sessionId: number): Promise<GroupChatSession> {
+  return request.post(`/group-chat/sessions/${sessionId}/restart`) as Promise<GroupChatSession>;
+}
+
+/** 失败态人工介入 */
+export function interveneGroupChatSession(
+  sessionId: number,
+  action: 'supplement' | 'restart',
+  message?: string,
+): Promise<GroupChatSession> {
+  return request.post(`/group-chat/sessions/${sessionId}/intervene`, {
+    action,
+    message,
+  }) as Promise<GroupChatSession>;
 }
 
 /** 人工审核处理 */

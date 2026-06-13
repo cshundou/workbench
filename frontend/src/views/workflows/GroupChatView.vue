@@ -12,6 +12,7 @@ import ReportViewer from '@/components/group-chat/ReportViewer.vue';
 import type { TeamConfig } from '@/api/agentRoles';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
 import ApiKeyHintBanner from '@/components/settings/ApiKeyHintBanner.vue';
+import ErrorAdvicePanel from '@/components/common/ErrorAdvicePanel.vue';
 import { useGroupChatStore } from '@/stores/groupChat';
 import { getGroupChatAuditLogs } from '@/api/groupChat';
 import { getKnowledgeBases } from '@/api/rag';
@@ -110,6 +111,14 @@ const isFailed = computed(() => groupChatStore.sessionStatus === 'failed');
 const sessionError = computed(
   () => groupChatStore.currentSession?.error_message || '协作执行失败，请查看后端日志或重试',
 );
+
+const errorSuggestions = computed(
+  () => groupChatStore.currentSession?.error_suggestions || [],
+);
+
+const rawError = computed(() => groupChatStore.currentSession?.raw_error || null);
+
+const isRestarting = ref(false);
 const canCancel = computed(() =>
   ['pending', 'running', 'reviewing'].includes(groupChatStore.sessionStatus),
 );
@@ -154,12 +163,42 @@ async function handleResolve(action: 'approve' | 'reject'): Promise<void> {
 async function handleSendMessage(content: string): Promise<void> {
   isSending.value = true;
   try {
-    await groupChatStore.sendUserMessage(content);
+    if (isFailed.value) {
+      await groupChatStore.sendUserMessage(content, false);
+      ElMessage.success('补充说明已记录，可点击「重新执行」继续协作');
+    } else {
+      await groupChatStore.sendUserMessage(content);
+    }
   } catch (err) {
     console.error('[GroupChat] 发言失败', err);
     ElMessage.error('发言失败');
   } finally {
     isSending.value = false;
+  }
+}
+
+async function handleRestart(): Promise<void> {
+  isRestarting.value = true;
+  try {
+    await groupChatStore.restartSession();
+    ElMessage.success('已重新启动协作');
+  } catch (err) {
+    console.error('[GroupChat] 重启失败', err);
+    ElMessage.error('重新执行失败');
+  } finally {
+    isRestarting.value = false;
+  }
+}
+
+async function handleRestartWithLastInput(): Promise<void> {
+  isRestarting.value = true;
+  try {
+    await groupChatStore.restartSession();
+    ElMessage.success('已重新启动协作');
+  } catch (err) {
+    ElMessage.error('重新执行失败');
+  } finally {
+    isRestarting.value = false;
   }
 }
 
@@ -364,14 +403,22 @@ onUnmounted(() => {
       />
 
       <main class="chat-main">
-        <el-alert
+        <ErrorAdvicePanel
           v-if="isFailed"
-          type="error"
-          title="协作执行失败"
-          :description="sessionError"
-          show-icon
+          :message="sessionError"
+          :suggestions="errorSuggestions"
+          :raw-error="rawError"
           class="human-review-banner"
+          @retry="handleRestart"
         />
+        <div v-if="isFailed" class="failed-actions">
+          <el-button type="primary" :loading="isRestarting" @click="handleRestart">
+            重新执行
+          </el-button>
+          <el-button :loading="isRestarting" @click="handleRestartWithLastInput">
+            使用当前任务重试
+          </el-button>
+        </div>
         <el-alert
           v-if="isHumanReview"
           type="warning"
@@ -424,8 +471,13 @@ onUnmounted(() => {
         </Transition>
 
         <ChatInput
-          :disabled="groupChatStore.isCompleted"
+          :disabled="!groupChatStore.canSendMessage"
           :loading="isSending"
+          :placeholder="
+            isFailed
+              ? '输入补充说明或修改要求（发送后可重新执行）'
+              : undefined
+          "
           @send="handleSendMessage"
         />
       </main>
@@ -543,6 +595,13 @@ onUnmounted(() => {
 
 .human-review-banner {
   margin: 12px 12px 0;
+  flex-shrink: 0;
+}
+
+.failed-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 8px;
   flex-shrink: 0;
 }
 

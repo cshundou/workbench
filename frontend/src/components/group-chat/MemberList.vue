@@ -66,6 +66,9 @@ function statusClass(member: GroupChatMember): string {
 }
 
 function taskProgress(member: GroupChatMember): string {
+  if (member.status === 'pending' && member.current_task) {
+    return `等待依赖：${member.current_task}`;
+  }
   if (member.completed_count !== undefined && member.total_count) {
     return `${member.completed_count}/${member.total_count} 项已完成`;
   }

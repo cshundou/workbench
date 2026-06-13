@@ -32,11 +32,20 @@ const REVIEW_TYPES = new Set(['review_result', 'review_request']);
 /** 根据消息 type 推断执行阶段 */
 export function getMessagePhase(msg: AgentMessage): ExecutionPhase {
   const t = msg.type;
-  if (t === 'task_start') return 'startup';
+  if (t === 'task_start' || t === 'phase_start') return 'startup';
+  if (t === 'phase_summary') return 'execution';
   if (REVIEW_TYPES.has(t)) return 'review';
   if (t === 'task_complete') return 'delivery';
   if (
-    ['task_assignment', 'progress_update', 'answer', 'result_delivery', 'question'].includes(t)
+    [
+      'task_assignment',
+      'phase_start',
+      'phase_summary',
+      'progress_update',
+      'answer',
+      'result_delivery',
+      'question',
+    ].includes(t)
   ) {
     return 'execution';
   }
