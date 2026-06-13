@@ -9,8 +9,26 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 SlideType = Literal["cover", "toc", "content", "section", "ending"]
+LayoutType = Literal[
+    "cover",
+    "toc",
+    "split_horizontal",
+    "split_vertical",
+    "card_row",
+    "chart_focus",
+    "process_steps",
+    "matrix",
+]
 ChartType = Literal["bar", "line", "pie"]
-TemplateId = Literal["business_minimal", "tech_modern"]
+TemplateId = Literal[
+    "business_minimal",
+    "business_report",
+    "tech_modern",
+    "tech_proposal",
+    "data_analysis",
+    "year_summary",
+    "minimal_share",
+]
 
 
 class ChartSpec(BaseModel):
@@ -36,6 +54,7 @@ class SlideSpec(BaseModel):
     """单页幻灯片。"""
 
     slide_type: SlideType = "content"
+    layout: Optional[str] = None
     title: str = ""
     subtitle: str = ""
     bullets: list[str] = Field(default_factory=list)
@@ -71,6 +90,7 @@ class PptOutline(BaseModel):
             slides.append(
                 SlideSpec(
                     slide_type=slide_type,
+                    layout=str(item.get("layout") or "") or None,
                     title=str(item.get("title") or item.get("heading") or ""),
                     subtitle=str(item.get("subtitle") or ""),
                     bullets=[str(b) for b in bullets],
@@ -81,9 +101,13 @@ class PptOutline(BaseModel):
                     table=table,
                 )
             )
-        template = data.get("template_id") or data.get("template") or "business_minimal"
-        if template not in ("business_minimal", "tech_modern"):
-            template = "business_minimal"
+        template = data.get("template_id") or data.get("template") or "business_report"
+        allowed = (
+            "business_minimal", "business_report", "tech_modern", "tech_proposal",
+            "data_analysis", "year_summary", "minimal_share",
+        )
+        if template not in allowed:
+            template = "business_report"
         return cls(
             title=str(data.get("title") or "演示文稿"),
             subtitle=str(data.get("subtitle") or ""),

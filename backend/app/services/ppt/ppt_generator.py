@@ -19,7 +19,7 @@ from pptx.util import Inches, Pt
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.ppt.schemas import PptOutline, SlideSpec
-from app.services.ppt.templates import PptTemplate, get_template
+from app.services.ppt.templates import PptTemplate, get_template, match_layout_for_slide
 
 logger = get_logger(__name__)
 
@@ -88,7 +88,8 @@ class PptGenerator:
                 elif slide_type == "ending":
                     self._add_ending(prs, spec.title or "谢谢聆听", template)
                 else:
-                    self._add_content_slide(prs, spec, template)
+                    layout = spec.layout or match_layout_for_slide(spec.model_dump())
+                    self._add_layout_slide(prs, spec, template, layout)
 
         prs.save(str(path))
         size = path.stat().st_size
@@ -98,7 +99,7 @@ class PptGenerator:
             "filename": path.name,
             "size": size,
             "slide_count": len(prs.slides),
-            "template_id": template.template_id,
+            "template_id": model.template_id,
         }
 
     def generate_for_session(
@@ -145,6 +146,9 @@ class PptGenerator:
             paragraph.font.name = template.body_font
             paragraph.font.size = Pt(template.body_size_pt)
             paragraph.font.color.rgb = _hex_to_rgb("333333")
+            # 6x6：限制段落层级
+            if len(paragraph.text) > 48:
+                paragraph.text = paragraph.text[:48]
 
     def _add_cover(
         self,
@@ -220,6 +224,116 @@ class PptGenerator:
             p.font.bold = True
             p.font.color.rgb = RGBColor(255, 255, 255)
             p.alignment = PP_ALIGN.CENTER
+
+    def _add_layout_slide(
+        self,
+        prs: Presentation,
+        spec: SlideSpec,
+        template: PptTemplate,
+        layout: str,
+    ) -> None:
+        """按版式类型渲染内容页（8 类标准版式）。"""
+        handlers = {
+            "split_horizontal": self._add_split_horizontal,
+            "split_vertical": self._add_split_vertical,
+            "card_row": self._add_card_row,
+            "chart_focus": self._add_chart_focus,
+            "process_steps": self._add_process_steps,
+            "matrix": self._add_matrix,
+            "cover": self._add_cover,
+            "toc": self._add_toc,
+        }
+        handler = handlers.get(layout, self._add_split_vertical)
+        if layout == "cover":
+            handler(prs, spec.title or "内容", spec.subtitle or "", template)
+        elif layout == "toc":
+            handler(prs, spec.title or "目录", spec.bullets, template)
+        else:
+            handler(prs, spec, template)
+
+    def _add_split_horizontal(self, prs: Presentation, spec: SlideSpec, template: PptTemplate) -> None:
+        """左右分栏：左文右图/图表。"""
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        self._set_slide_bg(slide, template.background_color)
+        header = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12), Inches(0.9))
+        header.text_frame.text = (spec.title or "内容")[:80]
+        self._apply_title_style(header, template, size=template.title_size_pt)
+        body = slide.shapes.add_textbox(Inches(0.8), Inches(1.4), Inches(5.5), Inches(5.5))
+        tf = body.text_frame
+        tf.clear()
+        lines = (spec.bullets or spec.paragraphs or [])[:6]
+        for idx, line in enumerate(lines):
+            p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
+            p.text = str(line)[:80]
+        self._apply_body_style(tf, template)
+        if spec.chart and spec.chart.categories:
+            self._add_chart(slide, spec.chart, template, left=Inches(6.5), top=Inches(1.6))
+        elif spec.table and spec.table.headers:
+            self._add_table(slide, spec.table, top=Inches(1.6))
+
+    def _add_split_vertical(self, prs: Presentation, spec: SlideSpec, template: PptTemplate) -> None:
+        """上下分栏：上标题下要点。"""
+        self._add_content_slide(prs, spec, template)
+
+    def _add_card_row(self, prs: Presentation, spec: SlideSpec, template: PptTemplate) -> None:
+        """卡片并列版式。"""
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        self._set_slide_bg(slide, template.background_color)
+        header = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12), Inches(0.8))
+        header.text_frame.text = (spec.title or "内容")[:80]
+        self._apply_title_style(header, template, size=template.title_size_pt)
+        bullets = (spec.bullets or [])[:4]
+        card_width = 2.8
+        for idx, bullet in enumerate(bullets):
+            left = Inches(0.8 + idx * (card_width + 0.3))
+            card = slide.shapes.add_textbox(left, Inches(1.8), Inches(card_width), Inches(4.5))
+            card.text_frame.text = str(bullet)[:120]
+            self._apply_body_style(card.text_frame, template)
+
+    def _add_chart_focus(self, prs: Presentation, spec: SlideSpec, template: PptTemplate) -> None:
+        """数据图表版式。"""
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        self._set_slide_bg(slide, template.background_color)
+        header = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12), Inches(0.8))
+        header.text_frame.text = (spec.title or "数据")[:80]
+        self._apply_title_style(header, template, size=template.title_size_pt)
+        if spec.chart and spec.chart.categories:
+            self._add_chart(slide, spec.chart, template, left=Inches(1.5), top=Inches(1.5))
+        if spec.table and spec.table.headers:
+            self._add_table(slide, spec.table, top=Inches(4.8))
+        elif spec.bullets:
+            cap = slide.shapes.add_textbox(Inches(0.8), Inches(6.2), Inches(11), Inches(0.8))
+            cap.text_frame.text = " · ".join(str(b)[:40] for b in spec.bullets[:3])
+            for p in cap.text_frame.paragraphs:
+                p.font.size = Pt(template.caption_size_pt)
+
+    def _add_process_steps(self, prs: Presentation, spec: SlideSpec, template: PptTemplate) -> None:
+        """流程步骤版式。"""
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        self._set_slide_bg(slide, template.background_color)
+        header = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12), Inches(0.8))
+        header.text_frame.text = (spec.title or "流程")[:80]
+        self._apply_title_style(header, template, size=template.title_size_pt)
+        steps = (spec.bullets or [])[:6]
+        for idx, step in enumerate(steps):
+            left = Inches(0.8 + idx * 2.0)
+            box = slide.shapes.add_textbox(left, Inches(2.5), Inches(1.8), Inches(2.5))
+            box.text_frame.text = f"{idx + 1}. {str(step)[:40]}"
+            self._apply_body_style(box.text_frame, template)
+
+    def _add_matrix(self, prs: Presentation, spec: SlideSpec, template: PptTemplate) -> None:
+        """矩阵分析版式（四象限）。"""
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        self._set_slide_bg(slide, template.background_color)
+        header = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(12), Inches(0.8))
+        header.text_frame.text = (spec.title or "矩阵分析")[:80]
+        self._apply_title_style(header, template, size=template.title_size_pt)
+        quadrants = (spec.bullets or ["Q1", "Q2", "Q3", "Q4"])[:4]
+        positions = [(0.8, 1.6), (6.8, 1.6), (0.8, 4.2), (6.8, 4.2)]
+        for (left, top), label in zip(positions, quadrants):
+            box = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(5.5), Inches(2.2))
+            box.text_frame.text = str(label)[:100]
+            self._apply_body_style(box.text_frame, template)
 
     def _add_content_slide(
         self,
