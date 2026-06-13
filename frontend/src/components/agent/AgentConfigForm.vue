@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { Rank } from '@element-plus/icons-vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import type { AgentInfo, ToolDefinition } from '@/api/agent';
 import PromptEditor from '@/components/agent/PromptEditor.vue';
 import {
-  LLM_MODEL_DEFINITIONS,
-  LLM_PROVIDER_ORDER,
+  getAvailableModels,
   PROVIDER_LABELS,
-  getModelMaxTokens,
-  validateAgentModelParams,
-  type ModelDefinition,
-} from '@/constants/models';
+  toAgentModelDefinition,
+  validateAgentModelParamsFromEntity,
+  type LegacyModelDefinition,
+} from '@/api/models';
+
+const LLM_PROVIDER_ORDER = ['openai', 'tongyi', 'doubao', 'minimax'] as const;
 
 const props = withDefaults(
   defineProps<{
@@ -49,6 +50,9 @@ export interface AgentFormData {
 }
 
 const formRef = ref<FormInstance>();
+const modelsLoading = ref(false);
+const modelsWarning = ref('');
+const llmModelDefinitions = ref<LegacyModelDefinition[]>([]);
 
 const form = reactive<AgentFormData>({
   name: '',
@@ -64,23 +68,23 @@ const form = reactive<AgentFormData>({
 });
 
 const modelsByProvider = computed(() => {
-  const grouped: Record<string, ModelDefinition[]> = {};
+  const grouped: Record<string, LegacyModelDefinition[]> = {};
   for (const provider of LLM_PROVIDER_ORDER) {
-    grouped[provider] = LLM_MODEL_DEFINITIONS.filter((m) => m.provider === provider);
+    grouped[provider] = llmModelDefinitions.value.filter((m) => m.provider === provider);
   }
   return grouped;
 });
 
 const currentModelDef = computed(
-  () => LLM_MODEL_DEFINITIONS.find((m) => m.name === form.model_name),
+  () => llmModelDefinitions.value.find((m) => m.name === form.model_name),
 );
 
-const maxTokensLimit = computed(() => getModelMaxTokens(form.model_name));
+const maxTokensLimit = computed(() => currentModelDef.value?.max_tokens ?? 128000);
 
 const paramHint = computed(() => {
   const def = currentModelDef.value;
   if (!def) return '';
-  return `建议：温度 ${def.defaultTemperature}，Top P ${def.defaultTopP}，最大 Token ≤ ${def.maxTokens}`;
+  return `建议：温度 ${def.default_temperature}，Top P ${def.default_top_p}，最大 Token ≤ ${def.max_tokens}`;
 });
 
 const formRules: FormRules = {
@@ -97,6 +101,21 @@ const dialogVisible = computed({
 });
 
 const isEdit = computed(() => !!props.agent?.id);
+
+async function loadAvailableModels(): Promise<void> {
+  modelsLoading.value = true;
+  modelsWarning.value = '';
+  try {
+    const response = await getAvailableModels('llm');
+    llmModelDefinitions.value = response.models.map(toAgentModelDefinition);
+    if (response.warning) modelsWarning.value = response.warning;
+  } catch (error) {
+    console.error('[Load Available Models Error]', error);
+    modelsWarning.value = '加载模型列表失败';
+  } finally {
+    modelsLoading.value = false;
+  }
+}
 
 function syncModelPriorities(): void {
   if (!form.model_priorities.includes(form.model_name)) {
@@ -123,11 +142,11 @@ function resetForm(): void {
   form.name = '';
   form.description = '';
   form.system_prompt = '你是一个专业的企业智能助手，能够使用工具帮助用户解决问题。';
-  form.model_name = 'gpt-3.5-turbo';
+  form.model_name = llmModelDefinitions.value[0]?.name || 'gpt-3.5-turbo';
   form.temperature = 0.7;
   form.top_p = 1;
   form.max_tokens = 2048;
-  form.model_priorities = ['gpt-3.5-turbo'];
+  form.model_priorities = [form.model_name];
   form.is_public = false;
   form.tools = [];
 }
@@ -147,9 +166,13 @@ watch(
 watch(
   () => form.model_name,
   (name) => {
-    const limit = getModelMaxTokens(name);
+    const limit = currentModelDef.value?.max_tokens ?? 128000;
     if (form.max_tokens > limit) {
       form.max_tokens = limit;
+    }
+    if (currentModelDef.value) {
+      form.temperature = currentModelDef.value.default_temperature;
+      form.top_p = currentModelDef.value.default_top_p;
     }
     syncModelPriorities();
   },
@@ -177,26 +200,44 @@ function movePriority(index: number, direction: -1 | 1): void {
 }
 
 function getModelLabel(name: string): string {
-  return LLM_MODEL_DEFINITIONS.find((m) => m.name === name)?.label ?? name;
+  return llmModelDefinitions.value.find((m) => m.name === name)?.label ?? name;
 }
 
 async function handleSubmit(): Promise<void> {
   const valid = await formRef.value?.validate().catch(() => false);
   if (!valid) return;
 
-  const error = validateAgentModelParams(
-    form.model_name,
-    form.temperature,
-    form.top_p,
-    form.max_tokens,
-  );
-  if (error) {
-    ElMessage.error(error);
-    return;
+  const entity = llmModelDefinitions.value.find((m) => m.name === form.model_name);
+  if (entity?.parameter_rules) {
+    const rawEntity = {
+      model: entity.name,
+      provider: entity.provider,
+      label: { zh_Hans: entity.label, en_US: entity.label },
+      model_type: 'llm' as const,
+      context_size: entity.max_tokens,
+      features: entity.features || [],
+      parameter_rules: entity.parameter_rules,
+      status: 'active' as const,
+      fetch_from: 'predefined' as const,
+    };
+    const error = validateAgentModelParamsFromEntity(
+      rawEntity,
+      form.temperature,
+      form.top_p,
+      form.max_tokens,
+    );
+    if (error) {
+      ElMessage.error(error);
+      return;
+    }
   }
 
   emit('submit', { ...form, model_priorities: [...form.model_priorities] });
 }
+
+onMounted(() => {
+  loadAvailableModels();
+});
 </script>
 
 <template>
@@ -227,7 +268,7 @@ async function handleSubmit(): Promise<void> {
       </el-form-item>
 
       <el-form-item label="主模型">
-        <el-select v-model="form.model_name" style="width: 100%">
+        <el-select v-model="form.model_name" :loading="modelsLoading" style="width: 100%">
           <el-option-group
             v-for="provider in LLM_PROVIDER_ORDER"
             :key="provider"
@@ -241,6 +282,7 @@ async function handleSubmit(): Promise<void> {
             />
           </el-option-group>
         </el-select>
+        <div v-if="modelsWarning" class="param-hint warning">{{ modelsWarning }}</div>
         <div v-if="paramHint" class="param-hint">{{ paramHint }}</div>
       </el-form-item>
 
@@ -288,7 +330,7 @@ async function handleSubmit(): Promise<void> {
           <div class="priority-add">
             <span class="priority-add-label">添加降级模型：</span>
             <el-check-tag
-              v-for="item in LLM_MODEL_DEFINITIONS"
+              v-for="item in llmModelDefinitions"
               :key="item.name"
               :checked="form.model_priorities.includes(item.name)"
               class="priority-tag"
