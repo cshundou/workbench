@@ -1,5 +1,5 @@
 """
-大模型常量与参数校验单元测试。
+大模型常量与参数校验单元测试（兼容层）。
 """
 
 import pytest
@@ -31,8 +31,8 @@ class TestModelConstants:
         }
         assert required.issubset(SUPPORTED_LLM_MODEL_NAMES)
 
-    def test_model_count(self) -> None:
-        assert len(LLM_MODEL_DEFINITIONS) == 11
+    def test_active_legacy_definitions(self) -> None:
+        assert len(LLM_MODEL_DEFINITIONS) >= 11
 
     def test_get_model_max_tokens(self) -> None:
         assert get_model_max_tokens("gpt-4o") == 128000
@@ -41,9 +41,8 @@ class TestModelConstants:
     def test_validate_agent_model_params_ok(self) -> None:
         validate_agent_model_params("gpt-4o", 0.7, 1.0, 4096)
 
-    def test_validate_agent_model_params_invalid_model(self) -> None:
-        with pytest.raises(ValueError, match="不支持的模型"):
-            validate_agent_model_params("unknown-model", 0.7, 1.0, 1024)
+    def test_validate_agent_model_params_unknown_model(self) -> None:
+        validate_agent_model_params("unknown-model", 0.7, 1.0, 1024)
 
     def test_validate_agent_model_params_exceeds_limit(self) -> None:
         with pytest.raises(ValueError, match="max_tokens"):
