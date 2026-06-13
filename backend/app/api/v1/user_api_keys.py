@@ -21,6 +21,7 @@ class ValidateKeyRequest(BaseModel):
     """验证密钥请求（可选传入新密钥）。"""
 
     api_key: Optional[str] = Field(None, description="待验证的新密钥，不传则验证已保存密钥")
+    base_url: Optional[str] = Field(None, description="自定义 API 地址，用于拉取模型列表")
 
 
 @router.get("", summary="获取当前用户的 API 密钥列表")
@@ -112,8 +113,9 @@ async def validate_api_key(
 ) -> dict[str, Any]:
     """测试 API 密钥是否有效，可验证新输入或已保存的密钥。"""
     api_key = body.api_key if body else None
+    base_url = body.base_url if body else None
     result = await user_api_key_service.validate_key(
-        db, current_user.id, tenant_id, provider, api_key
+        db, current_user.id, tenant_id, provider, api_key, base_url=base_url
     )
     await db.commit()
     return success_response(data=result.model_dump())

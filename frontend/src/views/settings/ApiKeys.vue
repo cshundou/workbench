@@ -12,148 +12,85 @@ import {
   type ApiKeyProvider,
   type RerankLlmProvider,
   type RerankMode,
-  type UserApiKeyInfo,
 } from '@/api/apiKeys';
+import {
+  fetchProviderModels,
+  getModelLabel,
+  listModelProviders,
+  type AIModelEntity,
+  type ModelProviderInfo,
+} from '@/api/models';
 import SectionHeader from '@/components/layout/SectionHeader.vue';
 
-interface ProviderConfig {
-  provider: ApiKeyProvider;
+interface ProviderConfig extends ModelProviderInfo {
   name: string;
-  category: 'llm' | 'tool';
-  description: string;
-  models: string[];
-  defaultBaseUrl: string;
-  baseUrlPlaceholder: string;
 }
-
-/** 支持的 API 密钥配置项 */
-const PROVIDER_CONFIGS: ProviderConfig[] = [
-  {
-    provider: 'openai',
-    name: 'OpenAI',
-    category: 'llm',
-    description: 'GPT 系列大模型与 Embedding',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo', 'text-embedding-3-small'],
-    defaultBaseUrl: 'https://api.openai.com/v1',
-    baseUrlPlaceholder: 'https://api.openai.com/v1',
-  },
-  {
-    provider: 'tongyi',
-    name: '通义千问',
-    category: 'llm',
-    description: '阿里云 DashScope 兼容 OpenAI 协议',
-    models: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'text-embedding-v3'],
-    defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    baseUrlPlaceholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  },
-  {
-    provider: 'doubao',
-    name: '豆包',
-    category: 'llm',
-    description: '火山引擎 Ark 大模型',
-    models: ['doubao-pro-32k', 'doubao-lite-32k', 'doubao-embedding'],
-    defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    baseUrlPlaceholder: 'https://ark.cn-beijing.volces.com/api/v3',
-  },
-  {
-    provider: 'minimax',
-    name: 'MiniMax',
-    category: 'llm',
-    description: 'MiniMax 对话与 embo-01 向量模型',
-    models: ['abab6.5-chat', 'abab6.5s-chat', 'embo-01'],
-    defaultBaseUrl: '',
-    baseUrlPlaceholder: '可选：Group ID（部分账号 Embedding 需要）',
-  },
-  {
-    provider: 'tavily',
-    name: 'Tavily 搜索',
-    category: 'tool',
-    description: '联网搜索工具，供智能体与工作流使用',
-    models: [],
-    defaultBaseUrl: '',
-    baseUrlPlaceholder: '无需自定义地址',
-  },
-  {
-    provider: 'cohere',
-    name: 'Cohere 重排序',
-    category: 'tool',
-    description: '可选，仅在重排序选择「Cohere 专用」时需要',
-    models: ['rerank-multilingual-v3.0', 'rerank-english-v3.0'],
-    defaultBaseUrl: '',
-    baseUrlPlaceholder: '无需自定义地址',
-  },
-  {
-    provider: 'pinecone',
-    name: 'Pinecone 向量库',
-    category: 'tool',
-    description: '可选的云端向量数据库',
-    models: [],
-    defaultBaseUrl: '',
-    baseUrlPlaceholder: '无需自定义地址',
-  },
-];
 
 interface ProviderFormState {
   apiKey: string;
   baseUrl: string;
   modelName: string;
+  embeddingModelName: string;
   isDefault: boolean;
   showKey: boolean;
   savedMasked: string;
   hasSaved: boolean;
   validating: boolean;
   saving: boolean;
+  modelsLoading: boolean;
   validateStatus: 'idle' | 'success' | 'error';
   validateMessage: string;
+  modelsWarning: string;
+}
+
+interface ProviderModelOptions {
+  llm: AIModelEntity[];
+  embedding: AIModelEntity[];
+  rerank: AIModelEntity[];
 }
 
 const loading = ref(false);
-const savedKeys = ref<UserApiKeyInfo[]>([]);
+const providerConfigs = ref<ProviderConfig[]>([]);
 
-/** 各提供商表单状态 */
-const formStates = reactive<Record<ApiKeyProvider, ProviderFormState>>(
-  {} as Record<ApiKeyProvider, ProviderFormState>,
-);
+const formStates = reactive<Record<string, ProviderFormState>>({});
+const modelOptions = reactive<Record<string, ProviderModelOptions>>({});
 
 function createEmptyState(): ProviderFormState {
   return {
     apiKey: '',
     baseUrl: '',
     modelName: '',
+    embeddingModelName: '',
     isDefault: false,
     showKey: false,
     savedMasked: '',
     hasSaved: false,
     validating: false,
     saving: false,
+    modelsLoading: false,
     validateStatus: 'idle',
     validateMessage: '',
+    modelsWarning: '',
   };
 }
 
-/** 初始化表单状态 */
-function initFormStates(): void {
-  for (const config of PROVIDER_CONFIGS) {
-    if (!formStates[config.provider]) {
-      formStates[config.provider] = {
-        ...createEmptyState(),
-        modelName: config.models[0] || '',
-      };
-    }
-  }
+function createEmptyModelOptions(): ProviderModelOptions {
+  return { llm: [], embedding: [], rerank: [] };
 }
 
-// 同步初始化，避免首屏渲染时 formStates[provider] 为 undefined
-initFormStates();
-
-const llmProviders = computed(() => PROVIDER_CONFIGS.filter((item) => item.category === 'llm'));
-const toolProviders = computed(() =>
-  PROVIDER_CONFIGS.filter((item) => item.category === 'tool' && item.provider !== 'cohere'),
+const llmProviders = computed(() =>
+  providerConfigs.value.filter((item) => item.category === 'llm'),
 );
-const cohereConfig = computed(() => PROVIDER_CONFIGS.find((item) => item.provider === 'cohere'));
+const toolProviders = computed(() =>
+  providerConfigs.value.filter(
+    (item) => item.category === 'tool' && item.provider !== 'cohere',
+  ),
+);
+const cohereConfig = computed(() =>
+  providerConfigs.value.find((item) => item.provider === 'cohere'),
+);
 
-/** 大模型提供商显示名 */
-const LLM_PROVIDER_LABELS: Record<ApiKeyProvider, string> = {
+const LLM_PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   tongyi: '通义千问',
   doubao: '豆包',
@@ -168,19 +105,16 @@ const availableRerankProviders = ref<RerankLlmProvider[]>([]);
 const hasCohereKey = ref(false);
 const rerankSaving = ref(false);
 
-/** 重排序模式选项 */
 const rerankModeOptions = computed(() => {
   const options: Array<{ value: RerankMode; label: string; disabled?: boolean }> = [
     { value: 'auto', label: '自动（优先 Cohere，否则使用已配置大模型 Embedding）' },
   ];
-
   for (const provider of availableRerankProviders.value) {
     options.push({
       value: provider,
       label: `使用 ${LLM_PROVIDER_LABELS[provider]}（复用已配置密钥）`,
     });
   }
-
   options.push({
     value: 'cohere',
     label: 'Cohere 专用',
@@ -189,6 +123,71 @@ const rerankModeOptions = computed(() => {
   options.push({ value: 'off', label: '关闭重排序' });
   return options;
 });
+
+async function loadProviderConfigs(): Promise<void> {
+  const providers = await listModelProviders();
+  providerConfigs.value = providers.map((item) => ({
+    ...item,
+    name: item.label.zh_Hans || item.label.en_US || item.provider,
+  }));
+  for (const config of providerConfigs.value) {
+    if (!formStates[config.provider]) {
+      formStates[config.provider] = createEmptyState();
+    }
+    if (!modelOptions[config.provider]) {
+      modelOptions[config.provider] = createEmptyModelOptions();
+    }
+  }
+}
+
+async function loadPredefinedModels(config: ProviderConfig): Promise<void> {
+  try {
+    const response = await fetchProviderModels(config.provider, {
+      model_type: config.category === 'llm' ? undefined : 'rerank',
+    });
+    modelOptions[config.provider] = {
+      llm: response.models.filter((m) => m.model_type === 'llm'),
+      embedding: response.models.filter((m) => m.model_type === 'text-embedding'),
+      rerank: response.models.filter((m) => m.model_type === 'rerank'),
+    };
+  } catch (error) {
+    console.error('[Load Predefined Models Error]', error);
+  }
+}
+
+async function loadProviderModels(
+  config: ProviderConfig,
+  apiKey?: string,
+): Promise<void> {
+  const state = formStates[config.provider];
+  state.modelsLoading = true;
+  state.modelsWarning = '';
+  try {
+    const response = await fetchProviderModels(config.provider, {
+      api_key: apiKey || state.apiKey.trim() || undefined,
+      base_url: state.baseUrl.trim() || undefined,
+    });
+    modelOptions[config.provider] = {
+      llm: response.models.filter((m) => m.model_type === 'llm'),
+      embedding: response.models.filter((m) => m.model_type === 'text-embedding'),
+      rerank: response.models.filter((m) => m.model_type === 'rerank'),
+    };
+    if (response.warning) {
+      state.modelsWarning = response.warning;
+    }
+    if (!state.modelName && modelOptions[config.provider].llm.length) {
+      state.modelName = modelOptions[config.provider].llm[0].model;
+    }
+    if (!state.embeddingModelName && modelOptions[config.provider].embedding.length) {
+      state.embeddingModelName = modelOptions[config.provider].embedding[0].model;
+    }
+  } catch (error) {
+    console.error('[Load Provider Models Error]', error);
+    state.modelsWarning = '加载失败，显示默认模型';
+  } finally {
+    state.modelsLoading = false;
+  }
+}
 
 async function fetchRerankPreference(): Promise<void> {
   try {
@@ -213,7 +212,6 @@ async function handleSaveRerankPreference(): Promise<void> {
     ElMessage.warning('请先在「大模型」中配置对应 API 密钥');
     return;
   }
-
   rerankSaving.value = true;
   try {
     const preference = await saveRerankPreference(rerankMode.value);
@@ -227,28 +225,28 @@ async function handleSaveRerankPreference(): Promise<void> {
   }
 }
 
-/** 加载已保存的密钥 */
 async function fetchKeys(): Promise<void> {
   loading.value = true;
   try {
-    savedKeys.value = await listApiKeys();
-    for (const config of PROVIDER_CONFIGS) {
-      const saved = savedKeys.value.find((item) => item.provider === config.provider);
+    const savedKeys = await listApiKeys();
+    for (const config of providerConfigs.value) {
+      const saved = savedKeys.find((item) => item.provider === config.provider);
       const state = formStates[config.provider];
       if (saved) {
         state.hasSaved = true;
         state.savedMasked = saved.api_key_masked;
         state.baseUrl = saved.base_url || '';
-        state.modelName = saved.model_name || config.models[0] || '';
+        state.modelName = saved.model_name || '';
+        state.embeddingModelName = saved.embedding_model_name || '';
         state.isDefault = saved.is_default;
         state.validateStatus = saved.is_valid ? 'success' : 'idle';
+        if (config.category === 'llm' && saved.is_valid) {
+          await loadProviderModels(config);
+          if (saved.model_name) state.modelName = saved.model_name;
+          if (saved.embedding_model_name) state.embeddingModelName = saved.embedding_model_name;
+        }
       } else {
-        state.hasSaved = false;
-        state.savedMasked = '';
-        state.baseUrl = '';
-        state.modelName = config.models[0] || '';
-        state.isDefault = false;
-        state.validateStatus = 'idle';
+        Object.assign(state, createEmptyState());
       }
     }
   } catch (error) {
@@ -258,23 +256,17 @@ async function fetchKeys(): Promise<void> {
   }
 }
 
-/** 显示密钥末尾 4 位预览 */
-function keyPreview(provider: ApiKeyProvider): string {
+function keyPreview(provider: string): string {
   const state = formStates[provider];
+  if (!state) return '未配置';
   if (state.apiKey) {
     const trimmed = state.apiKey.trim();
-    if (trimmed.length <= 4) {
-      return `****${trimmed}`;
-    }
-    return `****${trimmed.slice(-4)}`;
+    return trimmed.length <= 4 ? `****${trimmed}` : `****${trimmed.slice(-4)}`;
   }
-  if (state.hasSaved && state.savedMasked) {
-    return state.savedMasked;
-  }
+  if (state.hasSaved && state.savedMasked) return state.savedMasked;
   return '未配置';
 }
 
-/** 测试连接 */
 async function handleValidate(config: ProviderConfig): Promise<void> {
   const state = formStates[config.provider];
   if (!state.apiKey && !state.hasSaved) {
@@ -286,10 +278,25 @@ async function handleValidate(config: ProviderConfig): Promise<void> {
   state.validateStatus = 'idle';
   state.validateMessage = '';
   try {
-    const result = await validateApiKey(config.provider, state.apiKey.trim() || undefined);
+    const result = await validateApiKey(
+      config.provider as ApiKeyProvider,
+      state.apiKey.trim() || undefined,
+      state.baseUrl.trim() || undefined,
+    );
     state.validateStatus = result.is_valid ? 'success' : 'error';
     state.validateMessage = result.message;
-    if (result.is_valid) {
+    if (result.warning) state.modelsWarning = result.warning;
+
+    if (result.is_valid && config.category === 'llm') {
+      await loadProviderModels(config, state.apiKey.trim() || undefined);
+      if (result.llm_models?.length && !state.modelName) {
+        state.modelName = result.llm_models[0];
+      }
+      if (result.embedding_models?.length && !state.embeddingModelName) {
+        state.embeddingModelName = result.embedding_models[0];
+      }
+      ElMessage.success(result.message);
+    } else if (result.is_valid) {
       ElMessage.success(result.message);
     } else {
       ElMessage.error(result.message);
@@ -302,7 +309,6 @@ async function handleValidate(config: ProviderConfig): Promise<void> {
   }
 }
 
-/** 保存密钥 */
 async function handleSave(config: ProviderConfig): Promise<void> {
   const state = formStates[config.provider];
   if (!state.apiKey.trim()) {
@@ -313,10 +319,11 @@ async function handleSave(config: ProviderConfig): Promise<void> {
   state.saving = true;
   try {
     const saved = await upsertApiKey({
-      provider: config.provider,
+      provider: config.provider as ApiKeyProvider,
       api_key: state.apiKey.trim(),
       base_url: state.baseUrl.trim() || undefined,
       model_name: state.modelName || undefined,
+      embedding_model_name: state.embeddingModelName || undefined,
       is_default: state.isDefault,
     });
     state.hasSaved = true;
@@ -331,6 +338,7 @@ async function handleSave(config: ProviderConfig): Promise<void> {
       ElMessage.warning(state.validateMessage);
     } else {
       ElMessage.success(`${config.name} 密钥保存成功`);
+      await loadProviderModels(config);
     }
     await fetchKeys();
   } catch (error) {
@@ -341,16 +349,13 @@ async function handleSave(config: ProviderConfig): Promise<void> {
   await fetchRerankPreference();
 }
 
-/** 删除密钥 */
 async function handleDelete(config: ProviderConfig): Promise<void> {
   const state = formStates[config.provider];
-  if (!state.hasSaved) {
-    return;
-  }
+  if (!state.hasSaved) return;
   try {
-    await deleteApiKey(config.provider);
+    await deleteApiKey(config.provider as ApiKeyProvider);
     Object.assign(state, createEmptyState());
-    state.modelName = config.models[0] || '';
+    modelOptions[config.provider] = createEmptyModelOptions();
     ElMessage.success(`${config.name} 密钥已删除`);
     await fetchKeys();
   } catch (error) {
@@ -360,8 +365,19 @@ async function handleDelete(config: ProviderConfig): Promise<void> {
 }
 
 onMounted(async () => {
-  await fetchKeys();
-  await fetchRerankPreference();
+  loading.value = true;
+  try {
+    await loadProviderConfigs();
+    for (const config of providerConfigs.value) {
+      if (config.category === 'llm' || config.provider === 'cohere') {
+        await loadPredefinedModels(config);
+      }
+    }
+    await fetchKeys();
+    await fetchRerankPreference();
+  } finally {
+    loading.value = false;
+  }
 });
 </script>
 
@@ -417,21 +433,49 @@ onMounted(async () => {
               <el-form-item label="自定义 API 地址（可选）">
                 <el-input
                   v-model="formStates[config.provider].baseUrl"
-                  :placeholder="config.baseUrlPlaceholder"
+                  :placeholder="config.base_url_placeholder"
                 />
               </el-form-item>
 
-              <el-form-item v-if="config.models.length" label="默认模型">
+              <el-form-item label="默认 LLM 模型">
                 <el-select
                   v-model="formStates[config.provider].modelName"
-                  placeholder="选择默认模型"
+                  :loading="formStates[config.provider].modelsLoading"
+                  :placeholder="
+                    formStates[config.provider].modelsLoading
+                      ? '正在加载可用模型…'
+                      : '选择默认对话模型'
+                  "
                   style="width: 100%"
                 >
                   <el-option
-                    v-for="model in config.models"
-                    :key="model"
-                    :label="model"
-                    :value="model"
+                    v-for="model in modelOptions[config.provider]?.llm || []"
+                    :key="model.model"
+                    :label="getModelLabel(model)"
+                    :value="model.model"
+                  />
+                </el-select>
+                <p v-if="formStates[config.provider].modelsWarning" class="models-warning">
+                  {{ formStates[config.provider].modelsWarning }}
+                </p>
+              </el-form-item>
+
+              <el-form-item label="默认 Embedding 模型">
+                <el-select
+                  v-model="formStates[config.provider].embeddingModelName"
+                  :loading="formStates[config.provider].modelsLoading"
+                  :placeholder="
+                    formStates[config.provider].modelsLoading
+                      ? '正在加载可用模型…'
+                      : '选择默认向量模型'
+                  "
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="model in modelOptions[config.provider]?.embedding || []"
+                    :key="model.model"
+                    :label="getModelLabel(model)"
+                    :value="model.model"
                   />
                 </el-select>
               </el-form-item>
@@ -551,13 +595,17 @@ onMounted(async () => {
             <p class="key-preview">当前：{{ keyPreview('cohere') }}</p>
           </el-form-item>
 
-          <el-form-item v-if="cohereConfig.models.length" label="默认模型">
-            <el-select v-model="formStates.cohere.modelName" placeholder="选择默认模型" style="width: 100%">
+          <el-form-item v-if="(modelOptions.cohere?.rerank || []).length" label="默认模型">
+            <el-select
+              v-model="formStates.cohere.modelName"
+              placeholder="选择默认模型"
+              style="width: 100%"
+            >
               <el-option
-                v-for="model in cohereConfig.models"
-                :key="model"
-                :label="model"
-                :value="model"
+                v-for="model in modelOptions.cohere?.rerank || []"
+                :key="model.model"
+                :label="getModelLabel(model)"
+                :value="model.model"
               />
             </el-select>
           </el-form-item>
@@ -618,17 +666,17 @@ onMounted(async () => {
                 <p class="key-preview">当前：{{ keyPreview(config.provider) }}</p>
               </el-form-item>
 
-              <el-form-item v-if="config.models.length" label="默认模型">
+              <el-form-item v-if="(modelOptions[config.provider]?.rerank || []).length" label="默认模型">
                 <el-select
                   v-model="formStates[config.provider].modelName"
                   placeholder="选择默认模型"
                   style="width: 100%"
                 >
                   <el-option
-                    v-for="model in config.models"
-                    :key="model"
-                    :label="model"
-                    :value="model"
+                    v-for="model in modelOptions[config.provider]?.rerank || []"
+                    :key="model.model"
+                    :label="getModelLabel(model)"
+                    :value="model.model"
                   />
                 </el-select>
               </el-form-item>
@@ -746,6 +794,12 @@ onMounted(async () => {
   margin: 0;
   font-size: 13px;
   color: $text-secondary;
+}
+
+.models-warning {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: $warning-color;
 }
 
 .key-input-row {

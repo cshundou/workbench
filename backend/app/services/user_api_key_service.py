@@ -21,13 +21,19 @@ from app.schemas.user_api_key import (
     UserApiKeyValidateResult,
 )
 from app.services.audit_service import audit_service
+from app.services.model_provider_service import (
+    MODEL_TYPE_EMBEDDING,
+    MODEL_TYPE_LLM,
+    decode_model_preferences,
+    encode_model_preferences,
+    model_provider_service,
+)
 from app.services.user_key_context import (
     ALL_PROVIDERS,
     LLM_PROVIDERS,
     RERANK_MODE_COHERE,
     RERANK_MODES,
     RERANK_PREFERENCE_PROVIDER,
-    TOOL_PROVIDERS,
     ProviderKeyConfig,
     UserKeyContext,
     validate_provider_key,
@@ -42,14 +48,15 @@ class UserApiKeyService:
     def _to_response(self, record: UserApiKey) -> UserApiKeyResponse:
         """将数据库记录转为掩码响应。"""
         plain = decrypt_api_key(record.api_key)
-        # 未经过验证流程的密钥视为无效，避免误导用户
         is_valid = bool(record.is_valid and record.last_validated_at)
+        llm_model, embedding_model = decode_model_preferences(record.model_name)
         return UserApiKeyResponse(
             id=record.id,
             provider=record.provider,
             api_key_masked=mask_api_key(plain),
             base_url=record.base_url,
-            model_name=record.model_name,
+            model_name=llm_model,
+            embedding_model_name=embedding_model,
             is_default=record.is_default,
             is_valid=is_valid,
             last_validated_at=record.last_validated_at,
@@ -132,7 +139,30 @@ class UserApiKeyService:
 
         record.api_key = encrypted
         record.base_url = data.base_url
-        record.model_name = data.model_name
+
+        llm_model = data.model_name
+        embedding_model = data.embedding_model_name
+        if provider in LLM_PROVIDERS and (llm_model or embedding_model):
+            models, _, _, _, _ = await model_provider_service.fetch_provider_models(
+                provider=provider,
+                api_key=data.api_key.strip(),
+                base_url=data.base_url,
+                user_id=user_id,
+                use_cache=False,
+            )
+            if models:
+                if llm_model and not model_provider_service.validate_model_in_list(
+                    llm_model, models, MODEL_TYPE_LLM
+                ):
+                    raise ValidationError(message=f"默认 LLM 模型不在可用列表中: {llm_model}")
+                if embedding_model and not model_provider_service.validate_model_in_list(
+                    embedding_model, models, MODEL_TYPE_EMBEDDING
+                ):
+                    raise ValidationError(
+                        message=f"默认 Embedding 模型不在可用列表中: {embedding_model}"
+                    )
+
+        record.model_name = encode_model_preferences(llm_model, embedding_model)
         record.is_default = data.is_default
 
         # 保存时验证密钥有效性，避免写入无效 test key 后仍标记为可用
@@ -172,6 +202,7 @@ class UserApiKeyService:
             },
         )
         logger.info("用户 API 密钥已保存 user_id=%s provider=%s", user_id, provider)
+        await model_provider_service.invalidate_user_provider_cache(user_id, provider)
         return self._to_response(record)
 
     async def _clear_default_flags(
@@ -230,6 +261,7 @@ class UserApiKeyService:
             detail={"provider": provider, "success": True, "result": "deleted"},
         )
         logger.info("用户 API 密钥已删除 user_id=%s provider=%s", user_id, provider)
+        await model_provider_service.invalidate_user_provider_cache(user_id, provider)
 
     async def validate_key(
         self,
@@ -238,6 +270,7 @@ class UserApiKeyService:
         tenant_id: int,
         provider: str,
         api_key: str | None = None,
+        base_url: str | None = None,
     ) -> UserApiKeyValidateResult:
         """
         验证 API 密钥有效性。
@@ -253,7 +286,7 @@ class UserApiKeyService:
             验证结果。
         """
         provider = provider.lower().strip()
-        base_url: str | None = None
+        stored_base_url: str | None = base_url
 
         if api_key:
             plain_key = api_key.strip()
@@ -268,9 +301,25 @@ class UserApiKeyService:
             if record is None:
                 raise NotFoundError(message=f"未找到 {provider} 的 API 密钥")
             plain_key = decrypt_api_key(record.api_key)
-            base_url = record.base_url
+            stored_base_url = stored_base_url or record.base_url
 
-        is_valid, message = await validate_provider_key(provider, plain_key, base_url)
+        is_valid, message = await validate_provider_key(provider, plain_key, stored_base_url)
+
+        llm_models: list[str] = []
+        embedding_models: list[str] = []
+        warning: str | None = None
+        fetch_from = "predefined"
+
+        if is_valid and provider in LLM_PROVIDERS:
+            models, fetch_from, warning, _, _ = await model_provider_service.fetch_provider_models(
+                provider=provider,
+                api_key=plain_key,
+                base_url=stored_base_url,
+                user_id=user_id,
+                use_cache=True,
+            )
+            llm_models = [m.model for m in models if m.model_type == MODEL_TYPE_LLM]
+            embedding_models = [m.model for m in models if m.model_type == MODEL_TYPE_EMBEDDING]
 
         # 更新验证状态
         if not api_key:
@@ -305,6 +354,10 @@ class UserApiKeyService:
             provider=provider,
             is_valid=is_valid,
             message=message,
+            llm_models=llm_models,
+            embedding_models=embedding_models,
+            warning=warning,
+            fetch_from=fetch_from,
         )
 
     def build_status(self, user_ctx: UserKeyContext) -> UserApiKeyStatusResponse:

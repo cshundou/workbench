@@ -17,6 +17,7 @@ export interface UserApiKeyInfo {
   api_key_masked: string;
   base_url: string | null;
   model_name: string | null;
+  embedding_model_name: string | null;
   is_default: boolean;
   is_valid: boolean;
   last_validated_at: string | null;
@@ -30,6 +31,7 @@ export interface UserApiKeyUpsertPayload {
   api_key: string;
   base_url?: string;
   model_name?: string;
+  embedding_model_name?: string;
   is_default?: boolean;
 }
 
@@ -38,6 +40,10 @@ export interface UserApiKeyValidateResult {
   provider: string;
   is_valid: boolean;
   message: string;
+  llm_models?: string[];
+  embedding_models?: string[];
+  warning?: string | null;
+  fetch_from?: string;
 }
 
 /** 密钥配置状态摘要 */
@@ -98,12 +104,16 @@ export function deleteApiKey(provider: ApiKeyProvider): Promise<void> {
   return request.delete(`/user/api-keys/${provider}`);
 }
 
-/** 验证 API 密钥 */
+/** 验证 API 密钥（可选传入 base_url 供拉取模型） */
 export function validateApiKey(
   provider: ApiKeyProvider,
   apiKey?: string,
+  baseUrl?: string,
 ): Promise<UserApiKeyValidateResult> {
-  return request.post(`/user/api-keys/${provider}/validate`, apiKey ? { api_key: apiKey } : {});
+  const body: Record<string, string> = {};
+  if (apiKey) body.api_key = apiKey;
+  if (baseUrl) body.base_url = baseUrl;
+  return request.post(`/user/api-keys/${provider}/validate`, Object.keys(body).length ? body : {});
 }
 
 /** 获取 RAG 重排序偏好 */

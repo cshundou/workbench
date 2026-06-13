@@ -14,7 +14,8 @@ class UserApiKeyUpsert(BaseModel):
     provider: str = Field(..., min_length=1, max_length=50, description="服务提供商")
     api_key: str = Field(..., min_length=1, max_length=500, description="API 密钥")
     base_url: Optional[str] = Field(None, max_length=255, description="自定义 API 地址")
-    model_name: Optional[str] = Field(None, max_length=50, description="默认模型名称")
+    model_name: Optional[str] = Field(None, max_length=50, description="默认 LLM 模型")
+    embedding_model_name: Optional[str] = Field(None, max_length=50, description="默认 Embedding 模型")
     is_default: bool = Field(default=False, description="是否为该提供商默认密钥")
 
 
@@ -26,6 +27,7 @@ class UserApiKeyResponse(BaseModel):
     api_key_masked: str
     base_url: Optional[str] = None
     model_name: Optional[str] = None
+    embedding_model_name: Optional[str] = None
     is_default: bool
     is_valid: bool
     last_validated_at: Optional[datetime] = None
@@ -41,6 +43,10 @@ class UserApiKeyValidateResult(BaseModel):
     provider: str
     is_valid: bool
     message: str
+    llm_models: List[str] = Field(default_factory=list, description="可用 LLM 模型 ID")
+    embedding_models: List[str] = Field(default_factory=list, description="可用 Embedding 模型 ID")
+    warning: Optional[str] = None
+    fetch_from: str = "predefined"
 
 
 class RerankPreferenceUpdate(BaseModel):
