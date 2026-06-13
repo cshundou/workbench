@@ -32,6 +32,7 @@ langchain-experimental==0.0.58
 
 # Vector store & document processing
 numpy<2  # langchain 0.1.x 要求 numpy 1.x
+rank-bm25==0.2.2  # BM25 混合检索依赖
 chromadb==0.4.24
 unstructured==0.11.8
 networkx>=3.0  # unstructured 传递依赖
