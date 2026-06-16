@@ -32,6 +32,8 @@ export interface TeamMemberConfig {
   color?: string;
   depends_on?: string[];
   parallel_group?: string;
+  execution_mode?: 'llm' | 'task';
+  task_tools?: string[];
 }
 
 /** 团队配置 */
@@ -44,7 +46,7 @@ export interface TeamConfig {
   max_review_rounds: number;
   domain?: string;
   complexity?: string;
-  template_id?: string;
+  template_id?: string | number;
 }
 
 /** 团队模板 */
@@ -100,7 +102,7 @@ export function deleteProfessionalRole(id: number): Promise<void> {
 /** 智能组建团队 */
 export function buildTeam(data: {
   task: string;
-  template_id?: string;
+  template_id?: string | number;
   team_config?: TeamConfig;
 }): Promise<TeamConfig> {
   return request.post('/team/build', data);

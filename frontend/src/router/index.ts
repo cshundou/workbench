@@ -136,6 +136,12 @@ const routes: RouteRecordRaw[] = [
             meta: { title: '专业角色库', permission: 'workflow:write' },
           },
           {
+            path: 'teams',
+            name: 'WorkflowTeams',
+            component: () => import('@/views/workflows/TeamManagement.vue'),
+            meta: { title: '团队管理', permission: 'workflow:write' },
+          },
+          {
             path: 'marketplace',
             name: 'WorkflowMarketplace',
             component: () => import('@/views/marketplace/Index.vue'),

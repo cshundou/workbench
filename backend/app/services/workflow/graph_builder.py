@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Annotated, Any, Callable, NamedTuple, NotRequired, Optional, Sequence, TypedDict, Union
 
 import redis
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
 from app.core.config import settings
@@ -51,6 +51,7 @@ from app.services.workflow.role_catalog import (
     AUDIT_REJECT_ROLE_MAP,
     ROLE_AGENT_TYPE_MAP,
     build_role_lookup,
+    resolve_role_system_prompt,
 )
 from app.services.workflow.hybrid_checkpoint import create_checkpointer
 from app.services.workflow.redis_saver import RedisSaver
@@ -290,6 +291,61 @@ class WorkflowBuilder:
             members = (state.get("team_config") or {}).get("members")
         lookup = build_role_lookup(members)
         return lookup.get(role, AGENT_ROLES.get(role, AGENT_ROLES["project_manager"]))
+
+    def _get_team_members(self, state: AgentState | None = None) -> list[dict[str, Any]]:
+        """获取当前团队 members 列表（优先 state 快照）。"""
+        members = self._team_config.get("members")
+        if state and not members:
+            members = (state.get("team_config") or {}).get("members")
+        return list(members or [])
+
+    def _resolve_role_system_prompt(
+        self,
+        role_id: str,
+        state: AgentState | None = None,
+    ) -> Optional[str]:
+        """从团队配置或预设角色库解析 system_prompt。"""
+        prompt = resolve_role_system_prompt(role_id, self._get_team_members(state))
+        return prompt or None
+
+    def _get_member_config(
+        self,
+        role_id: str,
+        state: AgentState | None = None,
+    ) -> Optional[dict[str, Any]]:
+        """从团队配置获取成员完整配置（含 execution_mode / task_tools）。"""
+        for member in self._get_team_members(state):
+            mid = member.get("role_id") or member.get("role")
+            if mid == role_id:
+                return dict(member)
+        return None
+
+    def _resolve_subtask_role_system_prompt(
+        self,
+        state: AgentState,
+        agent_type: str,
+    ) -> Optional[str]:
+        """从匹配 agent 类型的子任务解析专业角色 system_prompt。"""
+        for subtask in state.get("subtasks", []):
+            if subtask.get("agent") == agent_type:
+                role_id = subtask.get("role")
+                if role_id:
+                    return self._resolve_role_system_prompt(role_id, state)
+        return None
+
+    @staticmethod
+    def _invoke_llm_with_role_prompt(llm: Any, system_prompt: Optional[str], user_prompt: str) -> str:
+        """使用角色 system_prompt + 任务 user_prompt 调用 LLM。"""
+        if system_prompt:
+            messages: list[BaseMessage] = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ]
+            response = llm.invoke(messages)
+        else:
+            response = llm.invoke(user_prompt)
+        content = response.content
+        return content if isinstance(content, str) else str(content)
 
     def set_execution_context(
         self,
@@ -585,6 +641,8 @@ class WorkflowBuilder:
         task: str,
         state: AgentState,
         node_id: str,
+        *,
+        professional_role: Optional[str] = None,
     ) -> dict[str, Any]:
         """通过 WorkflowToolManager 统一执行角色 Agent（内置 + Skill/MCP）。"""
         tool_manager = self._get_tool_manager()
@@ -605,6 +663,14 @@ class WorkflowBuilder:
         if config.get("temperature") is not None:
             model_config["temperature"] = float(config["temperature"])
 
+        system_prompt: Optional[str] = None
+        if professional_role:
+            system_prompt = self._resolve_role_system_prompt(professional_role, state)
+        if not system_prompt:
+            system_prompt = self._resolve_subtask_role_system_prompt(state, role)
+
+        member_config = self._get_member_config(professional_role, state) if professional_role else None
+
         result = tool_manager.run_role_agent(
             role=role,
             task=task,
@@ -612,6 +678,8 @@ class WorkflowBuilder:
             kb_id=kb_id,
             model_config=model_config or None,
             max_iterations=int(config.get("max_iterations", 5)),
+            system_prompt=system_prompt,
+            member_config=member_config,
         )
         if result.get("error"):
             raise RuntimeError(result["error"])
@@ -1377,7 +1445,12 @@ class WorkflowBuilder:
             role,
             "progress_update",
             f"收到，开始处理：{task_desc}",
-            metadata={"task_id": subtask_id, "phase": current_phase},
+            metadata={
+                "task_id": subtask_id,
+                "phase": current_phase,
+                "execution_mode": pending.get("execution_mode"),
+                "task_tools": pending.get("task_tools", []),
+            },
         )
         started = time.monotonic()
         role_agent = ROLE_AGENT_TYPE_MAP.get(role, agent_type)
@@ -1396,19 +1469,31 @@ class WorkflowBuilder:
                 result_key = "analysis"
             elif agent_type == "knowledge":
                 run_result = self._run_role_agent(
-                    "knowledge", task_desc, state, "knowledge_agent"
+                    "knowledge",
+                    task_desc,
+                    state,
+                    "knowledge_agent",
+                    professional_role=role,
                 )
                 result = run_result.get("answer", "")
                 result_key = "knowledge"
             elif agent_type == "search":
                 run_result = self._run_role_agent(
-                    "search", task_desc, state, "search_agent"
+                    "search",
+                    task_desc,
+                    state,
+                    "search_agent",
+                    professional_role=role,
                 )
                 result = run_result.get("answer", "")
                 result_key = "search"
             else:
                 run_result = self._run_role_agent(
-                    "execution", task_desc, state, "execution_agent"
+                    "execution",
+                    task_desc,
+                    state,
+                    "execution_agent",
+                    professional_role=role,
                 )
                 result = run_result.get("answer", "")
                 result_key = "execution"
@@ -1660,10 +1745,11 @@ class WorkflowBuilder:
 
 请输出结构化的分析报告，包含关键发现、数据摘要和建议。
 """
+        role_system_prompt = self._resolve_role_system_prompt(role, state)
         if llm is not None:
-            response = llm.invoke(analysis_prompt)
-            content = response.content
-            return content if isinstance(content, str) else str(content)
+            return self._invoke_llm_with_role_prompt(
+                llm, role_system_prompt, analysis_prompt
+            )
         if delivery_format == "ppt":
             return json.dumps(
                 {

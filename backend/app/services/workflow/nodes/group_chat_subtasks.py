@@ -46,6 +46,8 @@ def enrich_subtasks_from_team_config(
                     "depends_on": member.get("depends_on", []),
                     "parallel_group": member.get("parallel_group"),
                     "phase": int(member.get("phase") or 2),
+                    "execution_mode": member.get("execution_mode"),
+                    "task_tools": member.get("task_tools", []),
                 }
             )
     if not subtasks:

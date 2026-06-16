@@ -289,3 +289,24 @@ def build_role_lookup(
                 "system_prompt": member.get("system_prompt", ""),
             }
     return lookup
+
+
+def resolve_role_system_prompt(
+    role_id: str,
+    team_members: list[dict[str, Any]] | None = None,
+) -> str:
+    """
+    从预设角色库或团队配置成员中解析 system_prompt。
+
+    Args:
+        role_id: 专业角色 ID（如 copywriter、researcher）
+        team_members: 团队配置中的 members 列表
+
+    Returns:
+        非空时返回角色 system_prompt，否则空字符串
+    """
+    if not role_id:
+        return ""
+    lookup = build_role_lookup(team_members)
+    prompt = str(lookup.get(role_id, {}).get("system_prompt") or "").strip()
+    return prompt

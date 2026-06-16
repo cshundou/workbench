@@ -2,9 +2,39 @@
 
 import pytest
 
-from app.services.workflow.role_catalog import PRESET_PROFESSIONAL_ROLES
+from app.services.workflow.role_catalog import (
+    PRESET_PROFESSIONAL_ROLES,
+    build_role_lookup,
+    resolve_role_system_prompt,
+)
 from app.services.workflow.team_builder import TeamBuilder
 from app.services.workflow.team_template_catalog import OFFICIAL_TEAM_TEMPLATES
+
+
+class TestResolveRoleSystemPrompt:
+    """角色 system_prompt 解析。"""
+
+    def test_preset_role_prompt(self) -> None:
+        preset = next(r for r in PRESET_PROFESSIONAL_ROLES if r["role_id"] == "copywriter")
+        assert resolve_role_system_prompt("copywriter") == preset["system_prompt"]
+
+    def test_team_member_overrides_preset(self) -> None:
+        custom = "你是租户自定义文案师，专注品牌叙事。"
+        members = [
+            {
+                "role_id": "copywriter",
+                "name": "文案师",
+                "system_prompt": custom,
+            }
+        ]
+        assert resolve_role_system_prompt("copywriter", members) == custom
+
+    def test_unknown_role_returns_empty(self) -> None:
+        assert resolve_role_system_prompt("nonexistent_role") == ""
+
+    def test_build_role_lookup_includes_system_prompt(self) -> None:
+        lookup = build_role_lookup()
+        assert lookup["ppt_designer"].get("system_prompt")
 
 
 class TestRoleCatalog:

@@ -68,6 +68,14 @@ class TeamMemberConfig(BaseModel):
     color: Optional[str] = None
     depends_on: List[str] = Field(default_factory=list, description="依赖的角色 ID 列表")
     parallel_group: Optional[str] = Field(default=None, description="并行组标识")
+    execution_mode: str = Field(
+        default="llm",
+        description="执行模式：llm=纯大模型，task=任务执行（工具驱动）",
+    )
+    task_tools: List[str] = Field(
+        default_factory=list,
+        description="任务模式允许的能力工具，如 browser/terminal",
+    )
 
 
 class TeamConfig(BaseModel):
@@ -90,7 +98,7 @@ class TeamBuildRequest(BaseModel):
     task: str = Field(..., min_length=1, description="任务描述")
     template_id: Optional[str] = Field(
         default=None,
-        description="团队模板 ID，classic_five 使用经典五角色",
+        description="团队模板 ID（支持经典模板别名或数据库模板 ID）",
     )
     team_config: Optional[TeamConfig] = Field(
         default=None,

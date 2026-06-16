@@ -8,6 +8,7 @@ import logging
 from typing import Any, Optional
 
 from app.services.user_key_context import UserKeyContext
+from app.services.workflow.task_mode_resolver import build_member_node_config
 from app.services.workflow.workflow_agent_runner import ROLE_TOOLS, WorkflowAgentRunner
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,8 @@ class WorkflowToolManager:
                     seen.add(key)
                     merged.append(key)
 
-        _add(ROLE_TOOLS.get(role, []))
+        if not node_config.get("use_member_tools_only"):
+            _add(ROLE_TOOLS.get(role, []))
         for field in NODE_TOOL_CONFIG_KEYS:
             raw = node_config.get(field)
             if isinstance(raw, list):
@@ -71,11 +73,22 @@ class WorkflowToolManager:
         model_config: Optional[dict[str, Any]] = None,
         max_iterations: int = 5,
         timeout_seconds: Optional[int] = None,
+        system_prompt: Optional[str] = None,
+        member_config: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """通过统一工具列表执行角色 Agent。"""
-        tools = self.resolve_tool_names(role, node_config)
+        effective_config = dict(node_config or {})
+        if member_config:
+            effective_config = build_member_node_config(member_config, effective_config)
+        tools = self.resolve_tool_names(role, effective_config)
         retry_count = int((node_config or {}).get("tool_retry_count", 2))
         last_error: Optional[str] = None
+        # 节点配置可覆盖团队/预设角色提示词
+        resolved_prompt = system_prompt
+        if not resolved_prompt and effective_config:
+            raw = effective_config.get("system_prompt")
+            if raw:
+                resolved_prompt = str(raw).strip() or None
 
         for attempt in range(max(1, retry_count + 1)):
             try:
@@ -86,6 +99,7 @@ class WorkflowToolManager:
                     kb_id=kb_id,
                     model_config=model_config,
                     max_iterations=max_iterations,
+                    system_prompt=resolved_prompt,
                 )
             except Exception as exc:
                 last_error = str(exc)

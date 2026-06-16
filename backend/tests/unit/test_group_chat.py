@@ -8,6 +8,7 @@ from app.services.workflow.nodes.constants import (
     MAX_REVIEW_RETRIES,
     SUBTASK_ROLE_MAP,
 )
+from app.services.workflow.role_catalog import PRESET_PROFESSIONAL_ROLES
 
 
 class TestAgentRoles:
@@ -108,3 +109,66 @@ class TestGraphBuilderGroupChatHook:
         state: dict = {"status": "running", "gc_audit_retry": True}
         assert builder.route_after_group_chat_audit(state) == "retry"
         assert "gc_audit_retry" not in state
+
+
+class TestRoleSystemPromptInjection:
+    """群聊执行路径注入角色 system_prompt。"""
+
+    def test_resolve_subtask_role_system_prompt(self) -> None:
+        from app.services.workflow.graph_builder import WorkflowBuilder
+
+        builder = WorkflowBuilder(redis_url="redis://localhost:6379/15")
+        preset = next(
+            r for r in PRESET_PROFESSIONAL_ROLES if r["role_id"] == "researcher"
+        )
+        state = {
+            "subtasks": [
+                {"agent": "search", "role": "researcher", "task": "调研市场"},
+            ],
+            "team_config": {"members": []},
+        }
+        prompt = builder._resolve_subtask_role_system_prompt(state, "search")
+        assert prompt == preset["system_prompt"]
+
+    def test_invoke_llm_with_role_prompt_uses_system_message(self) -> None:
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        from app.services.workflow.graph_builder import WorkflowBuilder
+
+        captured: list = []
+
+        class FakeLLM:
+            def invoke(self, messages):  # type: ignore[no-untyped-def]
+                captured.extend(messages)
+                return type("R", (), {"content": "ok"})()
+
+        WorkflowBuilder._invoke_llm_with_role_prompt(
+            FakeLLM(),
+            "你是研究员",
+            "请分析数据",
+        )
+        assert isinstance(captured[0], SystemMessage)
+        assert captured[0].content == "你是研究员"
+        assert isinstance(captured[1], HumanMessage)
+        assert captured[1].content == "请分析数据"
+
+    def test_tool_manager_forwards_system_prompt(self) -> None:
+        from unittest.mock import MagicMock
+
+        from app.services.workflow.tool_manager import WorkflowToolManager
+
+        runner = MagicMock()
+        runner.run_sync.return_value = {"answer": "done", "tool_calls": [], "duration_ms": 1}
+        manager = WorkflowToolManager(
+            tenant_id=1,
+            user_id=1,
+            user_ctx=MagicMock(),
+            runner=runner,
+        )
+        manager.run_role_agent(
+            "search",
+            "调研任务",
+            system_prompt="你是行业研究员",
+        )
+        runner.run_sync.assert_called_once()
+        assert runner.run_sync.call_args.kwargs["system_prompt"] == "你是行业研究员"
